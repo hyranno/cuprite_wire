@@ -4,17 +4,22 @@ mod subcircuit;
 use parts::PartInstance;
 use subcircuit::{SubcircuitGenerationOptions, SubcircuitInstance};
 
-use std::{collections::{HashMap, HashSet}, fmt::Debug};
+use std::{collections::{HashMap, HashSet}, fmt::Debug, panic::Location};
 
 use petgraph::{Graph, graph::NodeIndex};
 
 use crate::subcircuit::SubcircuitGenerator;
 
+#[track_caller]
+pub fn get_location() -> &'static Location<'static> {
+    Location::caller()
+}
+
 #[derive(Debug)]
 pub struct Circuit {
     pub(crate) parts: Vec<PartInstance>,
     pub subcircuits: Vec<SubcircuitInstance>,
-    pub nets: Graph<(), ()>,
+    pub nets: Graph<(), &'static Location<'static>>,
 }
 
 impl Circuit {
@@ -38,14 +43,14 @@ impl Circuit {
                 index_map.insert(node, merged_node);
                 continue;
             } else {
-                let new_index = self.nets.add_node(());
+                let new_index = self.nets.add_node(other.nets[node]);
                 index_map.insert(node, new_index);
             }
         }
         for edge in other.nets.edge_indices() {
             let (source, target) = other.nets.edge_endpoints(edge).unwrap();
             self.nets
-                .add_edge(index_map[&source], index_map[&target], ());
+                .add_edge(index_map[&source], index_map[&target], other.nets.edge_weight(edge).unwrap());
         }
         for part in other.parts {
             let new_pin_mapping = part
@@ -116,7 +121,7 @@ mod tests {
             let mut circuit = Circuit::new();
             let node1 = circuit.nets.add_node(());
             let node2 = circuit.nets.add_node(());
-            circuit.nets.add_edge(node1, node2, ());
+            circuit.nets.add_edge(node1, node2, get_location());
             circuit
         }
     }
@@ -146,9 +151,9 @@ mod tests {
             let node2 = circuit.nets.add_node(());
             let subcircuit_pins1 = TestSubcircuitGenerator1::instantiate(&mut circuit);
             let subcircuit_pins2 = TestSubcircuitGenerator1::instantiate(&mut circuit);
-            circuit.nets.add_edge(subcircuit_pins1.pin2, subcircuit_pins2.pin1, ());
-            circuit.nets.add_edge(node1, subcircuit_pins1.pin1, ());
-            circuit.nets.add_edge(node2, subcircuit_pins2.pin2, ());
+            circuit.nets.add_edge(subcircuit_pins1.pin2, subcircuit_pins2.pin1, get_location());
+            circuit.nets.add_edge(node1, subcircuit_pins1.pin1, get_location());
+            circuit.nets.add_edge(node2, subcircuit_pins2.pin2, get_location());
             circuit
         }
     }
