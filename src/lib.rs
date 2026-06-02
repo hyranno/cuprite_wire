@@ -8,7 +8,7 @@ use std::{collections::{HashMap, HashSet}, fmt::Debug, panic::Location};
 
 use petgraph::{Graph, graph::NodeIndex};
 
-use crate::subcircuit::SubcircuitGenerator;
+use crate::{parts::Part, subcircuit::SubcircuitGenerator};
 
 #[track_caller]
 pub fn get_location() -> &'static Location<'static> {
@@ -102,13 +102,40 @@ impl Circuit {
         node_mapping
     }
 
+    pub fn instantiate_part(&mut self, part: Box<dyn Part>, num_pins: u32) -> HashMap<u32, NodeIndex> {
+        let mut pin_mapping = HashMap::new();
+        for pin in 0..num_pins {
+            pin_mapping.insert(pin, self.nets.add_node(()));
+        }
+        self.parts.push(PartInstance {
+            part,
+            pin_mapping: pin_mapping.clone(),
+        });
+        pin_mapping
+    }
+
 }
 
 
 #[cfg(test)]
 mod tests {
-    use crate::subcircuit::SubcircuitGenerator;
+    use crate::{parts::Part, subcircuit::SubcircuitGenerator};
     use super::*;
+
+    #[derive(Debug, Clone)]
+    struct TestPart;
+    struct TestPartPins {
+        pub pin1: NodeIndex,
+        pub pin2: NodeIndex,
+    }
+    impl Part for TestPart {
+    }
+    impl TestPart {
+        fn instantiate(circuit: &mut Circuit) -> TestPartPins {
+            let pins = circuit.instantiate_part(Box::new(TestPart), 2);
+            TestPartPins { pin1: pins[&0], pin2: pins[&1] }
+        }
+    }
 
     #[derive(Debug, Clone)]
     struct TestSubcircuitGenerator1;
@@ -151,7 +178,9 @@ mod tests {
             let node2 = circuit.nets.add_node(());
             let subcircuit_pins1 = TestSubcircuitGenerator1::instantiate(&mut circuit);
             let subcircuit_pins2 = TestSubcircuitGenerator1::instantiate(&mut circuit);
-            circuit.nets.add_edge(subcircuit_pins1.pin2, subcircuit_pins2.pin1, get_location());
+            let part_pins = TestPart::instantiate(&mut circuit);
+            circuit.nets.add_edge(subcircuit_pins1.pin2, part_pins.pin1, get_location());
+            circuit.nets.add_edge(part_pins.pin2, subcircuit_pins2.pin1, get_location());
             circuit.nets.add_edge(node1, subcircuit_pins1.pin1, get_location());
             circuit.nets.add_edge(node2, subcircuit_pins2.pin2, get_location());
             circuit
@@ -174,15 +203,17 @@ mod tests {
     #[test]
     fn test_expand_subcircuits() {
         let mut circuit = Circuit::new();
-        let subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
+        let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
         // number of nodes before expansion should be 2 (the interface nodes of the top-level subcircuit)
         assert_eq!(circuit.nets.node_count(), 2);
         circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
-        // after expansion, we should have 6 nodes: 2 for the top-level subcircuit, 2 for each of the two subcircuit instances inside it
-        assert_eq!(circuit.nets.node_count(), 6);
-        // we should have 5 edges: 3 from the top-level subcircuit, and 1 from each of the two subcircuit instances inside it
-        assert_eq!(circuit.nets.edge_count(), 5);
+        // after expansion, we should have 8 nodes: 2 for the top-level subcircuit, 2 for the part, 2 for each of the two subcircuit instances inside it
+        assert_eq!(circuit.nets.node_count(), 8);
+        // we should have 6 edges: 4 from the top-level subcircuit, and 1 from each of the two subcircuit instances inside it
+        assert_eq!(circuit.nets.edge_count(), 6);
         // we should have 0 subcircuit instances remaining after expansion
         assert_eq!(circuit.subcircuits.len(), 0);
+        // we should have 1 part instance (the one inside the top-level subcircuit)
+        assert_eq!(circuit.parts.len(), 1);
     }
 }

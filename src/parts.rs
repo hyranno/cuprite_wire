@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
@@ -9,5 +9,5 @@ dyn_clone::clone_trait_object!(Part);
 #[derive(Debug, Clone)]
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
-    pub pin_mapping: Vec<(u32, NodeIndex)>,
+    pub pin_mapping: HashMap<u32, NodeIndex>,
 }
