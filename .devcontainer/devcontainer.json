@@ -1,0 +1,23 @@
+{
+	"name": "cuprite_dev",
+	"dockerComposeFile": "compose.yml",
+	"features": {
+		"ghcr.io/devcontainers/features/git": {},
+		"ghcr.io/devcontainers-extra/features/opencode:1": {}
+	},
+    "service": "app",
+    "workspaceFolder": "/workspace",
+	"overrideCommand": true,
+	"containerEnv": {
+		"KICAD9_SYMBOL_DIR": "/usr/share/kicad/symbols"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"rust-lang.rust-analyzer",
+				"tamasfe.even-better-toml",
+				"eamodio.gitlens"
+			]
+		}
+	}
+}
