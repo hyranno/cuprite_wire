@@ -18,6 +18,7 @@ pub fn get_location() -> &'static Location<'static> {
 #[derive(Debug)]
 pub struct Circuit {
     pub(crate) parts: Vec<PartInstance>,
+    pub(crate) ref_name_counters: HashMap<String, u32>,
     pub subcircuits: Vec<SubcircuitInstance>,
     pub nets: Graph<(), &'static Location<'static>>,
 }
@@ -28,6 +29,7 @@ impl Circuit {
             parts: Vec::new(),
             subcircuits: Vec::new(),
             nets: Graph::new(),
+            ref_name_counters: HashMap::new(),
         }
     }
 
@@ -60,6 +62,7 @@ impl Circuit {
                 .collect();
             self.parts.push(PartInstance {
                 part: part.part,
+                ref_name: part.ref_name,
                 pin_mapping: new_pin_mapping,
             });
         }
@@ -107,8 +110,12 @@ impl Circuit {
         for pin in 0..num_pins {
             pin_mapping.insert(pin, self.nets.add_node(()));
         }
+        let counter = self.ref_name_counters.entry(part.get_ref_base_name()).or_insert(1);
+        let ref_name = format!("{}{}", part.get_ref_base_name(), *counter);
+        *counter += 1;
         self.parts.push(PartInstance {
             part,
+            ref_name,
             pin_mapping: pin_mapping.clone(),
         });
         pin_mapping
@@ -129,6 +136,9 @@ mod tests {
         pub pin2: NodeIndex,
     }
     impl Part for TestPart {
+        fn get_ref_base_name(&self) -> String {
+            "U".to_string()
+        }
     }
     impl TestPart {
         fn instantiate(circuit: &mut Circuit) -> TestPartPins {
