@@ -5,6 +5,7 @@ use petgraph::graph::NodeIndex;
 
 pub trait Part: Debug + DynClone {
     fn get_ref_base_name(&self) -> String;
+    fn pin_ids(&self) -> Vec<String>;
 }
 dyn_clone::clone_trait_object!(Part);
 
@@ -12,5 +13,5 @@ dyn_clone::clone_trait_object!(Part);
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
     pub ref_name: String,
-    pub pin_mapping: HashMap<u32, NodeIndex>,
+    pub pin_mapping: HashMap<String, NodeIndex>,
 }

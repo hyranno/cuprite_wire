@@ -58,7 +58,7 @@ impl Circuit {
             let new_pin_mapping = part
                 .pin_mapping
                 .iter()
-                .map(|(pin, node)| (*pin, index_map[node]))
+                .map(|(pin, node)| (pin.clone(), index_map[node]))
                 .collect();
             self.parts.push(PartInstance {
                 part: part.part,
@@ -105,9 +105,9 @@ impl Circuit {
         node_mapping
     }
 
-    pub fn instantiate_part(&mut self, part: Box<dyn Part>, num_pins: u32) -> HashMap<u32, NodeIndex> {
+    pub fn instantiate_part(&mut self, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
         let mut pin_mapping = HashMap::new();
-        for pin in 0..num_pins {
+        for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(()));
         }
         let counter = self.ref_name_counters.entry(part.get_ref_base_name()).or_insert(1);
@@ -139,11 +139,15 @@ mod tests {
         fn get_ref_base_name(&self) -> String {
             "U".to_string()
         }
+
+        fn pin_ids(&self) -> Vec<String> {
+            vec!["pin1".to_string(), "pin2".to_string()]
+        }
     }
     impl TestPart {
         fn instantiate(circuit: &mut Circuit) -> TestPartPins {
-            let pins = circuit.instantiate_part(Box::new(TestPart), 2);
-            TestPartPins { pin1: pins[&0], pin2: pins[&1] }
+            let pins = circuit.instantiate_part(Box::new(TestPart));
+            TestPartPins { pin1: pins["pin1"], pin2: pins["pin2"] }
         }
     }
 
