@@ -8,7 +8,7 @@ use crate::{
 
 use std::{collections::{HashMap, HashSet}, fmt::Debug, panic::Location};
 
-use petgraph::{Graph, graph::NodeIndex};
+use petgraph::{algo::kosaraju_scc, graph::{NodeIndex, UnGraph}};
 
 
 #[track_caller]
@@ -21,7 +21,7 @@ pub struct Circuit {
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) ref_name_counters: HashMap<String, u32>,
     pub subcircuits: Vec<SubcircuitInstance>,
-    pub nets: Graph<(), &'static Location<'static>>,
+    pub nets: UnGraph<(), &'static Location<'static>>,
 }
 
 impl Circuit {
@@ -29,7 +29,7 @@ impl Circuit {
         Circuit {
             parts: Vec::new(),
             subcircuits: Vec::new(),
-            nets: Graph::new(),
+            nets: UnGraph::new_undirected(),
             ref_name_counters: HashMap::new(),
         }
     }
@@ -148,6 +148,13 @@ impl Circuit {
             .collect()
     }
 
+    pub fn collect_connected_part_pins(&self) -> Vec<Vec<PinRef>> {
+        let connected_nodes = kosaraju_scc(&self.nets);
+        let pin_refs = self.pin_refs_by_node();
+        connected_nodes.into_iter()
+            .map(|nodes| nodes.into_iter().filter_map(|node| pin_refs.get(&node).cloned()).collect())
+            .collect()
+    }
 }
 
 
@@ -342,5 +349,53 @@ mod tests {
         ref_names.sort();
         ref_names.dedup();
         assert_eq!(ref_names, vec!["U1", "U2", "U3", "U4"]);
+    }
+
+    #[test]
+    fn test_collect_connected_part_pins() {
+        let mut circuit = Circuit::new();
+        let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
+        circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
+
+        let expected = vec![
+            vec![
+                PinRef {
+                    node_index: NodeIndex::new(7),
+                    part_ref_name: "U2".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+                PinRef {
+                    node_index: NodeIndex::new(9),
+                    part_ref_name: "U3".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+                PinRef {
+                    node_index: NodeIndex::new(4),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+            ],
+            vec![
+                PinRef {
+                    node_index: NodeIndex::new(5),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+            ],
+            vec![
+                PinRef {
+                    node_index: NodeIndex::new(6),
+                    part_ref_name: "U2".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+                PinRef {
+                    node_index: NodeIndex::new(8),
+                    part_ref_name: "U3".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+            ],
+        ];
+
+        assert_eq!(circuit.collect_connected_part_pins(), expected);
     }
 }
