@@ -15,3 +15,10 @@ pub(crate) struct PartInstance {
     pub ref_name: String,
     pub pin_mapping: HashMap<String, NodeIndex>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PinRef {
+    pub node_index: NodeIndex,
+    pub part_ref_name: String,
+    pub pin_id: String,
+}

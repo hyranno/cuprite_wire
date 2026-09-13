@@ -1,14 +1,15 @@
-mod parts;
-mod subcircuit;
+pub mod parts;
+pub mod subcircuit;
 
-use parts::PartInstance;
-use subcircuit::{SubcircuitGenerationOptions, SubcircuitInstance};
+use crate::{
+    parts::{Part, PartInstance, PinRef},
+    subcircuit::{SubcircuitGenerationOptions, SubcircuitInstance, SubcircuitGenerator},
+};
 
 use std::{collections::{HashMap, HashSet}, fmt::Debug, panic::Location};
 
 use petgraph::{Graph, graph::NodeIndex};
 
-use crate::{parts::Part, subcircuit::SubcircuitGenerator};
 
 #[track_caller]
 pub fn get_location() -> &'static Location<'static> {
@@ -121,6 +122,24 @@ impl Circuit {
         pin_mapping
     }
 
+    pub fn pin_refs_by_node(&self) -> HashMap<NodeIndex, PinRef> {
+        self.parts
+            .iter()
+            .flat_map(|part| {
+                part.pin_mapping.iter().map(|(pin_id, &node_index)| {
+                    (
+                        node_index,
+                        PinRef {
+                            node_index,
+                            part_ref_name: part.ref_name.clone(),
+                            pin_id: pin_id.clone(),
+                        },
+                    )
+                })
+            })
+            .collect()
+    }
+
 }
 
 
@@ -229,5 +248,33 @@ mod tests {
         assert_eq!(circuit.subcircuits.len(), 0);
         // we should have 1 part instance (the one inside the top-level subcircuit)
         assert_eq!(circuit.parts.len(), 1);
+    }
+
+    #[test]
+    fn test_pin_refs_by_node() {
+        let mut circuit = Circuit::new();
+        let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
+        circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
+
+        let expected = HashMap::from([
+            (
+                NodeIndex::new(6),
+                PinRef {
+                    node_index: NodeIndex::new(6),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+            ),
+            (
+                NodeIndex::new(7),
+                PinRef {
+                    node_index: NodeIndex::new(7),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+            ),
+        ]);
+
+        assert_eq!(circuit.pin_refs_by_node(), expected);
     }
 }
