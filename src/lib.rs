@@ -170,6 +170,7 @@ mod tests {
         }
     }
 
+    // Subcircuit containing two parts connected in parallel
     #[derive(Debug, Clone)]
     struct TestSubcircuitGenerator1;
     struct TestSubcircuitGenerator1Pins {
@@ -181,7 +182,14 @@ mod tests {
             let mut circuit = Circuit::new();
             let node1 = circuit.nets.add_node(());
             let node2 = circuit.nets.add_node(());
-            circuit.nets.add_edge(node1, node2, get_location());
+            let part1_pins = TestPart::instantiate(&mut circuit);
+            let part2_pins = TestPart::instantiate(&mut circuit);
+
+            circuit.nets.add_edge(node1, part1_pins.pin1, get_location());
+            circuit.nets.add_edge(part1_pins.pin2, node2, get_location());
+            circuit.nets.add_edge(node1, part2_pins.pin1, get_location());
+            circuit.nets.add_edge(part2_pins.pin2, node2, get_location());
+
             circuit
         }
     }
@@ -198,8 +206,10 @@ mod tests {
         }
     }
 
+    // Subcircuit containing a part and an instance of the first subcircuit connected in series
     #[derive(Debug, Clone)]
     struct TestSubcircuitGenerator2;
+    #[allow(dead_code)]
     struct TestSubcircuitGenerator2Pins {
         pub pin1: NodeIndex,
         pub pin2: NodeIndex,
@@ -209,13 +219,11 @@ mod tests {
             let mut circuit = Circuit::new();
             let node1 = circuit.nets.add_node(());
             let node2 = circuit.nets.add_node(());
-            let subcircuit_pins1 = TestSubcircuitGenerator1::instantiate(&mut circuit);
-            let subcircuit_pins2 = TestSubcircuitGenerator1::instantiate(&mut circuit);
+            let subcircuit_pins = TestSubcircuitGenerator1::instantiate(&mut circuit);
             let part_pins = TestPart::instantiate(&mut circuit);
-            circuit.nets.add_edge(subcircuit_pins1.pin2, part_pins.pin1, get_location());
-            circuit.nets.add_edge(part_pins.pin2, subcircuit_pins2.pin1, get_location());
-            circuit.nets.add_edge(node1, subcircuit_pins1.pin1, get_location());
-            circuit.nets.add_edge(node2, subcircuit_pins2.pin2, get_location());
+            circuit.nets.add_edge(node1, subcircuit_pins.pin1, get_location());
+            circuit.nets.add_edge(subcircuit_pins.pin2, part_pins.pin1, get_location());
+            circuit.nets.add_edge(part_pins.pin2, node2, get_location());
             circuit
         }
     }
@@ -240,14 +248,14 @@ mod tests {
         // number of nodes before expansion should be 2 (the interface nodes of the top-level subcircuit)
         assert_eq!(circuit.nets.node_count(), 2);
         circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
-        // after expansion, we should have 8 nodes: 2 for the top-level subcircuit, 2 for the part, 2 for each of the two subcircuit instances inside it
-        assert_eq!(circuit.nets.node_count(), 8);
-        // we should have 6 edges: 4 from the top-level subcircuit, and 1 from each of the two subcircuit instances inside it
-        assert_eq!(circuit.nets.edge_count(), 6);
-        // we should have 0 subcircuit instances remaining after expansion
+        // after expansion, we should have 0 subcircuit instances remaining after expansion
         assert_eq!(circuit.subcircuits.len(), 0);
-        // we should have 1 part instance (the one inside the top-level subcircuit)
-        assert_eq!(circuit.parts.len(), 1);
+        // we should have 3 part instance (the 1 inside the top-level subcircuit, and the 2 inside the subcircuit instance inside it)
+        assert_eq!(circuit.parts.len(), 3);
+        // we should have 2 + 4 + 4 = 10 nodes: 2 from the top-level subcircuit, 4 from the subcircuit instance inside it, and 4 from the part instance inside that
+        assert_eq!(circuit.nets.node_count(), 2 + 4 + 4);
+        // we should have 3 + 4 = 7 edges: 3 from the top-level subcircuit, and 4 from the subcircuit instance inside it
+        assert_eq!(circuit.nets.edge_count(), 3 + 4);
     }
 
     #[test]
@@ -258,10 +266,26 @@ mod tests {
 
         let expected = HashMap::from([
             (
+                NodeIndex::new(4),
+                PinRef {
+                    node_index: NodeIndex::new(4),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+            ),
+            (
+                NodeIndex::new(5),
+                PinRef {
+                    node_index: NodeIndex::new(5),
+                    part_ref_name: "U1".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+            ),
+            (
                 NodeIndex::new(6),
                 PinRef {
                     node_index: NodeIndex::new(6),
-                    part_ref_name: "U1".to_string(),
+                    part_ref_name: "U2".to_string(),
                     pin_id: "pin1".to_string(),
                 },
             ),
@@ -269,7 +293,23 @@ mod tests {
                 NodeIndex::new(7),
                 PinRef {
                     node_index: NodeIndex::new(7),
-                    part_ref_name: "U1".to_string(),
+                    part_ref_name: "U2".to_string(),
+                    pin_id: "pin2".to_string(),
+                },
+            ),
+            (
+                NodeIndex::new(8),
+                PinRef {
+                    node_index: NodeIndex::new(8),
+                    part_ref_name: "U3".to_string(),
+                    pin_id: "pin1".to_string(),
+                },
+            ),
+            (
+                NodeIndex::new(9),
+                PinRef {
+                    node_index: NodeIndex::new(9),
+                    part_ref_name: "U3".to_string(),
                     pin_id: "pin2".to_string(),
                 },
             ),
