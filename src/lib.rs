@@ -61,9 +61,16 @@ impl Circuit {
                 .iter()
                 .map(|(pin, node)| (pin.clone(), index_map[node]))
                 .collect();
+            let ref_base_name = part.part.get_ref_base_name();
+            let counter = self
+                .ref_name_counters
+                .entry(ref_base_name)
+                .or_insert(1);
+            let ref_number = *counter;
+            *counter += 1;
             self.parts.push(PartInstance {
                 part: part.part,
-                ref_name: part.ref_name,
+                ref_number,
                 pin_mapping: new_pin_mapping,
             });
         }
@@ -111,12 +118,13 @@ impl Circuit {
         for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(()));
         }
-        let counter = self.ref_name_counters.entry(part.get_ref_base_name()).or_insert(1);
-        let ref_name = format!("{}{}", part.get_ref_base_name(), *counter);
+        let ref_base_name = part.get_ref_base_name();
+        let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
+        let ref_number = *counter;
         *counter += 1;
         self.parts.push(PartInstance {
             part,
-            ref_name,
+            ref_number,
             pin_mapping: pin_mapping.clone(),
         });
         pin_mapping
@@ -131,7 +139,7 @@ impl Circuit {
                         node_index,
                         PinRef {
                             node_index,
-                            part_ref_name: part.ref_name.clone(),
+                            part_ref_name: part.ref_name(),
                             pin_id: pin_id.clone(),
                         },
                     )
@@ -316,5 +324,23 @@ mod tests {
         ]);
 
         assert_eq!(circuit.pin_refs_by_node(), expected);
+    }
+
+    #[test]
+    fn test_merge_reassigns_ref_numbers() {
+        let mut circuit = Circuit::new();
+        TestPart::instantiate(&mut circuit);
+        let _subcircuit_pins = TestSubcircuitGenerator2::instantiate(&mut circuit);
+
+        circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
+
+        let mut ref_names: Vec<_> = circuit
+            .pin_refs_by_node()
+            .values()
+            .map(|pin_ref| pin_ref.part_ref_name.clone())
+            .collect();
+        ref_names.sort();
+        ref_names.dedup();
+        assert_eq!(ref_names, vec!["U1", "U2", "U3", "U4"]);
     }
 }

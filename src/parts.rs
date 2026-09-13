@@ -12,8 +12,17 @@ dyn_clone::clone_trait_object!(Part);
 #[derive(Debug, Clone)]
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
-    pub ref_name: String,
+    pub ref_number: u32,
     pub pin_mapping: HashMap<String, NodeIndex>,
+}
+impl PartInstance {
+    pub fn ref_name(&self) -> String {
+        format!(
+            "{}{}",
+            self.part.get_ref_base_name(),
+            self.ref_number
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
