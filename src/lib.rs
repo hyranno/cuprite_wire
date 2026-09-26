@@ -160,6 +160,8 @@ impl Circuit {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use crate::{parts::Part, subcircuit::SubcircuitGenerator};
     use super::*;
 
@@ -357,7 +359,13 @@ mod tests {
         let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
         circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
 
-        let expected = vec![
+        let actual : Vec<Vec<PinRef>> = circuit.collect_connected_part_pins()
+            .into_iter()
+            .map(|inner| inner.into_iter().sorted().collect())
+            .sorted()
+            .collect();
+
+        let expected : Vec<Vec<PinRef>> = (vec![
             vec![
                 PinRef {
                     node_index: NodeIndex::new(7),
@@ -394,8 +402,12 @@ mod tests {
                     pin_id: "pin1".to_string(),
                 },
             ],
-        ];
+        ])
+            .into_iter()
+            .map(|inner| inner.into_iter().sorted().collect())
+            .sorted()
+            .collect();
 
-        assert_eq!(circuit.collect_connected_part_pins(), expected);
+        assert_eq!(actual, expected);
     }
 }
