@@ -11,18 +11,39 @@ use petgraph::{
 
 use crate::{
     parts::{Part, PartInstance, PinRef},
-    subcircuit::{SubcircuitGenerationOptions, SubcircuitGenerator, SubcircuitInstance},
+    subcircuit::{SubcircuitGenerator, SubcircuitInstance},
 };
 
-#[derive(Debug, Clone)]
-pub struct CircuitBuilder {
+pub struct CircuitBuilder<B = ()> {
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) ref_name_counters: HashMap<String, u32>,
-    pub subcircuits: Vec<SubcircuitInstance>,
+    pub subcircuits: Vec<SubcircuitInstance<B>>,
     pub nets: UnGraph<(), &'static Location<'static>>,
 }
 
-impl CircuitBuilder {
+impl<B> Clone for CircuitBuilder<B> {
+    fn clone(&self) -> Self {
+        Self {
+            parts: self.parts.clone(),
+            ref_name_counters: self.ref_name_counters.clone(),
+            subcircuits: self.subcircuits.clone(),
+            nets: self.nets.clone(),
+        }
+    }
+}
+
+impl<B> Debug for CircuitBuilder<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CircuitBuilder")
+            .field("parts", &self.parts)
+            .field("ref_name_counters", &self.ref_name_counters)
+            .field("subcircuits", &self.subcircuits)
+            .field("nets", &self.nets)
+            .finish()
+    }
+}
+
+impl<B> CircuitBuilder<B> {
     pub fn new() -> Self {
         CircuitBuilder {
             parts: Vec::new(),
@@ -32,85 +53,51 @@ impl CircuitBuilder {
         }
     }
 
-    fn merge(
+    pub fn build(&self, options: &B) -> BuiltCircuit {
+        self.clone().expand(options).into()
+    }
+
+    pub(crate) fn expand(self, options: &B) -> ExpandedCircuit {
+        let CircuitBuilder {
+            parts,
+            ref_name_counters,
+            subcircuits,
+            nets,
+        } = self;
+        let mut expanded = ExpandedCircuit {
+            parts,
+            ref_name_counters,
+            nets,
+        };
+
+        for instance in subcircuits {
+            let subcircuit = instance.generator.generate(options);
+            expanded.merge(subcircuit, &instance.node_mapping);
+        }
+
+        expanded
+    }
+
+    pub fn instantiate_subcircuit<G, F>(
         &mut self,
-        other: CircuitBuilder,
-        overriding_nodes: &HashMap<NodeIndex, NodeIndex>,   // HashMap from other circuit node indices to self circuit node indices for nodes that should be merged
-    ) -> HashMap<NodeIndex, NodeIndex> {
-        let mut index_map = HashMap::<NodeIndex, NodeIndex>::new();
-        for node in other.nets.node_indices() {
-            if let Some(&merged_node) = overriding_nodes.get(&node) {
-                self.nets[merged_node] = other.nets[node];
-                index_map.insert(node, merged_node);
-                continue;
-            } else {
-                let new_index = self.nets.add_node(other.nets[node]);
-                index_map.insert(node, new_index);
-            }
-        }
-        for edge in other.nets.edge_indices() {
-            let (source, target) = other.nets.edge_endpoints(edge).unwrap();
-            self.nets
-                .add_edge(index_map[&source], index_map[&target], other.nets.edge_weight(edge).unwrap());
-        }
-        for part in other.parts {
-            let new_pin_mapping = part
-                .pin_mapping
-                .iter()
-                .map(|(pin, node)| (pin.clone(), index_map[node]))
-                .collect();
-            let ref_base_name = part.part.get_ref_base_name();
-            let counter = self
-                .ref_name_counters
-                .entry(ref_base_name)
-                .or_insert(1);
-            let ref_number = *counter;
-            *counter += 1;
-            self.parts.push(PartInstance {
-                part: part.part,
-                ref_number,
-                pin_mapping: new_pin_mapping,
-            });
-        }
-        for subcircuit in other.subcircuits {
-            let new_node_mapping = subcircuit
-                .node_mapping
-                .iter()
-                .map(|(pin, node)| (*pin, index_map[node]))
-                .collect();
-            self.subcircuits.push(SubcircuitInstance {
-                generator: subcircuit.generator,
-                node_mapping: new_node_mapping,
-            });
-        }
-        index_map
-    }
-
-    fn expand_subcircuits(&mut self, options: &SubcircuitGenerationOptions) {
-        while !self.subcircuits.is_empty() {
-            let instances: Vec<SubcircuitInstance> = self.subcircuits.drain(..).collect();
-            for instance in instances {
-                let subcircuit = instance.generator.generate_subcircuit(options);
-                self.merge(subcircuit, &instance.node_mapping);
-            }
-        }
-    }
-
-    pub fn build(&self, options: &SubcircuitGenerationOptions) -> BuiltCircuit {
-        let mut target = self.clone();
-        target.expand_subcircuits(options);
-        BuiltCircuit { parts: target.parts, nets: target.nets }
-    }
-
-    pub fn instantiate_subcircuit(&mut self, generator: Box<dyn SubcircuitGenerator>, interface_nodes: &HashSet<NodeIndex>) -> HashMap<NodeIndex, NodeIndex> {
+        generator: G,
+        interface_nodes: &HashSet<NodeIndex>,
+        options_for_generator: F,
+    ) -> HashMap<NodeIndex, NodeIndex>
+    where
+        B: 'static,
+        G: SubcircuitGenerator + 'static,
+        F: Fn(&B) -> G::Options + Clone + 'static,
+    {
         let mut node_mapping = HashMap::new();
         for node in interface_nodes {
             node_mapping.insert(*node, self.nets.add_node(()));
         }
-        self.subcircuits.push(SubcircuitInstance {
+        self.subcircuits.push(SubcircuitInstance::new(
             generator,
-            node_mapping: node_mapping.clone(),
-        });
+            options_for_generator,
+            node_mapping.clone(),
+        ));
         node_mapping
     }
 
@@ -129,6 +116,69 @@ impl CircuitBuilder {
             pin_mapping: pin_mapping.clone(),
         });
         pin_mapping
+    }
+}
+
+impl<B> Default for CircuitBuilder<B> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExpandedCircuit {
+    parts: Vec<PartInstance>,
+    ref_name_counters: HashMap<String, u32>,
+    nets: UnGraph<(), &'static Location<'static>>,
+}
+
+impl ExpandedCircuit {
+    fn merge(&mut self, other: ExpandedCircuit, overriding_nodes: &HashMap<NodeIndex, NodeIndex>) {
+        let mut index_map = HashMap::<NodeIndex, NodeIndex>::new();
+        for node in other.nets.node_indices() {
+            if let Some(&merged_node) = overriding_nodes.get(&node) {
+                self.nets[merged_node] = other.nets[node];
+                index_map.insert(node, merged_node);
+            } else {
+                let new_index = self.nets.add_node(());
+                index_map.insert(node, new_index);
+            }
+        }
+
+        for edge in other.nets.edge_indices() {
+            let (source, target) = other.nets.edge_endpoints(edge).unwrap();
+            self.nets.add_edge(
+                index_map[&source],
+                index_map[&target],
+                *other.nets.edge_weight(edge).unwrap(),
+            );
+        }
+
+        for part in other.parts {
+            let new_pin_mapping = part
+                .pin_mapping
+                .iter()
+                .map(|(pin, node)| (pin.clone(), index_map[node]))
+                .collect();
+            let ref_base_name = part.part.get_ref_base_name();
+            let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
+            let ref_number = *counter;
+            *counter += 1;
+            self.parts.push(PartInstance {
+                part: part.part,
+                ref_number,
+                pin_mapping: new_pin_mapping,
+            });
+        }
+    }
+}
+
+impl From<ExpandedCircuit> for BuiltCircuit {
+    fn from(expanded: ExpandedCircuit) -> Self {
+        BuiltCircuit {
+            parts: expanded.parts,
+            nets: expanded.nets,
+        }
     }
 }
 
@@ -179,7 +229,7 @@ mod tests {
     use crate::{
         get_location,
         parts::{Part, PinRef},
-        subcircuit::{SubcircuitGenerationOptions, SubcircuitGenerator},
+        subcircuit::SubcircuitGenerator,
     };
 
     use super::*;
@@ -214,7 +264,9 @@ mod tests {
         pub pin2: NodeIndex,
     }
     impl SubcircuitGenerator for TestSubcircuitGenerator1 {
-        fn generate_subcircuit(&self, _options: &SubcircuitGenerationOptions) -> CircuitBuilder {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
             let node1 = circuit.nets.add_node(());
             let node2 = circuit.nets.add_node(());
@@ -237,7 +289,11 @@ mod tests {
                 local_pin1,
                 local_pin2,
             ]);
-            let mapping = circuit.instantiate_subcircuit(Box::new(TestSubcircuitGenerator1), &interface_nodes);
+            let mapping = circuit.instantiate_subcircuit(
+                TestSubcircuitGenerator1,
+                &interface_nodes,
+                |options: &()| *options,
+            );
             TestSubcircuitGenerator1Pins { pin1: mapping[&local_pin1], pin2: mapping[&local_pin2] }
         }
     }
@@ -251,7 +307,9 @@ mod tests {
         pub pin2: NodeIndex,
     }
     impl SubcircuitGenerator for TestSubcircuitGenerator2 {
-        fn generate_subcircuit(&self, _options: &SubcircuitGenerationOptions) -> CircuitBuilder {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
             let node1 = circuit.nets.add_node(());
             let node2 = circuit.nets.add_node(());
@@ -271,9 +329,86 @@ mod tests {
                 local_pin1,
                 local_pin2,
             ]);
-            let mapping = circuit.instantiate_subcircuit(Box::new(TestSubcircuitGenerator2), &interface_nodes);
+            let mapping = circuit.instantiate_subcircuit(
+                TestSubcircuitGenerator2,
+                &interface_nodes,
+                |options: &()| *options,
+            );
             TestSubcircuitGenerator2Pins { pin1: mapping[&local_pin1], pin2: mapping[&local_pin2] }
         }
+    }
+
+    #[derive(Debug)]
+    struct BuildOptions {
+        part_count: usize,
+    }
+
+    #[derive(Debug)]
+    struct NestedOptions {
+        part_count: usize,
+    }
+
+    #[derive(Debug)]
+    struct LeafOptions {
+        part_count: usize,
+    }
+
+    #[derive(Debug, Clone)]
+    struct NestedOptionsGenerator;
+
+    impl SubcircuitGenerator for NestedOptionsGenerator {
+        type Options = NestedOptions;
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let interface_nodes =
+                HashSet::from([circuit.nets.add_node(()), circuit.nets.add_node(())]);
+            circuit.instantiate_subcircuit(
+                LeafOptionsGenerator,
+                &interface_nodes,
+                |options: &NestedOptions| LeafOptions {
+                    part_count: options.part_count,
+                },
+            );
+            circuit
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct LeafOptionsGenerator;
+
+    impl SubcircuitGenerator for LeafOptionsGenerator {
+        type Options = LeafOptions;
+
+        fn construct_subcircuit(&self, options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            circuit.nets.add_node(());
+            circuit.nets.add_node(());
+            for _ in 0..options.part_count {
+                circuit.instantiate_part(Box::new(TestPart));
+            }
+            circuit
+        }
+    }
+
+    #[test]
+    fn test_generator_specific_options_expand_recursively() {
+        let mut circuit = CircuitBuilder::<BuildOptions>::new();
+        let interface_nodes = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
+        circuit.instantiate_subcircuit(
+            NestedOptionsGenerator,
+            &interface_nodes,
+            |options: &BuildOptions| NestedOptions {
+                part_count: options.part_count,
+            },
+        );
+
+        let one_part = circuit.build(&BuildOptions { part_count: 1 });
+        let three_parts = circuit.build(&BuildOptions { part_count: 3 });
+
+        assert_eq!(one_part.parts.len(), 1);
+        assert_eq!(three_parts.parts.len(), 3);
+        assert_eq!(circuit.subcircuits.len(), 1);
     }
 
     #[test]
@@ -282,9 +417,7 @@ mod tests {
         let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
         // number of nodes before expansion should be 2 (the interface nodes of the top-level subcircuit)
         assert_eq!(circuit.nets.node_count(), 2);
-        circuit.expand_subcircuits(&SubcircuitGenerationOptions {});
-        // after expansion, we should have 0 subcircuit instances remaining after expansion
-        assert_eq!(circuit.subcircuits.len(), 0);
+        let circuit = circuit.build(&());
         // we should have 3 part instance (the 1 inside the top-level subcircuit, and the 2 inside the subcircuit instance inside it)
         assert_eq!(circuit.parts.len(), 3);
         // we should have 2 + 4 + 4 = 10 nodes: 2 from the top-level subcircuit, 4 from the subcircuit instance inside it, and 4 from the part instance inside that
@@ -297,7 +430,7 @@ mod tests {
     fn test_pin_refs_by_node() {
         let mut circuit = CircuitBuilder::new();
         let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
-        let circuit = circuit.build(&SubcircuitGenerationOptions {});
+        let circuit = circuit.build(&());
 
         let expected = HashMap::from([
             (
@@ -359,7 +492,7 @@ mod tests {
         TestPart::instantiate(&mut circuit);
         let _subcircuit_pins = TestSubcircuitGenerator2::instantiate(&mut circuit);
 
-        let circuit = circuit.build(&SubcircuitGenerationOptions {});
+        let circuit = circuit.build(&());
 
         let mut ref_names: Vec<_> = circuit
             .pin_refs_by_node()
@@ -375,7 +508,7 @@ mod tests {
     fn test_collect_connected_part_pins() {
         let mut circuit = CircuitBuilder::new();
         let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
-        let circuit = circuit.build(&SubcircuitGenerationOptions {});
+        let circuit = circuit.build(&());
 
         let actual: Vec<Vec<PinRef>> = circuit.collect_connected_part_pins()
             .into_iter()
@@ -421,10 +554,10 @@ mod tests {
                 },
             ],
         ])
-            .into_iter()
-            .map(|inner| inner.into_iter().sorted().collect())
-            .sorted()
-            .collect();
+        .into_iter()
+        .map(|inner| inner.into_iter().sorted().collect())
+        .sorted()
+        .collect();
 
         assert_eq!(actual, expected);
     }
