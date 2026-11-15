@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug};
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
 
-use crate::{kicad::KicadPartInfo, spice::SpicePartInfo, trace::Trace};
+use crate::{kicad::KicadPartInfo, naming::HierPath, spice::SpicePartInfo, trace::Trace};
 
 /// A part (component) definition.
 ///
@@ -37,6 +37,8 @@ pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
     pub ref_number: u32,
     pub pin_mapping: HashMap<String, NodeIndex>,
+    /// Path of the subcircuit instance containing the part.
+    pub path: HierPath,
     /// Where the part was instantiated, through the chain of subcircuit instantiations.
     pub trace: Trace,
 }

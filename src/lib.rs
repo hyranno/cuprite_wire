@@ -1,5 +1,7 @@
 pub mod circuit;
+pub mod error;
 pub mod kicad;
+pub mod naming;
 pub mod parts;
 pub mod sexpr;
 pub mod spice;

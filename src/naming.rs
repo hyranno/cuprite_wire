@@ -1,0 +1,143 @@
+//! Instance names, hierarchical paths and net labels.
+
+use std::fmt;
+
+use crate::trace::Trace;
+
+/// Character reserved for automatic instance names (`R#1`, `OpAmpStage#2`, ...).
+pub(crate) const AUTO_NAME_SEPARATOR: char = '#';
+
+/// Escapes characters that have a special meaning in KiCad net names and sheet paths.
+pub fn escape_name(name: &str) -> String {
+    name.replace('/', "{slash}")
+}
+
+/// Path of subcircuit instance names from the root, e.g. `["amp_left", "stage#1"]`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub struct HierPath(pub Vec<String>);
+
+impl HierPath {
+    pub(crate) fn prepended(&self, name: &str) -> Self {
+        let mut names = Vec::with_capacity(self.0.len() + 1);
+        names.push(name.to_string());
+        names.extend_from_slice(&self.0);
+        HierPath(names)
+    }
+}
+
+impl fmt::Display for HierPath {
+    /// `/` at the root, otherwise `/a/b/` (names are escaped).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("/")?;
+        for name in &self.0 {
+            write!(f, "{}/", escape_name(name))?;
+        }
+        Ok(())
+    }
+}
+
+/// Checks an explicit instance name.
+pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        Err("names must not be empty")
+    } else if name.contains(AUTO_NAME_SEPARATOR) {
+        Err("'#' is reserved for automatic names")
+    } else {
+        Ok(())
+    }
+}
+
+/// The last path segment of a type name without generic arguments
+/// (`my_crate::amp::OpAmpStage<f64>` -> `OpAmpStage`).
+pub(crate) fn short_type_name<T: ?Sized>() -> String {
+    let full = std::any::type_name::<T>();
+    let without_generics = full.split('<').next().unwrap_or(full);
+    without_generics
+        .rsplit("::")
+        .next()
+        .unwrap_or(without_generics)
+        .to_string()
+}
+
+/// A name given to a net.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum NetLabel {
+    /// Connects every node with the same name anywhere in the circuit (like a KiCad power symbol
+    /// or global label). The net is named `NAME`.
+    Global(String),
+    /// Connects nodes with the same name in the same (sub)circuit instance (like a KiCad local
+    /// label). The net is named `/path/NAME`.
+    Local(String),
+}
+
+impl NetLabel {
+    pub fn global(name: impl Into<String>) -> Self {
+        NetLabel::Global(name.into())
+    }
+
+    pub fn local(name: impl Into<String>) -> Self {
+        NetLabel::Local(name.into())
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            NetLabel::Global(name) | NetLabel::Local(name) => name,
+        }
+    }
+}
+
+/// A label attached to a node, with the subcircuit instance it was attached in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeLabel {
+    pub label: NetLabel,
+    pub scope: HierPath,
+    pub trace: Trace,
+}
+
+impl NodeLabel {
+    /// The net name this label gives.
+    pub fn net_name(&self) -> String {
+        match &self.label {
+            NetLabel::Global(name) => escape_name(name),
+            NetLabel::Local(name) => format!("{}{}", self.scope, escape_name(name)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hier_path_display() {
+        assert_eq!(HierPath::default().to_string(), "/");
+        let path = HierPath(vec!["b/c".into()]).prepended("a");
+        assert_eq!(path.to_string(), "/a/b{slash}c/");
+    }
+
+    #[test]
+    fn test_short_type_name() {
+        struct Generic<T>(T);
+        assert_eq!(short_type_name::<Generic<Option<u8>>>(), "Generic");
+        assert_eq!(short_type_name::<u8>(), "u8");
+    }
+
+    #[test]
+    fn test_net_names() {
+        let label = |label, scope: &[&str]| NodeLabel {
+            label,
+            scope: HierPath(scope.iter().map(|s| s.to_string()).collect()),
+            trace: Trace::default(),
+        };
+        assert_eq!(label(NetLabel::global("+3V3"), &["a"]).net_name(), "+3V3");
+        assert_eq!(label(NetLabel::local("OUT"), &[]).net_name(), "/OUT");
+        assert_eq!(label(NetLabel::local("I/O"), &["amp"]).net_name(), "/amp/I{slash}O");
+    }
+
+    #[test]
+    fn test_check_explicit_name() {
+        assert!(check_explicit_name("amp_left").is_ok());
+        assert!(check_explicit_name("").is_err());
+        assert!(check_explicit_name("R#1").is_err());
+    }
+}
