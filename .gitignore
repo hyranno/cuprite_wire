@@ -2,6 +2,7 @@
 
 *.local.*
 *_local.*
+*.local/
 
 # Personal devcontainer configuration
 /.devcontainer/local/

@@ -1,6 +1,20 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git range-diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git blame *)",
+      "Bash(git grep *)",
+      "Bash(git ls-files *)",
+      "Bash(git ls-tree *)",
+      "Bash(git rev-parse *)",
+      "Bash(git cat-file *)"
+    ],
     "deny": [
       "Read(//**/*.env*)",
       "Read(//**/secrets/**)",
@@ -23,7 +37,6 @@
       "Read(~/.zshenv)",
       "Read(~/.bashrc)",
       "Read(~/.bash_profile)",
-
       "Edit(//**/*.env*)",
       "Edit(//**/secrets/**)",
       "Edit(//**/credentials*)",
@@ -46,28 +59,41 @@
       "Edit(~/.zshenv)",
       "Edit(~/.bashrc)",
       "Edit(~/.bash_profile)",
-
       "Bash(git credential *)",
-      "Bash(git push *)", "Bash(git remote *)", "Bash(gh *)"
+      "Bash(git push *)",
+      "Bash(git remote *)",
+      "Bash(gh *)"
     ],
     "ask": [
-      "Bash(git commit *)", "Bash(git reset *)",
-      "Bash(git checkout *)", "Bash(git switch *)", "Bash(git restore *)",
-      "Bash(git clean *)", "Bash(git rebase *)", "Bash(git merge *)",
-      "Bash(git tag *)", "Bash(git stash *)", "Bash(git config *)",
-      "Bash(git branch -d *)", "Bash(git branch -D *)", "Bash(git branch --delete *)",
-      "Bash(git branch -m *)", "Bash(git branch -M *)", "Bash(git branch --move *)",
-      "Bash(git branch -c *)", "Bash(git branch -C *)", "Bash(git branch --copy *)",
-      "Bash(git branch -f *)", "Bash(git branch --force *)",
-      "Bash(git branch -u *)", "Bash(git branch --set-upstream-to*)", "Bash(git branch --unset-upstream*)",
-      "Bash(git branch -t *)", "Bash(git branch --track*)", "Bash(git branch --no-track *)",
+      "Bash(git commit *)",
+      "Bash(git reset *)",
+      "Bash(git checkout *)",
+      "Bash(git switch *)",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(git rebase *)",
+      "Bash(git merge *)",
+      "Bash(git tag *)",
+      "Bash(git stash *)",
+      "Bash(git config *)",
+      "Bash(git branch -d *)",
+      "Bash(git branch -D *)",
+      "Bash(git branch --delete *)",
+      "Bash(git branch -m *)",
+      "Bash(git branch -M *)",
+      "Bash(git branch --move *)",
+      "Bash(git branch -c *)",
+      "Bash(git branch -C *)",
+      "Bash(git branch --copy *)",
+      "Bash(git branch -f *)",
+      "Bash(git branch --force *)",
+      "Bash(git branch -u *)",
+      "Bash(git branch --set-upstream-to*)",
+      "Bash(git branch --unset-upstream*)",
+      "Bash(git branch -t *)",
+      "Bash(git branch --track*)",
+      "Bash(git branch --no-track *)",
       "Bash(git branch --edit-description*)"
-    ],
-    "allow": [
-      "WebSearch",
-      "Bash(git status *)", "Bash(git diff *)", "Bash(git range-diff *)", "Bash(git log *)",
-      "Bash(git show *)", "Bash(git blame *)", "Bash(git grep *)",
-      "Bash(git ls-files *)", "Bash(git ls-tree *)", "Bash(git rev-parse *)", "Bash(git cat-file *)"
     ]
   },
   "sandbox": {
@@ -79,6 +105,7 @@
       "allowedDomains": [
         "api.github.com",
         "code.claude.com",
+        "api.anthropic.com",
         "crates.io",
         "index.crates.io",
         "static.crates.io",
@@ -140,5 +167,8 @@
         "~/.bash_profile"
       ]
     }
+  },
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
   }
 }
