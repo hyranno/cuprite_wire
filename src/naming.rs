@@ -1,6 +1,6 @@
 //! Instance names, hierarchical paths and net labels.
 
-use std::fmt;
+use std::{cmp::Ordering, fmt};
 
 use uuid::Uuid;
 
@@ -69,6 +69,41 @@ impl fmt::Display for HierPath {
             write!(f, "{}/", escape_name(name))?;
         }
         Ok(())
+    }
+}
+
+/// Compares strings in natural order: digit runs are compared as numbers (`R2` < `R10`).
+pub fn natural_cmp(a: &str, b: &str) -> Ordering {
+    fn chunks(s: &str) -> impl Iterator<Item = (bool, &str)> {
+        let mut rest = s;
+        std::iter::from_fn(move || {
+            let first = rest.chars().next()?;
+            let is_digit = first.is_ascii_digit();
+            let end = rest
+                .find(|c: char| c.is_ascii_digit() != is_digit)
+                .unwrap_or(rest.len());
+            let (chunk, tail) = rest.split_at(end);
+            rest = tail;
+            Some((is_digit, chunk))
+        })
+    }
+    let mut a_chunks = chunks(a);
+    let mut b_chunks = chunks(b);
+    loop {
+        let ordering = match (a_chunks.next(), b_chunks.next()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some((true, x)), Some((true, y))) => {
+                let x = x.trim_start_matches('0');
+                let y = y.trim_start_matches('0');
+                x.len().cmp(&y.len()).then_with(|| x.cmp(y))
+            }
+            (Some((_, x)), Some((_, y))) => x.cmp(y),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
     }
 }
 
@@ -162,6 +197,16 @@ mod tests {
         assert_eq!(path.tstamps(), format!("/{a}/{b}/"));
         assert_ne!(path.part_uuid("R#1"), path.part_uuid("R#2"));
         assert_ne!(path.part_uuid("x"), HierPath::default().part_uuid("x"));
+    }
+
+    #[test]
+    fn test_natural_cmp() {
+        let mut names = vec!["R10", "R2", "R1", "C1", "R02", "/a/OUT", "Net-(R1-Pad2)", "GND", "R"];
+        names.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(
+            names,
+            vec!["/a/OUT", "C1", "GND", "Net-(R1-Pad2)", "R", "R1", "R02", "R2", "R10"]
+        );
     }
 
     #[test]

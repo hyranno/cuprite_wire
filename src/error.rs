@@ -70,6 +70,14 @@ pub enum CircuitErrorKind {
     InvalidName { name: String, reason: &'static str },
     /// The same explicit instance name is used twice in one (sub)circuit.
     DuplicateInstanceName { name: String },
+    /// A part lists the same pin ID more than once.
+    DuplicatePinId { ref_name: String, pin_id: String },
+    /// A part refers to a pin ID that it does not have (e.g. in its internal connections).
+    UnknownPinId { ref_name: String, pin_id: String },
+    /// Two parts get the same reference designator.
+    DuplicateRef { ref_name: String },
+    /// Two different nets get the same name.
+    DuplicateNetName { name: String },
 }
 
 impl fmt::Display for CircuitErrorKind {
@@ -80,6 +88,18 @@ impl fmt::Display for CircuitErrorKind {
             }
             CircuitErrorKind::DuplicateInstanceName { name } => {
                 write!(f, "instance name {name:?} is used more than once in the same circuit")
+            }
+            CircuitErrorKind::DuplicatePinId { ref_name, pin_id } => {
+                write!(f, "{ref_name}: pin ID {pin_id:?} is listed more than once")
+            }
+            CircuitErrorKind::UnknownPinId { ref_name, pin_id } => {
+                write!(f, "{ref_name}: unknown pin ID {pin_id:?}")
+            }
+            CircuitErrorKind::DuplicateRef { ref_name } => {
+                write!(f, "reference {ref_name:?} is used by more than one part")
+            }
+            CircuitErrorKind::DuplicateNetName { name } => {
+                write!(f, "net name {name:?} is used by more than one net")
             }
         }
     }
@@ -99,6 +119,17 @@ impl std::error::Error for CircuitError {}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CircuitErrors(pub Vec<CircuitError>);
 
+impl CircuitErrors {
+    /// `Ok(value)` if there is no error.
+    pub(crate) fn into_result<T>(errors: Vec<CircuitError>, value: T) -> Result<T, CircuitErrors> {
+        if errors.is_empty() {
+            Ok(value)
+        } else {
+            Err(CircuitErrors(errors))
+        }
+    }
+}
+
 impl fmt::Display for CircuitErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for (i, error) in self.0.iter().enumerate() {
@@ -115,12 +146,32 @@ impl std::error::Error for CircuitErrors {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum CircuitWarningKind {}
+pub enum CircuitWarningKind {
+    /// A net has several names; `used` is used and the others only connect nets.
+    MultipleNetNames { used: String, others: Vec<String> },
+    /// A labeled net has no part pin, so it does not appear in the netlist.
+    LabelOnlyNet { names: Vec<String> },
+}
 
 impl fmt::Display for CircuitWarningKind {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {}
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CircuitWarningKind::MultipleNetNames { used, others } => {
+                write!(f, "net {used:?} is also named {}", quoted_list(others))
+            }
+            CircuitWarningKind::LabelOnlyNet { names } => {
+                write!(f, "net {} has no part pins", quoted_list(names))
+            }
+        }
     }
+}
+
+fn quoted_list(names: &[String]) -> String {
+    names
+        .iter()
+        .map(|name| format!("{name:?}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub type CircuitWarning = Diagnostic<CircuitWarningKind>;
@@ -132,7 +183,6 @@ impl fmt::Display for CircuitWarning {
 }
 
 /// Reports a warning. All warnings go through this function.
-#[allow(dead_code)]
 pub(crate) fn warn(warning: &CircuitWarning) {
     eprintln!("{warning}");
 }
