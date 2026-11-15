@@ -99,6 +99,7 @@ pub struct CircuitBuilder<B = ()> {
     pub(crate) subcircuits: Vec<SubcircuitInstance<B>>,
     pub(crate) nets: NetGraph,
     pub(crate) subcircuit_names: NameRegistry,
+    pub(crate) part_names: NameRegistry,
     pub(crate) errors: Vec<CircuitError>,
 }
 
@@ -110,6 +111,7 @@ impl<B> Clone for CircuitBuilder<B> {
             subcircuits: self.subcircuits.clone(),
             nets: self.nets.clone(),
             subcircuit_names: self.subcircuit_names.clone(),
+            part_names: self.part_names.clone(),
             errors: self.errors.clone(),
         }
     }
@@ -135,6 +137,7 @@ impl<B> CircuitBuilder<B> {
             nets: NetGraph::new_undirected(),
             ref_name_counters: HashMap::new(),
             subcircuit_names: NameRegistry::default(),
+            part_names: NameRegistry::default(),
             errors: Vec::new(),
         }
     }
@@ -152,6 +155,7 @@ impl<B> CircuitBuilder<B> {
             subcircuits,
             nets,
             subcircuit_names: _,
+            part_names: _,
             errors,
         } = self;
         let mut expanded = ExpandedCircuit {
@@ -278,10 +282,29 @@ impl<B> CircuitBuilder<B> {
         node_mapping
     }
 
-    /// Instantiates a part and returns the nodes of its pins, keyed by pin ID.
+    /// Instantiates a part with an automatic name (`<ref base name>#<n>`) and returns
+    /// the nodes of its pins, keyed by pin ID.
+    ///
+    /// The instance name is the key of the deterministic UUID of the part. Automatic names
+    /// shift when a part of the same kind is added or removed before this one in the same
+    /// (sub)circuit; use [`Self::instantiate_part_named`] to keep the UUID stable.
     #[track_caller]
     pub fn instantiate_part(&mut self, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        self.instantiate_part_impl(None, part)
+    }
+
+    /// Instantiates a part with an explicit name, unique in this (sub)circuit.
+    #[track_caller]
+    pub fn instantiate_part_named(&mut self, name: &str, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        self.instantiate_part_impl(Some(name), part)
+    }
+
+    #[track_caller]
+    fn instantiate_part_impl(&mut self, name: Option<&str>, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
         let trace = Trace::new(Location::caller());
+        let name = self
+            .part_names
+            .assign(name, &part.get_ref_base_name(), &trace, &mut self.errors);
         let mut pin_mapping = HashMap::new();
         for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
@@ -298,6 +321,7 @@ impl<B> CircuitBuilder<B> {
             part,
             ref_number,
             pin_mapping: pin_mapping.clone(),
+            name,
             path: HierPath::default(),
             trace,
         });
@@ -374,6 +398,7 @@ impl ExpandedCircuit {
             self.parts.push(PartInstance {
                 ref_number,
                 pin_mapping,
+                name: part.name,
                 path: part.path.prepended(name),
                 trace: part.trace.prepended(location),
                 part: part.part,
@@ -1040,5 +1065,68 @@ mod tests {
         assert_eq!(lines(&errors[1].trace), vec![outer, hash]);
         assert!(matches!(&errors[2].kind, CircuitErrorKind::InvalidName { name, .. } if name.is_empty()));
         assert_eq!(lines(&errors[2].trace), vec![outer, label]);
+    }
+
+    #[derive(Debug, Clone)]
+    struct NamedPartsGenerator {
+        reversed: bool,
+    }
+    impl SubcircuitGenerator for NamedPartsGenerator {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let mut names = vec!["first", "second"];
+            if self.reversed {
+                names.reverse();
+            }
+            for name in names {
+                circuit.instantiate_part_named(name, Box::new(TestPart));
+            }
+            circuit.instantiate_part(Box::new(TestPart));
+            circuit.instantiate_part(Box::new(MultiGndPart));
+            circuit
+        }
+    }
+
+    fn uuids_by_name(circuit: &BuiltCircuit) -> HashMap<String, uuid::Uuid> {
+        circuit
+            .parts
+            .iter()
+            .map(|part| (format!("{}{}", part.path, part.name), part.uuid()))
+            .collect()
+    }
+
+    #[test]
+    fn test_part_uuids_are_stable() {
+        let build = |reversed: bool, extra_part: bool| {
+            let mut circuit = CircuitBuilder::new();
+            if extra_part {
+                circuit.instantiate_part(Box::new(MultiGndPart));
+            }
+            circuit.instantiate_subcircuit_named("sub", NamedPartsGenerator { reversed }, &HashSet::new(), |o: &()| *o);
+            circuit.build(&())
+        };
+
+        let base = build(false, false);
+        let reordered = build(true, false);
+        let names: Vec<_> = uuids_by_name(&base).into_keys().sorted().collect();
+        assert_eq!(names, vec!["/sub/U#1", "/sub/U#2", "/sub/first", "/sub/second"]);
+        // Reordering explicitly named parts keeps every UUID even though the references change.
+        assert_eq!(uuids_by_name(&base), uuids_by_name(&reordered));
+        let ref_of = |circuit: &BuiltCircuit, name: &str| {
+            circuit.parts.iter().find(|part| part.name == name).unwrap().ref_name()
+        };
+        assert_eq!(ref_of(&base, "first"), "U1");
+        assert_eq!(ref_of(&reordered, "first"), "U2");
+
+        // Adding a part outside the subcircuit does not change the UUIDs inside it.
+        let extended = build(false, true);
+        let mut extended_uuids = uuids_by_name(&extended);
+        extended_uuids.remove("/U#1");
+        assert_eq!(uuids_by_name(&base), extended_uuids);
+
+        let all: HashSet<_> = uuids_by_name(&extended).into_values().collect();
+        assert_eq!(all.len(), extended.parts.len());
     }
 }

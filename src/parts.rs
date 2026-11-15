@@ -37,12 +37,19 @@ pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
     pub ref_number: u32,
     pub pin_mapping: HashMap<String, NodeIndex>,
+    /// Explicit or automatic (`<ref base name>#<n>`) instance name, unique in its subcircuit instance.
+    pub name: String,
     /// Path of the subcircuit instance containing the part.
     pub path: HierPath,
     /// Where the part was instantiated, through the chain of subcircuit instantiations.
     pub trace: Trace,
 }
 impl PartInstance {
+    /// Deterministic UUID derived from the path and the instance name.
+    pub fn uuid(&self) -> uuid::Uuid {
+        self.path.part_uuid(&self.name)
+    }
+
     pub fn ref_name(&self) -> String {
         format!(
             "{}{}",
