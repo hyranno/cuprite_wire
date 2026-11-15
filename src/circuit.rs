@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
-    panic::Location,
 };
 
 use petgraph::{
@@ -12,13 +11,34 @@ use petgraph::{
 use crate::{
     parts::{Part, PartInstance, PinRef},
     subcircuit::{SubcircuitGenerator, SubcircuitInstance},
+    trace::{Loc, Trace},
 };
+
+/// Weight of a node in the net graph.
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+    /// Where the node was created.
+    pub(crate) trace: Trace,
+}
+
+impl NodeInfo {
+    fn new(trace: Trace) -> Self {
+        NodeInfo { trace }
+    }
+
+    pub fn trace(&self) -> &Trace {
+        &self.trace
+    }
+}
+
+/// Nodes carry their creation location and edges carry the location where they were connected.
+pub type NetGraph = UnGraph<NodeInfo, Loc>;
 
 pub struct CircuitBuilder<B = ()> {
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) ref_name_counters: HashMap<String, u32>,
-    pub subcircuits: Vec<SubcircuitInstance<B>>,
-    pub nets: UnGraph<(), &'static Location<'static>>,
+    pub(crate) subcircuits: Vec<SubcircuitInstance<B>>,
+    pub(crate) nets: NetGraph,
 }
 
 impl<B> Clone for CircuitBuilder<B> {
@@ -48,7 +68,7 @@ impl<B> CircuitBuilder<B> {
         CircuitBuilder {
             parts: Vec::new(),
             subcircuits: Vec::new(),
-            nets: UnGraph::new_undirected(),
+            nets: NetGraph::new_undirected(),
             ref_name_counters: HashMap::new(),
         }
     }
@@ -72,12 +92,27 @@ impl<B> CircuitBuilder<B> {
 
         for instance in subcircuits {
             let subcircuit = instance.generator.generate(options);
-            expanded.merge(subcircuit, &instance.node_mapping);
+            expanded.merge(subcircuit, &instance.node_mapping, instance.location);
         }
 
         expanded
     }
 
+    /// Creates a new node (a point that pins and other nodes can be connected to).
+    #[track_caller]
+    pub fn add_node(&mut self) -> NodeIndex {
+        self.nets.add_node(NodeInfo::new(Trace::new(std::panic::Location::caller())))
+    }
+
+    /// Connects two nodes.
+    #[track_caller]
+    pub fn connect(&mut self, a: NodeIndex, b: NodeIndex) {
+        self.nets.add_edge(a, b, std::panic::Location::caller());
+    }
+
+    /// Instantiates a subcircuit. `interface_nodes` are node indices inside the generated
+    /// subcircuit; the returned map gives the corresponding new nodes in this circuit.
+    #[track_caller]
     pub fn instantiate_subcircuit<G, F>(
         &mut self,
         generator: G,
@@ -89,22 +124,29 @@ impl<B> CircuitBuilder<B> {
         G: SubcircuitGenerator + 'static,
         F: Fn(&B) -> G::Options + Clone + 'static,
     {
-        let mut node_mapping = HashMap::new();
-        for node in interface_nodes {
-            node_mapping.insert(*node, self.nets.add_node(()));
-        }
+        let location = std::panic::Location::caller();
+        let mut sorted_interface_nodes: Vec<_> = interface_nodes.iter().copied().collect();
+        sorted_interface_nodes.sort();
+        let node_mapping: HashMap<_, _> = sorted_interface_nodes
+            .into_iter()
+            .map(|node| (node, self.nets.add_node(NodeInfo::new(Trace::new(location)))))
+            .collect();
         self.subcircuits.push(SubcircuitInstance::new(
             generator,
             options_for_generator,
             node_mapping.clone(),
+            location,
         ));
         node_mapping
     }
 
+    /// Instantiates a part and returns the nodes of its pins, keyed by pin ID.
+    #[track_caller]
     pub fn instantiate_part(&mut self, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        let trace = Trace::new(std::panic::Location::caller());
         let mut pin_mapping = HashMap::new();
         for pin in part.pin_ids() {
-            pin_mapping.insert(pin, self.nets.add_node(()));
+            pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
         }
         let ref_base_name = part.get_ref_base_name();
         let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
@@ -114,6 +156,7 @@ impl<B> CircuitBuilder<B> {
             part,
             ref_number,
             pin_mapping: pin_mapping.clone(),
+            trace,
         });
         pin_mapping
     }
@@ -129,20 +172,28 @@ impl<B> Default for CircuitBuilder<B> {
 pub struct ExpandedCircuit {
     parts: Vec<PartInstance>,
     ref_name_counters: HashMap<String, u32>,
-    nets: UnGraph<(), &'static Location<'static>>,
+    nets: NetGraph,
 }
 
 impl ExpandedCircuit {
-    fn merge(&mut self, other: ExpandedCircuit, overriding_nodes: &HashMap<NodeIndex, NodeIndex>) {
+    /// Merges an expanded subcircuit that was instantiated at `location`.
+    /// `overriding_nodes` maps the subcircuit's interface nodes to nodes in this circuit.
+    fn merge(
+        &mut self,
+        other: ExpandedCircuit,
+        overriding_nodes: &HashMap<NodeIndex, NodeIndex>,
+        location: Loc,
+    ) {
         let mut index_map = HashMap::<NodeIndex, NodeIndex>::new();
         for node in other.nets.node_indices() {
-            if let Some(&merged_node) = overriding_nodes.get(&node) {
-                self.nets[merged_node] = other.nets[node];
-                index_map.insert(node, merged_node);
-            } else {
-                let new_index = self.nets.add_node(());
-                index_map.insert(node, new_index);
-            }
+            let merged_node = match overriding_nodes.get(&node) {
+                // The interface node keeps the information of the outer node.
+                Some(&merged_node) => merged_node,
+                None => self
+                    .nets
+                    .add_node(NodeInfo::new(other.nets[node].trace.prepended(location))),
+            };
+            index_map.insert(node, merged_node);
         }
 
         for edge in other.nets.edge_indices() {
@@ -150,7 +201,7 @@ impl ExpandedCircuit {
             self.nets.add_edge(
                 index_map[&source],
                 index_map[&target],
-                *other.nets.edge_weight(edge).unwrap(),
+                other.nets[edge],
             );
         }
 
@@ -168,6 +219,7 @@ impl ExpandedCircuit {
                 part: part.part,
                 ref_number,
                 pin_mapping: new_pin_mapping,
+                trace: part.trace.prepended(location),
             });
         }
     }
@@ -184,12 +236,12 @@ impl From<ExpandedCircuit> for BuiltCircuit {
 
 #[derive(Debug, Clone)]
 pub struct BuiltCircuit {
-    parts: Vec<PartInstance>,
-    nets: UnGraph<(), &'static Location<'static>>,
+    pub(crate) parts: Vec<PartInstance>,
+    pub(crate) nets: NetGraph,
 }
 
 impl BuiltCircuit {
-    pub fn nets(&self) -> &UnGraph<(), &'static Location<'static>> {
+    pub fn nets(&self) -> &NetGraph {
         &self.nets
     }
 
@@ -227,7 +279,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use crate::{
-        get_location,
         parts::{Part, PinRef},
         subcircuit::SubcircuitGenerator,
     };
@@ -250,6 +301,7 @@ mod tests {
         }
     }
     impl TestPart {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestPartPins {
             let pins = circuit.instantiate_part(Box::new(TestPart));
             TestPartPins { pin1: pins["pin1"], pin2: pins["pin2"] }
@@ -268,20 +320,21 @@ mod tests {
 
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            let node1 = circuit.nets.add_node(());
-            let node2 = circuit.nets.add_node(());
+            let node1 = circuit.add_node();
+            let node2 = circuit.add_node();
             let part1_pins = TestPart::instantiate(&mut circuit);
             let part2_pins = TestPart::instantiate(&mut circuit);
 
-            circuit.nets.add_edge(node1, part1_pins.pin1, get_location());
-            circuit.nets.add_edge(part1_pins.pin2, node2, get_location());
-            circuit.nets.add_edge(node1, part2_pins.pin1, get_location());
-            circuit.nets.add_edge(part2_pins.pin2, node2, get_location());
+            circuit.connect(node1, part1_pins.pin1);
+            circuit.connect(part1_pins.pin2, node2);
+            circuit.connect(node1, part2_pins.pin1);
+            circuit.connect(part2_pins.pin2, node2);
 
             circuit
         }
     }
     impl TestSubcircuitGenerator1 {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator1Pins {
             let local_pin1 = NodeIndex::new(0);
             let local_pin2 = NodeIndex::new(1);
@@ -311,17 +364,18 @@ mod tests {
 
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            let node1 = circuit.nets.add_node(());
-            let node2 = circuit.nets.add_node(());
+            let node1 = circuit.add_node();
+            let node2 = circuit.add_node();
             let subcircuit_pins = TestSubcircuitGenerator1::instantiate(&mut circuit);
             let part_pins = TestPart::instantiate(&mut circuit);
-            circuit.nets.add_edge(node1, subcircuit_pins.pin1, get_location());
-            circuit.nets.add_edge(subcircuit_pins.pin2, part_pins.pin1, get_location());
-            circuit.nets.add_edge(part_pins.pin2, node2, get_location());
+            circuit.connect(node1, subcircuit_pins.pin1);
+            circuit.connect(subcircuit_pins.pin2, part_pins.pin1);
+            circuit.connect(part_pins.pin2, node2);
             circuit
         }
     }
     impl TestSubcircuitGenerator2 {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator2Pins {
             let local_pin1 = NodeIndex::new(0);
             let local_pin2 = NodeIndex::new(1);
@@ -362,7 +416,7 @@ mod tests {
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
             let interface_nodes =
-                HashSet::from([circuit.nets.add_node(()), circuit.nets.add_node(())]);
+                HashSet::from([circuit.add_node(), circuit.add_node()]);
             circuit.instantiate_subcircuit(
                 LeafOptionsGenerator,
                 &interface_nodes,
@@ -382,8 +436,8 @@ mod tests {
 
         fn construct_subcircuit(&self, options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            circuit.nets.add_node(());
-            circuit.nets.add_node(());
+            circuit.add_node();
+            circuit.add_node();
             for _ in 0..options.part_count {
                 circuit.instantiate_part(Box::new(TestPart));
             }
@@ -560,5 +614,41 @@ mod tests {
         .collect();
 
         assert_eq!(actual, expected);
+    }
+
+    #[derive(Debug, Clone)]
+    struct TracedSubcircuitGenerator;
+    static TRACED_PART_LINE: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+    impl SubcircuitGenerator for TracedSubcircuitGenerator {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let (_, line) = (circuit.instantiate_part(Box::new(TestPart)), line!());
+            *TRACED_PART_LINE.lock().unwrap() = line;
+            circuit
+        }
+    }
+
+    #[test]
+    fn test_traces_follow_subcircuit_instantiations() {
+        let mut circuit = CircuitBuilder::new();
+        let (_, part_line) = (TestPart::instantiate(&mut circuit), line!());
+        #[rustfmt::skip]
+        let (_, subcircuit_line) = (circuit.instantiate_subcircuit(TracedSubcircuitGenerator, &HashSet::new(), |o: &()| *o), line!());
+        let (node, node_line) = (circuit.add_node(), line!());
+        let circuit = circuit.build(&());
+
+        let lines = |trace: &Trace| trace.0.iter().map(|loc| loc.line()).collect::<Vec<_>>();
+        assert!(circuit.parts.iter().all(|part| part.trace.0.iter().all(|loc| loc.file() == file!())));
+        assert_eq!(lines(&circuit.parts[0].trace), vec![part_line]);
+        assert_eq!(
+            lines(&circuit.parts[1].trace),
+            vec![subcircuit_line, *TRACED_PART_LINE.lock().unwrap()]
+        );
+        assert_eq!(lines(&circuit.nets[node].trace), vec![node_line]);
+        // Pin nodes of a part inside the subcircuit carry the subcircuit trace too.
+        let inner_pin = circuit.parts[1].pin_mapping["pin1"];
+        assert_eq!(lines(&circuit.nets[inner_pin].trace), lines(&circuit.parts[1].trace));
     }
 }

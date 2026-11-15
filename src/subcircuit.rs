@@ -3,7 +3,10 @@ use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
 
-use crate::circuit::{CircuitBuilder, ExpandedCircuit};
+use crate::{
+    circuit::{CircuitBuilder, ExpandedCircuit},
+    trace::Loc,
+};
 
 pub trait SubcircuitGenerator: Debug + Clone {
     type Options;
@@ -66,6 +69,8 @@ where
 pub struct SubcircuitInstance<B = ()> {
     pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
     pub node_mapping: HashMap<NodeIndex, NodeIndex>,
+    /// Where the subcircuit was instantiated.
+    pub location: Loc,
 }
 
 impl<B> Clone for SubcircuitInstance<B> {
@@ -73,6 +78,7 @@ impl<B> Clone for SubcircuitInstance<B> {
         Self {
             generator: dyn_clone::clone_box(&*self.generator),
             node_mapping: self.node_mapping.clone(),
+            location: self.location,
         }
     }
 }
@@ -81,6 +87,7 @@ impl<B> Debug for SubcircuitInstance<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SubcircuitInstance")
             .field("node_mapping", &self.node_mapping)
+            .field("location", &self.location)
             .finish_non_exhaustive()
     }
 }
@@ -90,6 +97,7 @@ impl<B> SubcircuitInstance<B> {
         generator: G,
         options_for_generator: F,
         node_mapping: HashMap<NodeIndex, NodeIndex>,
+        location: Loc,
     ) -> Self
     where
         B: 'static,
@@ -103,6 +111,7 @@ impl<B> SubcircuitInstance<B> {
                 _builder_options: PhantomData,
             }),
             node_mapping,
+            location,
         }
     }
 }
