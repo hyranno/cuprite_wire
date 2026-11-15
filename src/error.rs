@@ -78,6 +78,14 @@ pub enum CircuitErrorKind {
     DuplicateRef { ref_name: String },
     /// Two different nets get the same name.
     DuplicateNetName { name: String },
+    /// The part has no KiCad information.
+    KicadUnsupported { ref_name: String },
+    /// The part has no footprint assigned.
+    FootprintMissing { ref_name: String },
+    /// The KiCad information has no entry for a pin ID of the part.
+    PinInfoMissing { ref_name: String, pin_id: String },
+    /// Two pins of a part are assigned to the same pad.
+    DuplicatePad { ref_name: String, pad: String },
 }
 
 impl fmt::Display for CircuitErrorKind {
@@ -100,6 +108,18 @@ impl fmt::Display for CircuitErrorKind {
             }
             CircuitErrorKind::DuplicateNetName { name } => {
                 write!(f, "net name {name:?} is used by more than one net")
+            }
+            CircuitErrorKind::KicadUnsupported { ref_name } => {
+                write!(f, "{ref_name}: the part cannot be exported to KiCad")
+            }
+            CircuitErrorKind::FootprintMissing { ref_name } => {
+                write!(f, "{ref_name}: no footprint is assigned")
+            }
+            CircuitErrorKind::PinInfoMissing { ref_name, pin_id } => {
+                write!(f, "{ref_name}: no KiCad pin information for pin ID {pin_id:?}")
+            }
+            CircuitErrorKind::DuplicatePad { ref_name, pad } => {
+                write!(f, "{ref_name}: pad {pad:?} is assigned to more than one pin")
             }
         }
     }

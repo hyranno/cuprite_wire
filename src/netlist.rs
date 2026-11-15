@@ -62,7 +62,16 @@ impl BuiltCircuit {
         let mut warnings = Vec::new();
 
         let (components, component_of_part) = self.sorted_components(&mut errors);
-        let kicad_infos: Vec<_> = components.iter().map(|c| c.part.kicad()).collect();
+        // KiCad pin names and pads are used for naming unnamed nets, unless they are inconsistent
+        // (the KiCad exporter reports that), so that the names stay unique.
+        let kicad_infos: Vec<_> = components
+            .iter()
+            .map(|c| {
+                c.part
+                    .kicad()
+                    .filter(|info| info.check_pins(&c.part.pin_ids()).is_empty())
+            })
+            .collect();
         let pins_by_node = self.pins_by_node(&component_of_part);
 
         let mut nets = Vec::new();
@@ -249,6 +258,7 @@ fn distinct_names(labels: &[&NodeLabel]) -> Vec<String> {
 
 /// Names a net without labels after one of its pins, like KiCad:
 /// `Net-(R1-Pad2)` / `Net-(U1-OUT)`, or `unconnected-(U1-NC-Pad7)` for a single pin.
+/// A pin name shared by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`).
 ///
 /// Pin names and pad numbers come from the KiCad information of the parts. Pins of parts
 /// without it are used only when no pin has it, and are named by their pin IDs.
@@ -274,8 +284,11 @@ fn unnamed_net_name(
     let (node, pin_label) = match representative {
         Some((node, pin)) => {
             let pad = format!("Pad{}", escape_name(&pin.pad));
+            let info = kicad_infos[node.component].as_ref().unwrap();
             let pin_label = match pin.name.as_deref().filter(|name| !name.is_empty()) {
-                Some(name) if unconnected => format!("{}-{pad}", escape_name(name)),
+                Some(name) if unconnected || info.is_pin_name_shared(name) => {
+                    format!("{}-{pad}", escape_name(name))
+                }
                 Some(name) => escape_name(name),
                 None => pad,
             };
@@ -497,7 +510,7 @@ mod tests {
         assert_eq!(
             summary(&netlist),
             expected(&[
-                ("Net-(U1-GND)", &["U1.gnd_a", "U1.gnd_b", "U1.gnd_c"]),
+                ("Net-(U1-GND-Pad2)", &["U1.gnd_a", "U1.gnd_b", "U1.gnd_c"]),
                 ("unconnected-(U1-I{slash}O-Pad3)", &["U1.io"]),
                 ("unconnected-(U1-VCC-Pad1)", &["U1.vcc"]),
             ])
