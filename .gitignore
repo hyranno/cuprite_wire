@@ -1,1 +1,7 @@
 /target
+
+*.local.*
+*_local.*
+
+# Personal devcontainer configuration
+/.devcontainer/local/

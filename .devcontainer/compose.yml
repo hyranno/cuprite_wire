@@ -5,6 +5,8 @@ services:
     build: .
     container_name: cuprite_dev
     restart: 'no'
+    environment:
+      KICAD9_SYMBOL_DIR: /usr/share/kicad/symbols
     volumes:
       - repo:/workspace
 
