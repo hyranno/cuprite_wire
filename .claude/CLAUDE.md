@@ -1,0 +1,3 @@
+- Comments and commit messages should be written in English.
+- If something should be installed to the machine, write it to devcontainer.
+- Claude should leave a sign as a co-author, but not on the other places.
