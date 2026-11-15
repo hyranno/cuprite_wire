@@ -11,6 +11,7 @@ RUN \
   apt-get update && \
   apt-get install -y -q \
     kicad \
+    ngspice \
   && \
 # clean up
   apt-get clean && \
