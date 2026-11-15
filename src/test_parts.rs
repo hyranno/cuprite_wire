@@ -125,7 +125,7 @@ impl Part for MultiGndIc {
             ("io", "3", "I/O", PinType::Bidirectional),
         ];
         Some(KicadPartInfo {
-            footprint: Some(lib_id("Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")),
+            footprint: Some(lib_id("Package_SO:SOIC-16_3.9x9.9mm_P1.27mm")),
             pins: pins
                 .into_iter()
                 .map(|(id, pad, name, pin_type)| (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type)))

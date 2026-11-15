@@ -18,7 +18,7 @@
     (comp
       (ref "U2")
       (value "MultiGnd")
-      (footprint "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+      (footprint "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm")
       (sheetpath (names "/") (tstamps "/"))
       (tstamps "9205faad-8a47-5f35-abde-37c5bf60185d")))
   (nets
