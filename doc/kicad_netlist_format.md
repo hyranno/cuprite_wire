@@ -220,17 +220,26 @@ However, without `tstamps` components cannot be matched when updating from a net
       (node (ref "R1") (pin "1")))))
 ```
 
-## 8. Output policy for cuprite_wire (draft)
+## 8. Output policy for cuprite_wire
 
-- Emit: `version "E"`, `components` (`ref` `value` `footprint` `fields` `libsource`
-  `sheetpath` `tstamps`, plus `property` as needed), and `nets` (`code` `name` `class`, with
-  `ref` `pin` `pinfunction` `pintype` in each `node`).
-- May omit: `design` (or keep it minimal), `libparts`, `libraries`.
-- Emit `pin` as the footprint pad number. The mapping from symbol pin names to pad numbers belongs to the part definitions.
-- Generate UUIDs deterministically so that they do not change between exports.
-- Verification: `kicad-cli` cannot read a netlist, so check the import in the pcbnew GUI
-  (File -> Import -> Netlist). Reference output for comparison can be generated with `kicad-cli`
-  following `.claude/skills/kicad/SKILL.md`.
+See `doc/kicad_netlist_usage.md` for how to use the exporter.
+
+- Emit: `version "E"`; `design` with only `source` (optional) and `tool` (no date, so that the output
+  is deterministic); `components` (`ref` `value` `footprint`, `fields` if any, `libsource` if set,
+  value-less `property` flags, `sheetpath` `tstamps`); and `nets` (`code` `name` `class "Default"`,
+  with `ref` `pin` `pinfunction` (if named) `pintype` in each `node`).
+- Omit: `libparts`, `libraries`, `datasheet`, `description`, and the `Sheetname`/`Sheetfile` properties.
+- Emit `pin` as the footprint pad number. The mapping from pin IDs to pad numbers belongs to the
+  part definitions (one pin ID per pad).
+- Generate UUIDs deterministically (UUID v5 from the hierarchical path and the instance names),
+  so that they do not change between exports.
+- Name nets following section 6.1 (global / `/path/LOCAL` / `Net-(...)` / `unconnected-(...)`),
+  sort components and nets by natural order, and nodes by reference then pad in string order.
+- Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
+- Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so the import is
+  checked manually in the pcbnew GUI (File -> Import -> Netlist). Footprint and pad existence is
+  checked by `tools/check_netlist_footprints.py`. Reference output for comparison can be generated
+  with `kicad-cli` following `.claude/skills/kicad/SKILL.md`.
 
 ## References
 
