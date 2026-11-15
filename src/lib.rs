@@ -1,6 +1,7 @@
 pub mod parts;
 pub mod subcircuit;
 pub mod circuit;
+pub mod sexpr;
 
 use std::panic::Location;
 
