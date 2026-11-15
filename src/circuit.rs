@@ -148,6 +148,13 @@ impl<B> CircuitBuilder<B> {
         for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
         }
+        // Unknown pin IDs are skipped here and reported when the netlist is created.
+        for group in part.internal_connections() {
+            let nodes: Vec<_> = group.iter().filter_map(|pin| pin_mapping.get(pin)).collect();
+            for pair in nodes.windows(2) {
+                self.nets.add_edge(*pair[0], *pair[1], trace.0[0]);
+            }
+        }
         let ref_base_name = part.get_ref_base_name();
         let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
         let ref_number = *counter;
@@ -298,6 +305,10 @@ mod tests {
 
         fn pin_ids(&self) -> Vec<String> {
             vec!["pin1".to_string(), "pin2".to_string()]
+        }
+
+        fn value(&self) -> String {
+            "test".to_string()
         }
     }
     impl TestPart {
@@ -650,5 +661,43 @@ mod tests {
         // Pin nodes of a part inside the subcircuit carry the subcircuit trace too.
         let inner_pin = circuit.parts[1].pin_mapping["pin1"];
         assert_eq!(lines(&circuit.nets[inner_pin].trace), lines(&circuit.parts[1].trace));
+    }
+
+    #[derive(Debug, Clone)]
+    struct MultiGndPart;
+    impl Part for MultiGndPart {
+        fn get_ref_base_name(&self) -> String {
+            "U".to_string()
+        }
+
+        fn pin_ids(&self) -> Vec<String> {
+            ["VCC", "GND1", "GND2", "GND3"].map(String::from).to_vec()
+        }
+
+        fn value(&self) -> String {
+            "multi_gnd".to_string()
+        }
+
+        fn internal_connections(&self) -> Vec<Vec<String>> {
+            vec![["GND1", "GND2", "GND3", "unknown"].map(String::from).to_vec()]
+        }
+    }
+
+    #[test]
+    fn test_internal_connections_are_connected() {
+        let mut circuit = CircuitBuilder::new();
+        circuit.instantiate_part(Box::new(MultiGndPart));
+        let circuit = circuit.build(&());
+
+        let groups: Vec<Vec<String>> = circuit
+            .collect_connected_part_pins()
+            .into_iter()
+            .map(|pins| pins.into_iter().map(|pin| pin.pin_id).sorted().collect())
+            .sorted()
+            .collect();
+        assert_eq!(
+            groups,
+            vec![vec!["GND1", "GND2", "GND3"], vec!["VCC"]]
+        );
     }
 }
