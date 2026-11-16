@@ -174,3 +174,7 @@ Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in 
      "Update PCB". The messages must show no errors (warnings about unplaced footprints are fine).
   4. Place the footprints, export again after a change that keeps instance names,
      and import again: footprints must keep their positions (UUIDs are stable).
+
+  The IPC API of KiCad 9 and 10 has no netlist import either; the `ImportNetlist` command
+  (with UUID matching and a dry-run mode) and the headless `kicad-cli api-server` are on the
+  development branch, expected in KiCad 11, which should allow automating this check.
