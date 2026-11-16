@@ -12,6 +12,7 @@ RUN \
   apt-get install -y -q \
     kicad \
     ngspice \
+    xvfb \
   && \
 # clean up
   apt-get clean && \

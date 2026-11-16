@@ -236,9 +236,9 @@ See `doc/kicad_netlist_usage.md` for how to use the exporter.
 - Name nets following section 6.1 (global / `/path/LOCAL` / `Net-(...)` / `unconnected-(...)`),
   sort components and nets by natural order, and nodes by reference then pad in string order.
 - Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
-- Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so the import is
-  checked manually in the pcbnew GUI (File -> Import -> Netlist). Footprint and pad existence is
-  checked by `tools/check_netlist_footprints.py`. Reference output for comparison can be generated
+- Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so
+  `tools/check_netlist_import.py` drives the import in the pcbnew GUI (File -> Import -> Netlist)
+  on a virtual X server. Footprint and pad existence is checked by `tools/check_netlist_footprints.py`. Reference output for comparison can be generated
   with `kicad-cli` following `.claude/skills/kicad/SKILL.md`.
 
 ## References

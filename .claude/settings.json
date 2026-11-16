@@ -142,6 +142,9 @@
         "~/.bashrc",
         "~/.bash_profile"
       ],
+      "allowWrite": [
+        "//var/lib/xkb"
+      ],
       "denyRead": [
         "//**/*.env*",
         "//**/*.conf",

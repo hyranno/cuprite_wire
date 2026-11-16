@@ -166,15 +166,22 @@ Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in 
 - **Footprints and pads**: `python3 tools/check_netlist_footprints.py NETLIST...` checks with KiCad's
   `pcbnew` Python module that every footprint exists in the installed libraries and every `pin` is a
   pad of it.
-- **Import into pcbnew** (manual): pcbnew's netlist reader is not available from Python or
-  `kicad-cli`, so check the import in the GUI:
-  1. Open (or create) a project in KiCad 9 and open the PCB editor.
-  2. File -> Import -> Netlist..., select the `.net` file.
-  3. Keep "Link footprints using symbol references" **off** (match by UUID) and click
-     "Update PCB". The messages must show no errors (warnings about unplaced footprints are fine).
-  4. Place the footprints, export again after a change that keeps instance names,
-     and import again: footprints must keep their positions (UUIDs are stable).
+- **Import into pcbnew**: `python3 tools/check_netlist_import.py [--keep DIR] NETLIST...` imports
+  each netlist with the real pcbnew GUI and checks the result. pcbnew's netlist reader is not
+  available from Python or `kicad-cli`, so the script runs pcbnew on a virtual X server (Xvfb, installed
+  in the devcontainer) with a throwaway KiCad configuration, and a scripting plugin
+  (`tools/pcbnew_gui/import_netlist_plugin.py`) drives File -> Import -> Netlist... inside pcbnew.
+  1. The netlist is imported into an empty board, matching footprints by UUID (tstamps). The report
+     must have no errors; warnings are printed but do not fail the check.
+  2. The saved board must match the netlist: references, footprints, values, symbol and sheet paths,
+     fields, DNP / exclude-from-BOM flags, and the net, pin function and pin type of every pad.
+  3. The footprints are moved and the same netlist is imported again: no footprint may be replaced
+     or moved (UUIDs are stable).
 
-  The IPC API of KiCad 9 and 10 has no netlist import either; the `ImportNetlist` command
-  (with UUID matching and a dry-run mode) and the headless `kicad-cli api-server` are on the
-  development branch, expected in KiCad 11, which should allow automating this check.
+  `--keep DIR` keeps the boards, the import reports, a screenshot of the dialog (`report.png`) and
+  the pcbnew logs. In the Claude Code sandbox, Unix sockets cannot be created, so Xvfb listens on
+  TCP (`127.0.0.1`), and its keymap directory `/var/lib/xkb` must be writable
+  (`sandbox.filesystem.allowWrite` in `.claude/settings.json`).
+
+  The IPC API of KiCad 9 and 10 has no netlist import; the `ImportNetlist` command and the headless
+  `kicad-cli api-server` expected in KiCad 11 may allow a check without the GUI.

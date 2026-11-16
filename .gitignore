@@ -6,3 +6,5 @@
 
 # Personal devcontainer configuration
 /.devcontainer/local/
+
+__pycache__/
