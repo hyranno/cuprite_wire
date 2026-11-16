@@ -308,6 +308,14 @@ mod tests {
         check_golden("rc_filter.net", &netlist);
     }
 
+    /// pcbnew detects a KiCad netlist by a line matching `[ ]*\(export[ ]+`
+    /// and reports "Cannot open netlist file" otherwise.
+    #[test]
+    fn test_first_line_is_recognized_by_pcbnew() {
+        let text = export(&rc_filter()).to_string();
+        assert!(text.lines().next().unwrap().starts_with("(export (version \"E\")"));
+    }
+
     /// An RC low-pass stage. Node 0: input, node 1: output.
     #[derive(Debug, Clone)]
     struct RcStage;

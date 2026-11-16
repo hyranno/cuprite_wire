@@ -64,8 +64,11 @@ impl SExpr {
     }
 
     /// Lists nested at most two levels deep are written on one line.
-    /// Deeper lists write their leading atoms on the first line and
-    /// each remaining child on its own indented line.
+    /// Deeper lists write their leading atoms, followed by the next child if
+    /// it is a list of atoms, on the first line and each remaining child on
+    /// its own indented line, as KiCad does (e.g. `(export (version "E")`).
+    /// pcbnew relies on this: it detects a netlist by a line starting with
+    /// `(export ` and rejects the file otherwise.
     fn write_pretty(&self, out: &mut impl Write, indent: usize) -> fmt::Result {
         let SExpr::List(items) = self else {
             return self.write_inline(out);
@@ -74,7 +77,10 @@ impl SExpr {
             return self.write_inline(out);
         }
         out.write_char('(')?;
-        let head_len = items.iter().take_while(|item| item.is_atom()).count();
+        let mut head_len = items.iter().take_while(|item| item.is_atom()).count();
+        if head_len > 0 && items.get(head_len).is_some_and(|item| item.depth() == 1) {
+            head_len += 1;
+        }
         for (i, item) in items[..head_len].iter().enumerate() {
             if i > 0 {
                 out.write_char(' ')?;
@@ -160,11 +166,9 @@ mod tests {
             ],
         );
         let expected = concat!(
-            "(export\n",
-            "  (version \"E\")\n",
+            "(export (version \"E\")\n",
             "  (components\n",
-            "    (comp\n",
-            "      (ref \"R1\")\n",
+            "    (comp (ref \"R1\")\n",
             "      (fields\n",
             "        (field (name \"A\") \"x\"))))\n",
             "  (nets))",
