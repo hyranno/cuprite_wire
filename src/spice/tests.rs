@@ -402,3 +402,46 @@ fn test_parts_without_spice_model_mix_with_kicad() {
     let netlist = rc_filter().build(&()).to_netlist().unwrap();
     assert!(netlist.to_kicad().is_ok());
 }
+
+/// A circuit exported to both formats, for comparing the SPICE output with KiCad's
+/// (`tools/compare_kicad_cli_netlist.py --spice tests/golden/kicad_pair.net`): node names from
+/// labels with characters KiCad replaces, unnamed and unconnected nets, subcircuits with named and
+/// automatic instance names, a subcircuit model, and a part excluded from the simulation.
+#[test]
+fn test_golden_kicad_pair() {
+    let mut circuit = CircuitBuilder::new();
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, &interface(), |o: &()| *o);
+    let second = circuit.instantiate_subcircuit(RcStage, &interface(), |o: &()| *o);
+    let r_in = circuit.instantiate_part_named("input", Box::new(Resistor("100")));
+    circuit.label(r_in["1"], NetLabel::local("I/O"));
+    // An unnamed net between two parts in the root.
+    let r_mid = circuit.instantiate_part_named("mid", Box::new(Resistor("220")));
+    circuit.connect(r_in["2"], r_mid["1"]);
+    circuit.connect(r_mid["2"], first[&NodeIndex::new(0)]);
+    circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+    let amp = circuit.instantiate_part_named("amp", Box::new(OpAmp));
+    circuit.connect(amp["in_p"], second[&NodeIndex::new(1)]);
+    circuit.connect(amp["out"], amp["in_n"]);
+    circuit.label(amp["out"], NetLabel::local("a(b) c"));
+    circuit.label(amp["vdd"], NetLabel::global("+5V"));
+    circuit.label(amp["vss"], NetLabel::global("GND"));
+    // An unconnected pin.
+    let r_open = circuit.instantiate_part_named("open", Box::new(Resistor("1Meg")));
+    circuit.connect(r_open["1"], amp["out"]);
+    let connector = circuit.instantiate_part_named(
+        "connector",
+        Box::new(CustomPart {
+            ref_base_name: "J",
+            spice: Some(SpicePartInfo::Excluded),
+            ..CustomPart::valid()
+        }),
+    );
+    circuit.connect(connector["1"], amp["out"]);
+    circuit.label(connector["2"], NetLabel::global("GND"));
+
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    let mut kicad = Vec::new();
+    netlist.to_kicad().unwrap().with_source("kicad_pair").write(&mut kicad).unwrap();
+    test_parts::check_golden("kicad_pair.net", &String::from_utf8(kicad).unwrap());
+    check_golden("kicad_pair.cir", &netlist.to_spice().unwrap().with_title("kicad_pair"));
+}

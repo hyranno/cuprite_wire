@@ -20,7 +20,15 @@ unnamed net crossing sheets is connected by global labels named after it, and
 its name is reported as not compared. Only the label that named a net is
 placed, so which of several labels names a net is not checked.
 
-Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] NETLIST...
+With --spice, the SPICE deck written for the same circuit (NETLIST with the suffix
+`.cir`) is compared with `kicad-cli sch export netlist --format spice` instead. Every symbol
+gets Sim.* fields from its element line in the deck (Sim.Pins maps the pads to the element's
+nodes by their nets), parts without an element are excluded from the simulation, and inline
+`.subckt`/`.model` definitions are written to a library for Sim.Library. Element lines are
+compared after mapping KiCad's ground `GND` to `0`; their order is reported separately.
+Only R, C, L and X (with an inline `.subckt`) elements are supported.
+
+Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] [--spice] NETLIST...
 """
 
 import argparse
@@ -113,8 +121,11 @@ def symbol_lines(lib_id, ref, signature):
     return out
 
 
-def synthesize(path, project):
-    """Returns ({file name: text} of a schematic equivalent to the netlist at `path`, notes)."""
+def synthesize(path, project, sim=None):
+    """Returns ({file name: text} of a schematic equivalent to the netlist at `path`, notes).
+
+    `sim` is an optional (ref -> [(field name, text)], refs excluded from the simulation).
+    """
     root_tree = parse(open(path, encoding="utf-8").read())
     netlist = read(path)
     notes = []
@@ -208,11 +219,12 @@ def synthesize(path, project):
         s.page = page
     files = {}
     for s in sheets.values():
-        files[s.file] = sheet_text(s, project, netlist, pins, libsources, lib_symbols)
+        files[s.file] = sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim)
     return files, notes
 
 
-def sheet_text(s, project, netlist, pins, libsources, lib_symbols):
+def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
+    sim_fields, sim_excluded = sim or ({}, set())
     instance = "/" + "/".join((project["uuid"],) + s.tstamps)
     out = [f'(kicad_sch (version 20231120) (generator "cuprite_wire_compare")',
            f"(uuid {quote(project['uuid'] if not s.names else s.uuid)})", '(paper "A0")',
@@ -229,6 +241,7 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols):
         y = PIN_Y + 5.08
         flags = comp.properties
         out.append(f"(symbol (lib_id {quote(libsources[ref])}) (at {mm(x)} {mm(y)} 0) (unit 1) "
+                   f"(exclude_from_sim {'yes' if ref in sim_excluded else 'no'}) "
                    f"(in_bom {'no' if 'exclude_from_bom' in flags else 'yes'}) "
                    f"(on_board {'no' if 'exclude_from_board' in flags else 'yes'}) "
                    f"(dnp {'yes' if 'dnp' in flags else 'no'}) "
@@ -236,7 +249,7 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols):
         out.append(prop("Reference", ref, (x, y + 5), hidden=False))
         out.append(prop("Value", comp.value, (x, y + 7.5)))
         out.append(prop("Footprint", comp.footprint, (x, y)))
-        for field_name, text in comp.fields.items():
+        for field_name, text in [*comp.fields.items(), *sim_fields.get(ref, [])]:
             out.append(prop(field_name, text, (x, y)))
         for i, (pad, _, _) in enumerate(sorted(pins[ref])):
             ends[("pin", ref, pad)] = (x + i * PIN_PITCH, PIN_Y)
@@ -358,26 +371,123 @@ def compare(path, work, env):
                                      lineterm="")), notes
 
 
+def spice_node_name(net):
+    """The SPICE node name of a net, by the rule of `spice_node_name` in src/spice/netlist.rs."""
+    name = re.sub(r"[%(),\[\]<>~\s]", "_", net.replace("{slash}", "/"))
+    if name == "0" or name.lower() == "gnd":
+        return "0"
+    return "/root/" + name[2:] if name.startswith("//") else name
+
+
+def read_deck(path):
+    """Returns (element lines as token lists, inline definitions, {subckt name: ports})."""
+    elements, models, subckts, block = [], [], {}, None
+    for line in Path(path).read_text(encoding="utf-8").splitlines()[1:]:  # the first line is the title
+        tokens = line.split()
+        if not tokens or line.startswith("*"):
+            continue
+        keyword = tokens[0].lower()
+        if block is not None:
+            block.append(line)
+            if keyword == ".ends":
+                models.append("\n".join(block))
+                block = None
+        elif keyword == ".subckt":
+            block = [line]
+            subckts[tokens[1].lower()] = tokens[2:]
+        elif keyword == ".model":
+            models.append(line)
+        elif not keyword.startswith("."):
+            elements.append(tokens)
+    return elements, models, subckts
+
+
+def sim_fields(netlist, elements, subckts, library):
+    """Sim.* fields reproducing the elements. Returns ((fields by ref, excluded refs), compared elements)."""
+    fields, compared = {}, []
+    for tokens in elements:
+        name, device = tokens[0], tokens[0][0].upper()
+        ref = name if name in netlist.components else name[1:]
+        if ref not in netlist.components:
+            raise ValueError(f"{name}: no component in the .net (a simulation-only part)")
+        if ref in fields:
+            raise ValueError(f"{ref}: several elements (multi-unit symbols are not synthesized)")
+        if device in "RCL":
+            nodes, ports = tokens[1:3], ["+", "-"]
+            model = [("Sim.Device", device), ("Sim.Params", f"{device.lower()}={' '.join(tokens[3:])}")]
+        elif device == "X":
+            at = next((i for i, t in enumerate(tokens) if t.lower() in subckts), None)
+            if at is None:
+                raise ValueError(f"{name}: the subcircuit is not defined in the deck")
+            nodes, ports = tokens[1:at], subckts[tokens[at].lower()]
+            if tokens[at + 1:]:
+                raise ValueError(f"{name}: subcircuit parameters are not supported")
+            model = [("Sim.Device", "SUBCKT"), ("Sim.Library", str(library)), ("Sim.Name", tokens[at])]
+        else:
+            raise ValueError(f"{name}: device {device} is not supported")
+        # Assign each node to a pad on that net.
+        free = sorted((pad, spice_node_name(node.net)) for (r, pad), node in netlist.nodes.items() if r == ref)
+        mapping = []
+        for node, port in zip(nodes, ports):
+            pad = next((p for p, n in free if n == node), None)
+            if pad is None:
+                raise ValueError(f"{name}: no pad of {ref} is on node {node}")
+            free.remove((pad, node))
+            mapping.append(f"{pad}={port}")
+        fields[ref] = model + [("Sim.Pins", " ".join(mapping))]
+        compared.append(" ".join(tokens))
+    return (fields, set(netlist.components) - set(fields)), compared
+
+
+def compare_spice(path, work, env):
+    deck = Path(path).with_suffix(".cir")
+    if not deck.exists():
+        raise ValueError(f"no SPICE deck {deck}")
+    elements, models, subckts = read_deck(deck)
+    library = (work / "models.lib").resolve()
+    library.write_text("\n".join(models) + "\n")
+    sim, ours = sim_fields(read(path), elements, subckts, library)
+    project = {"name": "compare", "uuid": new_uuid()}
+    files, notes = synthesize(path, project, sim)
+    for name, text in files.items():
+        (work / name).write_text(text)
+    exported = work / "kicad.cir"
+    run = subprocess.run(["kicad-cli", "sch", "export", "netlist", "--format", "spice",
+                          "-o", str(exported), str(work / "compare.kicad_sch")],
+                         env={**os.environ, **env}, capture_output=True, text=True)
+    if run.returncode or not exported.exists():
+        return [f"kicad-cli failed: {run.stdout}{run.stderr}"], notes
+    theirs = [" ".join("0" if t.lower() == "gnd" else t for t in tokens)
+              for tokens in read_deck(exported)[0]]
+    diff = list(difflib.unified_diff(sorted(ours), sorted(theirs), str(deck), "kicad-cli", lineterm=""))
+    if not diff and ours != theirs:
+        notes.append("element order differs: kicad-cli writes " + ", ".join(t.split()[0] for t in theirs))
+    return diff, notes
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", metavar="DIR",
                         help="keep the synthesized schematics and KiCad's netlists in DIR")
+    parser.add_argument("--spice", action="store_true",
+                        help="compare the SPICE deck NETLIST.cir with kicad-cli's SPICE export")
     parser.add_argument("netlists", nargs="+")
     args = parser.parse_args()
 
     root = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="netlist-compare-"))
     root.mkdir(parents=True, exist_ok=True)
     env = kicad_env(root / "kicad")
-    print("Ignored (intentional differences):")
-    for what, why in KNOWN_DIFFERENCES.items():
-        print(f"  {what}: {why}")
+    if not args.spice:
+        print("Ignored (intentional differences):")
+        for what, why in KNOWN_DIFFERENCES.items():
+            print(f"  {what}: {why}")
     failed = False
     try:
         for i, path in enumerate(args.netlists):
             work = root / f"{i}-{Path(path).stem}"
             work.mkdir(exist_ok=True)
             try:
-                diff, notes = compare(path, work, env)
+                diff, notes = (compare_spice if args.spice else compare)(path, work, env)
             except ValueError as e:
                 print(f"{path}: skipped: {e}")
                 continue
