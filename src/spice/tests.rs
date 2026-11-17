@@ -1,4 +1,7 @@
-//! Export tests of whole circuits.
+//! Export and simulation tests of whole circuits.
+//!
+//! The simulation tests run ngspice (see [`Ngspice::from_env`]); they need `python3` and
+//! `libngspice`, which the devcontainer provides.
 
 use std::collections::HashSet;
 
@@ -8,7 +11,10 @@ use crate::{
     circuit::CircuitBuilder,
     error::CircuitErrorKind,
     naming::NetLabel,
-    spice::{IndependentSource, ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo},
+    spice::{
+        Ammeter, IndependentSource, ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo,
+        Waveform,
+    },
     test_parts::{self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
 };
 
@@ -242,6 +248,143 @@ fn test_ground_is_required() {
         .0;
     let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
     assert_eq!(kinds, vec![CircuitErrorKind::GroundMissing]);
+}
+
+#[test]
+fn test_deck() {
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .with_title("deck")
+        .deck()
+        .directive(".options reltol=1e-4")
+        .control(["op", "print all"]);
+    check_golden("deck.cir", &deck);
+}
+
+// Simulations.
+
+/// The -3 dB frequency of the RC filter is 1 / (2 pi R C).
+#[test]
+fn test_simulate_ac() {
+    let deck = export(&rc_filter_bench(
+        IndependentSource::voltage(0.0).with_ac(1.0),
+    ))
+    .deck()
+    .control([
+        "ac dec 50 1 100k",
+        r#"meas ac f3db WHEN vdb("/OUT")=-3"#,
+        r#"wrdata ac.txt vdb("/OUT") vp("/OUT")"#,
+    ]);
+    let sim = deck.run().unwrap();
+    let expected = 1.0 / (2.0 * std::f64::consts::PI * 10e3 * 100e-9);
+    let f3db = sim.value("f3db").unwrap();
+    assert!(
+        (f3db / expected - 1.0).abs() < 0.01,
+        "f3db = {f3db}, expected {expected}"
+    );
+    let table = sim.table("ac.txt").unwrap();
+    assert_eq!(
+        table.names(),
+        ["frequency", r#"vdb("/OUT")"#, r#"vp("/OUT")"#]
+    );
+    let gain_at_10k = table.interpolate(r#"vdb("/OUT")"#, 10e3).unwrap();
+    // One decade above the corner: about -36 dB (20 log10(1 / sqrt(1 + (10k/159)^2))).
+    assert!((gain_at_10k + 36.0).abs() < 0.2, "{gain_at_10k}");
+}
+
+/// The step response of the RC filter reaches 63.2% after one time constant (1 ms).
+#[test]
+fn test_simulate_transient() {
+    let step = Waveform::Pulse {
+        initial: 0.0,
+        pulsed: 1.0,
+        delay: 0.0,
+        rise: 1e-9,
+        fall: 1e-9,
+        width: 1.0,
+        period: 2.0,
+    };
+    let deck = export(&rc_filter_bench(
+        IndependentSource::voltage(0.0).with_waveform(step),
+    ))
+    .deck()
+    .control(["tran 10u 5m", r#"wrdata tran.txt v("/OUT")"#]);
+    let sim = deck.run().unwrap();
+    let table = sim.table("tran.txt").unwrap();
+    // ngspice writes the header without the quotes: `v(/OUT)`.
+    assert_eq!(table.names(), ["time", "v(/OUT)"]);
+    let v = table.interpolate(r#"v("/OUT")"#, 1e-3).unwrap();
+    assert!((v - 0.632).abs() < 0.005, "v(1ms) = {v}");
+}
+
+/// A divider with an ammeter: the operating point gives the node voltage and the current.
+#[test]
+fn test_simulate_operating_point() {
+    let mut circuit = CircuitBuilder::new();
+    let v = circuit.instantiate_part(IndependentSource::voltage(10.0));
+    let meter = circuit.instantiate_part(Box::new(Ammeter));
+    let top = circuit.instantiate_part(Box::new(Resistor("1k")));
+    let bottom = circuit.instantiate_part(Box::new(Resistor("3k")));
+    circuit.connect(v["p"], meter["p"]);
+    circuit.connect(meter["n"], top["1"]);
+    circuit.connect(top["2"], bottom["1"]);
+    circuit.label(bottom["1"], NetLabel::local("MID"));
+    circuit.label(bottom["2"], NetLabel::global("GND"));
+    circuit.label(v["n"], NetLabel::global("GND"));
+    let deck = export(&circuit).deck().control([
+        "op",
+        r#"let mid = v("/MID")"#,
+        "let current = i(VM1)",
+        "print mid current",
+    ]);
+    let sim = deck.run().unwrap();
+    assert!(
+        (sim.value("mid").unwrap() - 7.5).abs() < 1e-6,
+        "{}",
+        sim.log()
+    );
+    assert!(
+        (sim.value("current").unwrap() - 2.5e-3).abs() < 1e-9,
+        "{}",
+        sim.log()
+    );
+}
+
+/// A non-inverting amplifier with the op-amp's inline subcircuit model: gain 1 + 9k / 1k.
+#[test]
+fn test_simulate_subcircuit_model() {
+    let mut circuit = CircuitBuilder::new();
+    let amp = circuit.instantiate_part(Box::new(OpAmp));
+    let feedback = circuit.instantiate_part(Box::new(Resistor("9k")));
+    let ground = circuit.instantiate_part(Box::new(Resistor("1k")));
+    circuit.connect(amp["out"], feedback["1"]);
+    circuit.connect(feedback["2"], amp["in_n"]);
+    circuit.connect(amp["in_n"], ground["1"]);
+    circuit.label(ground["2"], NetLabel::global("GND"));
+    circuit.label(amp["out"], NetLabel::local("OUT"));
+    let input = circuit.instantiate_part(IndependentSource::voltage(0.1));
+    circuit.connect(input["p"], amp["in_p"]);
+    circuit.label(input["n"], NetLabel::global("GND"));
+    let supply = circuit.instantiate_part(IndependentSource::voltage(5.0));
+    circuit.connect(supply["p"], amp["vdd"]);
+    circuit.connect(supply["n"], amp["vss"]);
+    circuit.label(supply["n"], NetLabel::global("GND"));
+
+    let deck = export(&circuit)
+        .deck()
+        .control(["op", r#"let out = v("/OUT")"#, "print out"]);
+    let sim = deck.run().unwrap();
+    let out = sim.value("out").unwrap();
+    assert!((out - 1.0).abs() < 1e-3, "out = {out}");
+}
+
+/// A deck that ngspice rejects is reported with its log.
+#[test]
+fn test_simulation_error() {
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .deck()
+        .control(["op", r#"wrdata x.txt v("/nothing")"#]);
+    let error = deck.run().unwrap_err().to_string();
+    assert!(error.contains("no such vector"), "{error}");
 }
 
 #[test]

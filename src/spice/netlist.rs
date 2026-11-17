@@ -12,14 +12,15 @@ use crate::{
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     naming::unescape_name,
     netlist::{Component, Netlist},
-    spice::{ModelSource, SpicePartInfo, SpiceProblem},
+    spice::{ModelSource, SpiceDeck, SpicePartInfo, SpiceProblem},
     trace::Trace,
 };
 
 /// The node name of the ground.
 pub const GROUND: &str = "0";
 
-/// A netlist checked and resolved for SPICE. Write it with [`SpiceNetlist::write`] or `Display`.
+/// A netlist checked and resolved for SPICE. Write it with [`SpiceNetlist::write`] or `Display`,
+/// or add analyses with [`SpiceNetlist::deck`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpiceNetlist {
     title: String,
@@ -347,6 +348,11 @@ impl SpiceNetlist {
     /// `None` if no element uses the net.
     pub fn node(&self, net_name: &str) -> Option<&str> {
         self.nodes.get(net_name).map(String::as_str)
+    }
+
+    /// A deck of this netlist, to add analyses and run it.
+    pub fn deck(self) -> SpiceDeck {
+        SpiceDeck::new(self)
     }
 
     /// Writes everything but `.end`.
