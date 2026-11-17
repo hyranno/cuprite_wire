@@ -114,10 +114,13 @@ Reference designators (`R1`, `R2`, ...) are numbered in instantiation order over
   global over local, then the label in the shallower subcircuit instance, then the smallest name.
   A `MultipleNetNames` warning is reported, and the other names still connect nets
   (a net labeled `ALPHA` and `ZED` is connected to another net labeled `ZED`).
-- An unnamed net is named after one of its pins (the smallest reference, then pad number), using
-  the pin name if it has one, or `Pad<number>`. A pin name shared by several pins of the part is
-  followed by the pad (`Net-(U1-GND-Pad5)`). A net of a single pin is `unconnected-(...)`.
-  Pins of parts without KiCad information are used only if no pin has it, by their pin IDs.
+- An unnamed net is named after one of its pins, as Eeschema does: `Net-(<ref>-<pin name>)`, or
+  `Net-(<ref>-Pad<number>)` for a pin without a name or named as its pad number. A pin name shared
+  by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`). Pins written by their
+  name alone are preferred, and among them the smallest name in string order (not natural order:
+  `Net-(R10-Pad1)` before `Net-(R9-Pad1)`); the pin type does not matter. A net of a single pin is
+  `unconnected-(...)`. Pins of parts without KiCad information are used only if no pin has it,
+  by their pin IDs.
 - A labeled net without any part pin is not written and gives a `LabelOnlyNet` warning.
 - Two different nets with the same name are an error (`DuplicateNetName`).
 
@@ -183,5 +186,25 @@ Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in 
   TCP (`127.0.0.1`), and its keymap directory `/var/lib/xkb` must be writable
   (`sandbox.filesystem.allowWrite` in `.claude/settings.json`).
 
+  `--relink BEFORE AFTER` imports BEFORE, moves the footprints and imports AFTER, a revised
+  circuit, checking that footprints are linked by UUID: footprints of components still in the
+  netlist keep their places even if renumbered, and new components are added. The golden files
+  `tests/golden/revision_*.net` are such revisions (a named part added before the others, and an
+  automatically named part inserted before another one, which takes over its UUID):
+
+  ```sh
+  G=tests/golden
+  python3 tools/check_netlist_import.py --relink \
+      $G/revision_before.net $G/revision_named_added.net \
+      $G/revision_before.net $G/revision_auto_inserted.net
+  ```
+
   The IPC API of KiCad 9 and 10 has no netlist import; the `ImportNetlist` command and the headless
   `kicad-cli api-server` expected in KiCad 11 may allow a check without the GUI.
+- **Comparison with Eeschema**: `python3 tools/compare_kicad_cli_netlist.py [--keep DIR] NETLIST...`
+  synthesizes a schematic equivalent to each netlist (one symbol per component with the pins of its
+  nodes, wires, and a global or local label for each named net; unnamed nets are left for KiCad to
+  name), exports it with `kicad-cli sch export netlist`, and prints the differences in element
+  order, quoting, omission rules and net names. What cuprite_wire intentionally omits (`libparts`,
+  the `Footprint`/`Datasheet`/`Description` fields, properties repeating fields, ...) is ignored.
+  Only flat netlists (every component on the root sheet) are supported.

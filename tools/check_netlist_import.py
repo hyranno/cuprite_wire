@@ -14,10 +14,18 @@ For each netlist:
 2. Move the footprints, import the same netlist again, and check that no
    footprint was replaced: unique ids and positions are kept.
 
+With `--relink`, the netlists are taken in pairs (BEFORE AFTER), and step 2
+imports AFTER, a revised circuit: every footprint whose path (sheet and symbol
+unique ids) is still in the netlist must be kept in place even if its reference
+or value changed, footprints of new components are added, and footprints of
+removed components are left as they are. What happened to each footprint is
+printed.
+
 KiCad runs with a throwaway configuration under a temporary directory, so the
 user's KiCad settings are neither used nor changed.
 
 Usage: python3 tools/check_netlist_import.py [--keep DIR] NETLIST...
+       python3 tools/check_netlist_import.py [--keep DIR] --relink BEFORE AFTER...
 """
 
 import argparse
@@ -126,23 +134,28 @@ def read_report(result):
     return [], lines
 
 
-def board_problems(board, netlist):
-    """Differences between an imported board and the netlist it was imported from."""
+def board_problems(board, netlist, orphans=()):
+    """Differences between an imported board and the netlist it was imported from.
+
+    Footprints are matched to components by path (sheet and symbol unique ids), as pcbnew
+    does. Footprints whose path is in `orphans` may stay on the board.
+    """
     problems = []
-    footprints = {fp.GetReference(): fp for fp in board.GetFootprints()}
-    for ref in sorted(set(netlist.components) - set(footprints)):
-        problems.append(f"{ref}: missing on the board")
-    for ref in sorted(set(footprints) - set(netlist.components)):
-        problems.append(f"{ref}: on the board but not in the netlist")
+    footprints = {fp.GetPath().AsString(): fp for fp in board.GetFootprints()}
+    components = {comp.path: comp for comp in netlist.components.values()}
+    for path in sorted(set(components) - set(footprints)):
+        problems.append(f"{components[path].ref}: missing on the board")
+    for path in sorted(set(footprints) - set(components) - set(orphans)):
+        problems.append(f"{footprints[path].GetReference()}: on the board but not in the netlist")
     for ref, comp in sorted(netlist.components.items()):
-        fp = footprints.get(ref)
+        fp = footprints.get(comp.path)
         if fp is None:
             continue
         fields = {f.GetName(): f.GetText() for f in fp.GetFields()}
         checks = [
+            ("reference", fp.GetReference(), comp.ref),
             ("footprint", fp.GetFPIDAsString(), comp.footprint),
             ("value", fp.GetValue(), comp.value),
-            ("symbol path", fp.GetPath().AsString(), comp.path),
             ("sheet name", fp.GetSheetname(), comp.sheet_names),
             ("dnp", fp.IsDNP(), "dnp" in comp.properties),
             ("exclude from BOM", fp.IsExcludedFromBOM(), "exclude_from_bom" in comp.properties),
@@ -167,22 +180,27 @@ def board_problems(board, netlist):
 
 
 def placement(board):
-    """{reference: (unique id, position)} of every footprint."""
-    return {fp.GetReference(): (fp.m_Uuid.AsString(), (fp.GetPosition().x, fp.GetPosition().y))
+    """{path: (reference, value, unique id, position)} of every footprint."""
+    return {fp.GetPath().AsString(): (fp.GetReference(), fp.GetValue(), fp.m_Uuid.AsString(),
+                                      (fp.GetPosition().x, fp.GetPosition().y))
             for fp in board.GetFootprints()}
 
 
-def check(path, work, display, env, timeout):
+def check(path, work, display, env, timeout, revised=None):
+    """Imports `path` into an empty board, moves the footprints and imports `revised`
+    (by default `path` again). Returns (problems, warnings, notes)."""
     import pcbnew  # needs the XDG variables set by main()
 
     netlist = read(path)
+    revised = revised or path
+    revised_netlist = read(revised)
     empty = work / "empty.kicad_pcb"
     pcbnew.SaveBoard(str(empty), pcbnew.BOARD())
 
     first = run_import(env, display, path, empty, work / "1-import", timeout)
     problems, warnings = read_report(first)
     if not first["ok"]:
-        return problems, warnings
+        return problems, warnings, []
     board = pcbnew.LoadBoard(first["board"])
     problems += board_problems(board, netlist)
 
@@ -194,21 +212,35 @@ def check(path, work, display, env, timeout):
     pcbnew.SaveBoard(str(placed), board)
     before = placement(pcbnew.LoadBoard(str(placed)))
 
-    second = run_import(env, display, path, placed, work / "2-reimport", timeout)
+    second = run_import(env, display, revised, placed, work / "2-reimport", timeout)
     errors, more_warnings = read_report(second)
     problems += [f"reimport: {p}" for p in errors]
     warnings += [f"reimport: {w}" for w in more_warnings if w not in warnings]
     if not second["ok"]:
-        return problems, warnings
+        return problems, warnings, []
     after_board = pcbnew.LoadBoard(second["board"])
-    problems += [f"reimport: {p}" for p in board_problems(after_board, netlist)]
+    revised_paths = {comp.path for comp in revised_netlist.components.values()}
+    orphans = set(before) - revised_paths
+    problems += [f"reimport: {p}" for p in board_problems(after_board, revised_netlist, orphans)]
     after = placement(after_board)
-    for ref in sorted(before.keys() & after.keys()):
-        if before[ref][0] != after[ref][0]:
-            problems.append(f"reimport: {ref}: footprint was replaced (unique id changed)")
-        elif before[ref][1] != after[ref][1]:
-            problems.append(f"reimport: {ref}: moved from {before[ref][1]} to {after[ref][1]}")
-    return problems, warnings
+
+    # Footprints are linked by path: a footprint whose path is still in the netlist must be kept
+    # (same unique id and position) even if its reference changed; orphans are left as they are.
+    notes = []
+    for path in sorted(before.keys() & after.keys(), key=lambda p: before[p][0]):
+        (old_ref, old_value, old_id, old_pos) = before[path]
+        (new_ref, new_value, new_id, new_pos) = after[path]
+        if old_id != new_id:
+            problems.append(f"reimport: {old_ref}: footprint was replaced (unique id changed)")
+        elif old_pos != new_pos:
+            problems.append(f"reimport: {old_ref}: moved from {old_pos} to {new_pos}")
+        elif path in orphans:
+            notes.append(f"{old_ref}: no longer in the netlist, left on the board")
+        elif (old_ref, old_value) != (new_ref, new_value):
+            notes.append(f"{old_ref} ({old_value}): kept in place as {new_ref} ({new_value})")
+    for path in sorted(after.keys() - before.keys(), key=lambda p: after[p][0]):
+        notes.append(f"{after[path][0]} ({after[path][1]}): added")
+    return problems, warnings, notes if revised != path else []
 
 
 def main():
@@ -217,8 +249,18 @@ def main():
                         help="keep the boards, reports, screenshots and logs in DIR")
     parser.add_argument("--timeout", type=float, default=120,
                         help="seconds allowed for one pcbnew run (default: 120)")
+    parser.add_argument("--relink", action="store_true",
+                        help="take the netlists in pairs (BEFORE AFTER): import BEFORE, move the "
+                             "footprints, then import AFTER, and check that footprints are linked "
+                             "by unique ids")
     parser.add_argument("netlists", nargs="+")
     args = parser.parse_args()
+    if args.relink:
+        if len(args.netlists) % 2:
+            parser.error("--relink needs pairs of netlists")
+        jobs = list(zip(args.netlists[::2], args.netlists[1::2]))
+    else:
+        jobs = [(path, None) for path in args.netlists]
 
     root = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="netlist-import-"))
     root.mkdir(parents=True, exist_ok=True)
@@ -228,17 +270,17 @@ def main():
     failed = False
     try:
         with Xvfb() as xvfb:
-            for i, path in enumerate(args.netlists):
+            for i, (path, revised) in enumerate(jobs):
                 work = root / f"{i}-{Path(path).stem}"
                 work.mkdir(exist_ok=True)
-                problems, warnings = check(path, work, xvfb.display, env, args.timeout)
-                for warning in warnings:
-                    print(f"{path}: {warning}")
-                for problem in problems:
-                    print(f"{path}: {problem}")
+                problems, warnings, notes = check(path, work, xvfb.display, env, args.timeout,
+                                                  revised)
+                name = f"{path} -> {revised}" if revised else path
+                for line in warnings + problems + notes:
+                    print(f"{name}: {line}")
                 failed |= bool(problems)
                 if not problems:
-                    print(f"{path}: ok")
+                    print(f"{name}: ok")
     finally:
         if args.keep:
             print(f"outputs kept in {root}")

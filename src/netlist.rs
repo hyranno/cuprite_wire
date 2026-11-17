@@ -258,7 +258,11 @@ fn distinct_names(labels: &[&NodeLabel]) -> Vec<String> {
 
 /// Names a net without labels after one of its pins, like KiCad:
 /// `Net-(R1-Pad2)` / `Net-(U1-OUT)`, or `unconnected-(U1-NC-Pad7)` for a single pin.
-/// A pin name shared by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`).
+/// A pin without a name, or named as its pad number, is written as the pad (`Pad2`), and a pin
+/// name shared by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`).
+///
+/// As KiCad does, a pin written by its name alone is preferred to one written with the pad,
+/// and among those the smallest name in string order (not natural order) is chosen.
 ///
 /// Pin names and pad numbers come from the KiCad information of the parts. Pins of parts
 /// without it are used only when no pin has it, and are named by their pin IDs.
@@ -267,39 +271,28 @@ fn unnamed_net_name(
     components: &[Component],
     kicad_infos: &[Option<KicadPartInfo>],
 ) -> String {
-    let kicad_pin = |node: &NetNode| {
-        kicad_infos[node.component]
-            .as_ref()
-            .and_then(|info| info.pins.get(&node.pin_id))
-    };
-    let representative = nodes
-        .iter()
-        .filter_map(|node| kicad_pin(node).map(|pin| (node, pin)))
-        .min_by(|(a, pin_a), (b, pin_b)| {
-            a.component
-                .cmp(&b.component)
-                .then_with(|| natural_cmp(&pin_a.pad, &pin_b.pad))
-        });
     let unconnected = nodes.len() == 1;
-    let (node, pin_label) = match representative {
-        Some((node, pin)) => {
-            let pad = format!("Pad{}", escape_name(&pin.pad));
-            let info = kicad_infos[node.component].as_ref().unwrap();
-            let pin_label = match pin.name.as_deref().filter(|name| !name.is_empty()) {
-                Some(name) if unconnected || info.is_pin_name_shared(name) => {
-                    format!("{}-{pad}", escape_name(name))
-                }
-                Some(name) => escape_name(name),
-                None => pad,
-            };
-            (node, pin_label)
-        }
-        // `nodes` is sorted, so the first node is the smallest.
-        None => (&nodes[0], escape_name(&nodes[0].pin_id)),
-    };
-    let ref_name = escape_name(&components[node.component].ref_name);
     let prefix = if unconnected { "unconnected" } else { "Net" };
-    format!("{prefix}-({ref_name}-{pin_label})")
+    // (written with the pad, net name) of a pin with KiCad information.
+    let candidate = |node: &NetNode| {
+        let info = kicad_infos[node.component].as_ref()?;
+        let pin = info.pins.get(&node.pin_id)?;
+        let ref_name = escape_name(&components[node.component].ref_name);
+        let pad = format!("Pad{}", escape_name(&pin.pad));
+        let name = pin.name.as_deref().filter(|name| !name.is_empty() && *name != pin.pad);
+        let (with_pad, pin_label) = match name {
+            Some(name) if unconnected || info.is_pin_name_shared(name) => (true, format!("{}-{pad}", escape_name(name))),
+            Some(name) => (false, escape_name(name)),
+            None => (true, pad),
+        };
+        Some((with_pad, format!("{prefix}-({ref_name}-{pin_label})")))
+    };
+    nodes.iter().filter_map(candidate).min().map(|(_, name)| name).unwrap_or_else(|| {
+        // `nodes` is sorted, so the first node is the smallest.
+        let node = &nodes[0];
+        let ref_name = escape_name(&components[node.component].ref_name);
+        format!("{prefix}-({ref_name}-{})", escape_name(&node.pin_id))
+    })
 }
 
 impl Ord for NetNode {
@@ -318,11 +311,12 @@ impl PartialOrd for NetNode {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{BTreeMap, HashSet};
 
     use super::*;
     use crate::{
         circuit::CircuitBuilder,
+        kicad::{KicadPinInfo, PinType},
         subcircuit::SubcircuitGenerator,
         test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor, SpiceSource},
     };
@@ -369,12 +363,42 @@ mod tests {
             expected(&[
                 ("/IN", &["R1.1"]),
                 ("GND", &["C1.2", "U1.vss"]),
-                ("Net-(C1-Pad1)", &["C1.1", "R1.2", "U1.in_p"]),
-                ("Net-(U1-OUT)", &["U1.in_n", "U1.out"]),
+                // Named pins are preferred, then the smallest name in string order.
+                ("Net-(U1-+)", &["C1.1", "R1.2", "U1.in_p"]),
+                ("Net-(U1--)", &["U1.in_n", "U1.out"]),
                 ("unconnected-(U1-V+-Pad5)", &["U1.vdd"]),
             ])
         );
         assert!(netlist.warnings.is_empty());
+    }
+
+    #[test]
+    fn test_unnamed_net_names_follow_kicad() {
+        let mut circuit = CircuitBuilder::<()>::new();
+        let r: Vec<_> = (0..10).map(|_| circuit.instantiate_part(Box::new(Resistor("1k")))).collect();
+        let named = |names: [&str; 2]| {
+            let pin = |pad: &str, name| (pad.to_string(), KicadPinInfo::new(pad, Some(name), PinType::Passive));
+            let pins = BTreeMap::from([pin("1", names[0]), pin("2", names[1])]);
+            CustomPart {
+                kicad: Some(KicadPartInfo { pins, ..CustomPart::valid().kicad.unwrap() }),
+                ..CustomPart::valid()
+            }
+        };
+        let x1 = circuit.instantiate_part(Box::new(named(["1", "2"])));
+        let x2 = circuit.instantiate_part(Box::new(named(["A", "B"])));
+        circuit.connect(r[8]["1"], r[9]["1"]);
+        circuit.connect(r[0]["2"], x1["1"]);
+        circuit.connect(r[1]["2"], x2["1"]);
+        let netlist = circuit.build(&()).to_netlist().unwrap();
+        let name_of = |node: &str| {
+            summary(&netlist).into_iter().find(|(_, nodes)| nodes.iter().any(|n| n == node)).unwrap().0
+        };
+        // String order, not natural order (as KiCad does).
+        assert_eq!(name_of("R9.1"), "Net-(R10-Pad1)");
+        // A pin named as its pad number is written as the pad, like an unnamed pin.
+        assert_eq!(name_of("X1.1"), "Net-(R1-Pad2)");
+        // A named pin is preferred to unnamed ones.
+        assert_eq!(name_of("X2.1"), "Net-(X2-A)");
     }
 
     #[derive(Debug, Clone)]
@@ -510,7 +534,7 @@ mod tests {
         assert_eq!(
             summary(&netlist),
             expected(&[
-                ("Net-(U1-GND-Pad2)", &["U1.gnd_a", "U1.gnd_b", "U1.gnd_c"]),
+                ("Net-(U1-GND-Pad10)", &["U1.gnd_a", "U1.gnd_b", "U1.gnd_c"]),
                 ("unconnected-(U1-I{slash}O-Pad3)", &["U1.io"]),
                 ("unconnected-(U1-VCC-Pad1)", &["U1.vcc"]),
             ])

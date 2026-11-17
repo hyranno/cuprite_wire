@@ -192,9 +192,15 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
 | Unnamed | `Net-(R1-Pad2)`, `Net-(U1-+)` | `Net-(<ref>-<pin name or Pad<number>>)` |
 | Single unconnected pin | `unconnected-(U1-NC-Pad7)` | A net with only one pin |
 
+- For an unnamed net, Eeschema prefers a pin that is written by its name alone (`U1-OUT`) to one
+  written with `Pad<number>` (a pin without a name, named as its pad number, or whose name is
+  shared by several pins of the symbol), and among those takes the smallest net name in string
+  order. The pin type does not matter. (Observed with KiCad 9.0.2 using
+  `tools/compare_kicad_cli_netlist.py`.)
 - Characters such as `/` in net names are escaped by Eeschema (e.g. `/` -> `{slash}`).
   When this project uses arbitrary strings as names, follow the same `{slash}`-style escaping.
-- Eeschema sorts nets by name in natural order and assigns `code` from 1.
+- Eeschema sorts nets by name in natural order (case-sensitive: `/B` < `/_x` < `/a9` < `/a10` < `/b`)
+  and assigns `code` from 1.
   Nets containing only power-symbol (`#PWR`) pins are not emitted, so gaps in `code` may appear.
   pcbnew does not care about such gaps.
 - Nodes are sorted by `ref` (string order) then by pin number, with duplicates removed.
@@ -238,8 +244,9 @@ See `doc/kicad_netlist_usage.md` for how to use the exporter.
 - Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
 - Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so
   `tools/check_netlist_import.py` drives the import in the pcbnew GUI (File -> Import -> Netlist)
-  on a virtual X server. Footprint and pad existence is checked by `tools/check_netlist_footprints.py`. Reference output for comparison can be generated
-  with `kicad-cli` following `.claude/skills/kicad/SKILL.md`.
+  on a virtual X server. Footprint and pad existence is checked by `tools/check_netlist_footprints.py`.
+  `tools/compare_kicad_cli_netlist.py` compares the output with what `kicad-cli` exports for an
+  equivalent schematic.
 
 ## References
 

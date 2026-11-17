@@ -388,6 +388,115 @@ mod tests {
         check_golden("multi_pin_ic.net", &export(&circuit));
     }
 
+    /// Net names in mixed case, digits and symbols, to compare the order with KiCad's
+    /// (`tools/compare_kicad_cli_netlist.py`).
+    #[test]
+    fn test_golden_net_order() {
+        let mut circuit = CircuitBuilder::new();
+        let labels = [
+            NetLabel::local("ZZZ"),
+            NetLabel::local("first"),
+            NetLabel::local("a10"),
+            NetLabel::local("a9"),
+            NetLabel::local("b"),
+            NetLabel::local("B"),
+            NetLabel::local("_x"),
+            NetLabel::local("Z9"),
+            NetLabel::local("z10"),
+            NetLabel::global("vcc"),
+            NetLabel::global("GND"),
+            NetLabel::global("+3V3"),
+        ];
+        for label in labels {
+            let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+            circuit.label(r["1"], label);
+        }
+        check_golden("net_order.net", &export(&circuit));
+    }
+
+    /// Versions of one circuit, for checking how pcbnew links footprints when the circuit changes
+    /// (`tools/check_netlist_import.py --relink`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Revision {
+        Before,
+        /// A part with an explicit name is added before the others: references are renumbered.
+        NamedAdded,
+        /// A part with an automatic name is added before another one: the automatic names shift.
+        AutoInserted,
+    }
+
+    fn revised_circuit(revision: Revision) -> CircuitBuilder {
+        let mut circuit = CircuitBuilder::new();
+        let input = circuit.add_node();
+        circuit.label(input, NetLabel::local("IN"));
+        if revision == Revision::NamedAdded {
+            let r_in = circuit.instantiate_part_named("r_in", Box::new(Resistor("1k")));
+            circuit.connect(input, r_in["1"]);
+            let input = circuit.add_node();
+            circuit.connect(r_in["2"], input);
+        }
+        let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
+        let gnd = circuit.add_node();
+        circuit.label(gnd, NetLabel::global("GND"));
+        if revision == Revision::AutoInserted {
+            let r_new = circuit.instantiate_part(Box::new(Resistor("47k")));
+            circuit.connect(r_new["1"], r["2"]);
+            circuit.connect(r_new["2"], gnd);
+        }
+        let r_load = circuit.instantiate_part(Box::new(Resistor("22k")));
+        let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
+        circuit.connect(input, r["1"]);
+        circuit.connect(r["2"], c["1"]);
+        circuit.connect(c["1"], r_load["1"]);
+        circuit.label(c["1"], NetLabel::local("OUT"));
+        circuit.connect(c["2"], gnd);
+        circuit.connect(r_load["2"], gnd);
+        circuit
+    }
+
+    #[test]
+    fn test_golden_revisions() {
+        let before = export(&revised_circuit(Revision::Before));
+        let named_added = export(&revised_circuit(Revision::NamedAdded));
+        let auto_inserted = export(&revised_circuit(Revision::AutoInserted));
+        check_golden("revision_before.net", &before);
+        check_golden("revision_named_added.net", &named_added);
+        check_golden("revision_auto_inserted.net", &auto_inserted);
+
+        let by_uuid = |netlist: &KicadNetlist| -> BTreeMap<Uuid, (String, String)> {
+            netlist
+                .components
+                .iter()
+                .map(|c| (c.uuid, (c.ref_name.clone(), c.value.clone())))
+                .collect()
+        };
+        let before = by_uuid(&before);
+        let named_added = by_uuid(&named_added);
+        let auto_inserted = by_uuid(&auto_inserted);
+        let pairs = |map: &BTreeMap<Uuid, (String, String)>| -> Vec<(String, String)> {
+            before
+                .keys()
+                .map(|uuid| map.get(uuid).cloned().unwrap_or_default())
+                .collect()
+        };
+        // Before: R1 = r (10k), R2 = R#1 (22k), C1 = c.
+        let v = |r: &str, value: &str| (r.to_string(), value.to_string());
+        let mut expected = vec![v("C1", "100n"), v("R1", "10k"), v("R2", "22k")];
+        let mut actual: Vec<_> = before.values().cloned().collect();
+        actual.sort();
+        assert_eq!(actual, expected);
+        // Every part keeps its UUID, though R1 and R2 are renumbered to R2 and R3.
+        let mut actual = pairs(&named_added);
+        actual.sort();
+        expected = vec![v("C1", "100n"), v("R2", "10k"), v("R3", "22k")];
+        assert_eq!(actual, expected);
+        // The new part takes the automatic name R#1, and with it the UUID of the 22k resistor.
+        let mut actual = pairs(&auto_inserted);
+        actual.sort();
+        expected = vec![v("C1", "100n"), v("R1", "10k"), v("R2", "47k")];
+        assert_eq!(actual, expected);
+    }
+
     /// Instantiates a part and records the line of the caller.
     #[track_caller]
     fn add(circuit: &mut CircuitBuilder, part: impl crate::parts::Part + 'static, lines: &mut Vec<u32>) {
