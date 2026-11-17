@@ -371,6 +371,65 @@ mod tests {
         assert_eq!(netlist.to_string(), export(&circuit).to_string());
     }
 
+    /// Node 0: input, node 1: output (labeled "X" inside).
+    #[derive(Debug, Clone)]
+    struct Inner;
+    impl SubcircuitGenerator for Inner {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
+            let mut circuit = CircuitBuilder::new();
+            let input = circuit.add_node();
+            let output = circuit.add_node();
+            let r_a = circuit.instantiate_part_named("a", Box::new(Resistor("1k")));
+            let r_b = circuit.instantiate_part(Box::new(Resistor("2k")));
+            let c = circuit.instantiate_part(Box::new(Capacitor("1n")));
+            circuit.connect(input, r_a["1"]);
+            circuit.connect(r_a["2"], r_b["1"]);
+            circuit.connect(r_a["2"], c["1"]);
+            circuit.label(c["2"], NetLabel::global("VCC"));
+            circuit.connect(r_b["2"], output);
+            circuit.label(output, NetLabel::local("X"));
+            circuit
+        }
+    }
+
+    /// Node 0: input, node 1: output. Contains an `Inner`.
+    #[derive(Debug, Clone)]
+    struct Outer;
+    impl SubcircuitGenerator for Outer {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
+            let mut circuit = CircuitBuilder::new();
+            let input = circuit.add_node();
+            let output = circuit.add_node();
+            let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
+            let inner = circuit.instantiate_subcircuit_named("inner", Inner, &interface, |o: &()| *o);
+            let r_o = circuit.instantiate_part_named("o", Box::new(Resistor("3k")));
+            circuit.connect(input, inner[&NodeIndex::new(0)]);
+            circuit.connect(inner[&NodeIndex::new(1)], r_o["1"]);
+            circuit.connect(r_o["2"], output);
+            circuit
+        }
+    }
+
+    /// Nested subcircuits: nets inside a subcircuit, labels reaching up, and a net between
+    /// subcircuits without a name.
+    #[test]
+    fn test_golden_nested_hierarchy() {
+        let mut circuit = CircuitBuilder::new();
+        let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
+        let first = circuit.instantiate_subcircuit_named("outer", Outer, &interface, |o: &()| *o);
+        let second = circuit.instantiate_subcircuit(Outer, &interface, |o: &()| *o);
+        let r_root = circuit.instantiate_part_named("root", Box::new(Resistor("10k")));
+        circuit.label(r_root["1"], NetLabel::local("IN"));
+        circuit.connect(r_root["1"], first[&NodeIndex::new(0)]);
+        circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+        circuit.label(r_root["2"], NetLabel::global("VCC"));
+        check_golden("nested_hierarchy.net", &export(&circuit));
+    }
+
     #[test]
     fn test_golden_multi_pin_ic() {
         let mut circuit = CircuitBuilder::new();

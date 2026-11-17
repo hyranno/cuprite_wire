@@ -17,7 +17,8 @@ use crate::{
     trace::Trace,
 };
 
-/// A resolved netlist. Components are sorted by reference and nets by name (both in natural order).
+/// A resolved netlist. Components are grouped by subcircuit instance (in the order of [`sheet_order`])
+/// and sorted by reference in each, and nets are sorted by name (both in natural order).
 #[derive(Debug, Clone)]
 pub struct Netlist {
     pub components: Vec<Component>,
@@ -159,12 +160,17 @@ impl BuiltCircuit {
         )
     }
 
-    /// Components sorted by reference, after checking the parts,
+    /// Components in the order of the netlist, after checking the parts,
     /// and the component index of each part.
     fn sorted_components(&self, errors: &mut Vec<CircuitError>) -> (Vec<Component>, Vec<usize>) {
         let ref_names: Vec<_> = self.parts.iter().map(|part| part.ref_name()).collect();
+        let sheet_rank = sheet_order(self.parts.iter().map(|part| &part.path));
         let mut order: Vec<usize> = (0..self.parts.len()).collect();
-        order.sort_by(|&a, &b| natural_cmp(&ref_names[a], &ref_names[b]));
+        order.sort_by(|&a, &b| {
+            sheet_rank[&self.parts[a].path]
+                .cmp(&sheet_rank[&self.parts[b].path])
+                .then_with(|| natural_cmp(&ref_names[a], &ref_names[b]))
+        });
         let mut component_of_part = vec![0; self.parts.len()];
         for (component, &part) in order.iter().enumerate() {
             component_of_part[part] = component;
@@ -183,16 +189,23 @@ impl BuiltCircuit {
             })
             .collect();
 
-        for (i, component) in components.iter().enumerate() {
-            let error = |kind| CircuitError::new(kind, component.trace.clone());
-            if i > 0 && components[i - 1].ref_name == component.ref_name {
+        let mut by_ref: Vec<&Component> = components.iter().collect();
+        by_ref.sort_by(|a, b| natural_cmp(&a.ref_name, &b.ref_name));
+        for pair in by_ref.windows(2) {
+            if pair[0].ref_name == pair[1].ref_name {
                 errors.push(
-                    error(CircuitErrorKind::DuplicateRef {
-                        ref_name: component.ref_name.clone(),
-                    })
-                    .with_note("the other part is instantiated here", components[i - 1].trace.clone()),
+                    CircuitError::new(
+                        CircuitErrorKind::DuplicateRef {
+                            ref_name: pair[1].ref_name.clone(),
+                        },
+                        pair[1].trace.clone(),
+                    )
+                    .with_note("the other part is instantiated here", pair[0].trace.clone()),
                 );
             }
+        }
+        for component in &components {
+            let error = |kind| CircuitError::new(kind, component.trace.clone());
             let pin_ids = component.part.pin_ids();
             let mut seen = HashSet::new();
             for pin_id in &pin_ids {
@@ -232,6 +245,19 @@ impl BuiltCircuit {
             })
             .collect()
     }
+}
+
+/// Ranks subcircuit instances (sheets) by their first part, given the paths of the parts in
+/// instantiation order. Parts are expanded depth-first, so the root comes first and each
+/// subcircuit instance is followed by the ones inside it, like the pages of a KiCad schematic.
+/// Eeschema writes components sheet by sheet in page order.
+fn sheet_order<'a>(paths: impl Iterator<Item = &'a HierPath>) -> HashMap<&'a HierPath, usize> {
+    let mut rank = HashMap::new();
+    for path in paths {
+        let next = rank.len();
+        rank.entry(path).or_insert(next);
+    }
+    rank
 }
 
 /// Picks the label naming a net: global labels first, then labels in shallower

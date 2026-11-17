@@ -204,6 +204,8 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
   Nets containing only power-symbol (`#PWR`) pins are not emitted, so gaps in `code` may appear.
   pcbnew does not care about such gaps.
 - Nodes are sorted by `ref` (string order) then by pin number, with duplicates removed.
+- Components are written sheet by sheet in page order, and by reference in natural order in each
+  sheet (a root `X1` comes before `C1` on page 2).
 
 ## 7. Minimal form
 
@@ -240,7 +242,9 @@ See `doc/kicad_netlist_usage.md` for how to use the exporter.
 - Generate UUIDs deterministically (UUID v5 from the hierarchical path and the instance names),
   so that they do not change between exports.
 - Name nets following section 6.1 (global / `/path/LOCAL` / `Net-(...)` / `unconnected-(...)`),
-  sort components and nets by natural order, and nodes by reference then pad in string order.
+  write components sheet by sheet (the root first, then each subcircuit instance followed by the
+  ones inside it, in instantiation order, like Eeschema's page order) sorted by reference in natural
+  order, sort nets by natural order, and nodes by reference then pad in string order.
 - Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
 - Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so
   `tools/check_netlist_import.py` drives the import in the pcbnew GUI (File -> Import -> Netlist)

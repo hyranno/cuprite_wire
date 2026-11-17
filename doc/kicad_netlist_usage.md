@@ -128,7 +128,9 @@ Reference designators (`R1`, `R2`, ...) are numbered in instantiation order over
 
 - `components`: `ref`, `value` (`~` if empty), `footprint`, `fields` (if any), `libsource` (if
   set), value-less `property` flags (`exclude_from_board`, `exclude_from_bom`, `dnp`), `sheetpath`
-  and `tstamps`. Components are sorted by reference in natural order (`R2` before `R10`).
+  and `tstamps`. Components are written subcircuit instance by subcircuit instance, as Eeschema writes them
+  sheet by sheet in page order: the root first, then each instance followed by the ones inside it,
+  in instantiation order. In each, they are sorted by reference in natural order (`R2` before `R10`).
 - `nets`: `code` (from 1), `name`, `class` (`"Default"`), and `node`s with `ref`, `pin`,
   `pinfunction` (if the pin has a name) and `pintype`. Nets are sorted by name in natural order
   (case-sensitive); nodes by reference and then pad, both in string order (as KiCad does).
@@ -207,4 +209,7 @@ Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in 
   name), exports it with `kicad-cli sch export netlist`, and prints the differences in element
   order, quoting, omission rules and net names. What cuprite_wire intentionally omits (`libparts`,
   the `Footprint`/`Datasheet`/`Description` fields, properties repeating fields, ...) is ignored.
-  Only flat netlists (every component on the root sheet) are supported.
+  Each subcircuit instance becomes a sheet; local nets reaching other sheets are connected through
+  hierarchical labels. Two cases are not checked: an unnamed net crossing sheets (Eeschema needs a
+  label to connect sheets, so it is connected by global labels named after it), and the choice
+  among several labels of one net (only the label that named the net is in the netlist).
