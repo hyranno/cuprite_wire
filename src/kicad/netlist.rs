@@ -254,10 +254,7 @@ impl KicadNet {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::{BTreeMap, HashSet},
-        path::Path,
-    };
+    use std::collections::{BTreeMap, HashSet};
 
     use petgraph::graph::NodeIndex;
 
@@ -267,39 +264,18 @@ mod tests {
         kicad::{KicadPinInfo, PinType},
         naming::NetLabel,
         subcircuit::SubcircuitGenerator,
-        test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor, SpiceSource},
+        spice::IndependentSource,
+        test_parts::{self, Capacitor, CustomPart, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
     };
 
-    /// Compares the output with `tests/golden/<name>`.
-    /// Run the tests with `UPDATE_GOLDEN=1` to (re)generate the files.
     fn check_golden(name: &str, netlist: &KicadNetlist) {
         let mut actual = Vec::new();
         netlist.write(&mut actual).unwrap();
-        let actual = String::from_utf8(actual).unwrap();
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
-        if std::env::var_os("UPDATE_GOLDEN").is_some() {
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, &actual).unwrap();
-            return;
-        }
-        let expected = std::fs::read_to_string(&path)
-            .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
-        assert_eq!(actual, expected, "output differs from {}", path.display());
+        test_parts::check_golden(name, &String::from_utf8(actual).unwrap());
     }
 
     fn export(circuit: &CircuitBuilder) -> KicadNetlist {
         circuit.build(&()).to_netlist().unwrap().to_kicad().unwrap()
-    }
-
-    fn rc_filter() -> CircuitBuilder {
-        let mut circuit = CircuitBuilder::new();
-        let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
-        let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
-        circuit.label(r["1"], NetLabel::local("IN"));
-        circuit.connect(r["2"], c["1"]);
-        circuit.label(c["1"], NetLabel::local("OUT"));
-        circuit.label(c["2"], NetLabel::global("GND"));
-        circuit
     }
 
     #[test]
@@ -314,27 +290,6 @@ mod tests {
     fn test_first_line_is_recognized_by_pcbnew() {
         let text = export(&rc_filter()).to_string();
         assert!(text.lines().next().unwrap().starts_with("(export (version \"E\")"));
-    }
-
-    /// An RC low-pass stage. Node 0: input, node 1: output.
-    #[derive(Debug, Clone)]
-    struct RcStage;
-    impl SubcircuitGenerator for RcStage {
-        type Options = ();
-
-        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
-            let mut circuit = CircuitBuilder::new();
-            let input = circuit.add_node();
-            let output = circuit.add_node();
-            let r = circuit.instantiate_part(Box::new(Resistor("1k")));
-            let c = circuit.instantiate_part(Box::new(Capacitor("1u")));
-            circuit.connect(input, r["1"]);
-            circuit.connect(r["2"], output);
-            circuit.connect(output, c["1"]);
-            circuit.label(output, NetLabel::local("OUT"));
-            circuit.label(c["2"], NetLabel::global("GND"));
-            circuit
-        }
     }
 
     #[test]
@@ -575,7 +530,7 @@ mod tests {
         let mut duplicate_pad = valid().kicad.unwrap();
         duplicate_pad.pins.get_mut("2").unwrap().pad = "1".into();
 
-        add(&mut circuit, SpiceSource, &mut lines);
+        add(&mut circuit, *IndependentSource::voltage(5.0), &mut lines);
         add(&mut circuit, CustomPart { kicad: Some(no_footprint), ..valid() }, &mut lines);
         add(&mut circuit, CustomPart { pin_ids: vec!["1", "2", "3"], ..valid() }, &mut lines);
         add(&mut circuit, CustomPart { pin_ids: vec!["1"], ..valid() }, &mut lines);

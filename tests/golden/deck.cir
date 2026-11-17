@@ -1,0 +1,14 @@
+.title deck
+C1 /OUT 0 100n
+R1 /IN /OUT 10k
+V1 /IN 0 DC 1
+.options reltol=1e-4
+.control
+set filetype=ascii
+set wr_singlescale
+set wr_vecnames
+op
+print all
+quit
+.endc
+.end

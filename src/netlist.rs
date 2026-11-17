@@ -344,7 +344,8 @@ mod tests {
         circuit::CircuitBuilder,
         kicad::{KicadPinInfo, PinType},
         subcircuit::SubcircuitGenerator,
-        test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor, SpiceSource},
+        spice::IndependentSource,
+        test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor},
     };
 
     fn summary(netlist: &Netlist) -> Vec<(String, Vec<String>)> {
@@ -509,11 +510,11 @@ mod tests {
     #[test]
     fn test_parts_without_kicad_info_use_pin_ids() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let v = circuit.instantiate_part(Box::new(SpiceSource));
+        let v = circuit.instantiate_part(IndependentSource::voltage(5.0));
         let r = circuit.instantiate_part(Box::new(Resistor("1k")));
         circuit.connect(v["p"], r["1"]);
         circuit.connect(v["n"], r["2"]);
-        let v2 = circuit.instantiate_part(Box::new(SpiceSource));
+        let v2 = circuit.instantiate_part(IndependentSource::voltage(5.0));
         circuit.connect(v2["p"], v2["n"]);
         let netlist = circuit.build(&()).to_netlist().unwrap();
         assert_eq!(

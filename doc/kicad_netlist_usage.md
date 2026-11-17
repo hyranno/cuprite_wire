@@ -62,6 +62,8 @@ Parts supporting different formats may be mixed in one circuit (e.g. a simulatio
 source next to a connector that has no SPICE model). Only exporting such a circuit to the
 unsupported format is an error: a part whose `kicad()` returns `None` makes `to_kicad()` fail with
 `KicadUnsupported`. There is currently no option to skip unsupported parts.
+For SPICE, parts that should not be simulated are excluded explicitly instead
+(`SpicePartInfo::Excluded`, see `doc/spice_netlist_usage.md`).
 
 ## 3. Describing circuits
 

@@ -1,0 +1,13 @@
+.title kicad_pair
+.subckt ideal_opamp inp inn vdd vss out
+E1 out 0 inp inn 100k
+.ends ideal_opamp
+R1 /I/O Net-_R1-Pad2_ 100
+R2 Net-_R1-Pad2_ Net-_R2-Pad2_ 220
+R3 /a_b__c unconnected-_R3-Pad2_ 1Meg
+XU1 /RcStage#1/OUT /a_b__c +5V 0 /a_b__c ideal_opamp
+C1 /stage1/OUT 0 1u
+R4 Net-_R2-Pad2_ /stage1/OUT 1k
+C2 /RcStage#1/OUT 0 1u
+R5 /stage1/OUT /RcStage#1/OUT 1k
+.end

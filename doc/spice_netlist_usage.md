@@ -1,0 +1,155 @@
+# Exporting a SPICE Netlist and Simulating
+
+This document explains how to export a circuit described with cuprite_wire as a SPICE netlist and
+simulate it with ngspice from Rust. See `doc/spice_netlist_format.md` for the SPICE format and
+`doc/kicad_netlist_usage.md` for describing circuits (parts, labels, subcircuits, errors), which
+works the same way for both formats.
+A complete example is in `examples/spice_rc_filter.rs` (`cargo run --example spice_rc_filter`).
+
+## 1. Pipeline
+
+```rust
+let netlist = bench               // CircuitBuilder: the test bench (section 3)
+    .build(&options)
+    .to_netlist()?                // Netlist: the same as for KiCad
+    .to_spice()?                  // SpiceNetlist: SPICE information resolved and checked
+    .with_title("rc_filter");     // optional title line (default: "cuprite_wire")
+let out = netlist.node("/OUT").unwrap().to_string();   // SPICE node name of a net
+let simulation = netlist
+    .deck()                       // SpiceDeck: the netlist with analyses
+    .directive(".options reltol=1e-4")
+    .control(["ac dec 20 1 100k".to_string(), format!(r#"meas ac f3db WHEN vdb("{out}")=-3"#)])
+    .run()?;                      // runs ngspice (section 5)
+let f3db = simulation.value("f3db");
+```
+
+- `to_spice()` returns `Err(CircuitErrors)` with **all** errors found, like `to_kicad()`.
+- The output is deterministic. `SpiceNetlist` and `SpiceDeck` implement `Display`;
+  `SpiceNetlist::write` writes the netlist alone (title, models, elements, `.end`).
+
+## 2. Defining parts
+
+`Part::spice()` returns `Option<SpicePartInfo>`; `None` (the default) means that the part cannot be
+simulated, and exporting a circuit containing it fails with `SpiceUnsupported`.
+
+```rust
+fn spice(&self) -> Option<SpicePartInfo> {
+    // Resistor: R<ref> <pin 1> <pin 2> 10k
+    Some(SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], "10k")))
+}
+
+fn spice(&self) -> Option<SpicePartInfo> {
+    // Op-amp with a subcircuit model: XU1 <in_p> <in_n> <vdd> <vss> <out> AD8051
+    let element = SpiceElement::new('X', ["in_p", "in_n", "vdd", "vss", "out"], "AD8051")
+        .with_model(ModelSource::include(concat!(env!("CARGO_MANIFEST_DIR"), "/models/ad8051.lib")));
+    Some(SpicePartInfo::element(element).with_unused_pins(["nc"]))
+}
+
+fn spice(&self) -> Option<SpicePartInfo> {
+    // A connector: not simulated, but its pins still name the nets.
+    Some(SpicePartInfo::Excluded)
+}
+```
+
+- `SpiceElement::new(device, nodes, args)` is the counterpart of KiCad's `Sim.*` fields:
+  - `device`: the SPICE device letter (`R C L V I D Q M J X B E F G H ...`), which selects the
+    element type and must match the model, whatever the reference prefix is.
+  - `nodes`: pin IDs of the part **in the order of the model's nodes** (`Sim.Pins`).
+  - `args`: everything after the nodes: value, model or subcircuit name, parameters.
+    `;` and `$` (comments) and line breaks are rejected, so values like `100uF;16V` are caught.
+  - `with_model`: `ModelSource::include(path)` for a model library (`.include`, absolute paths only,
+    since ngspice resolves relative paths against its working directory), or
+    `ModelSource::inline(name, text)` for a `.model`/`.subckt` written into the deck. Inline models
+    are deduplicated by name (case-insensitively); different definitions with one name are an error.
+- **Every pin must be used**: by an element, or connected inside the part (`internal_connections()`)
+  to a pin that is. Pins intentionally left out of the model are listed with `with_unused_pins`;
+  others are reported as `SpicePinUnmapped`, which catches mistakes in the pin mapping.
+- A part may have **several elements** (`SpicePartInfo::elements`), e.g. the units of a dual op-amp.
+  Each gets a distinct suffix (`with_suffix("A")` -> `XU1A`). Use a `.subckt` for a model with
+  internal nodes.
+- `SpicePartInfo::check` checks the information against the part's pins without building a circuit.
+
+## 3. Test benches and simulation-only parts
+
+Analyses and stimuli belong to the test, not to the circuit:
+
+- Put the circuit under test in a **test bench circuit** as a subcircuit (or build it directly in
+  the bench), and add simulation-only parts from `cuprite_wire::spice`:
+  - `IndependentSource::voltage(dc)` / `IndependentSource::current(dc)` with pins `p` and `n`,
+    `.with_ac(magnitude)` and `.with_waveform(Waveform::sin(..) | Waveform::Pulse { .. } | Waveform::Pwl(..))`.
+  - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` is the vector `i(VM1)`.
+
+  These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
+  under test still can.
+- Add analyses to a `SpiceDeck`: `directive(...)` for dot lines (`.options`, `.ic`, `.tran`) and
+  `control([...])` for ngspice front-end commands. The `.control` block starts with
+  `set filetype=ascii`, `set wr_singlescale` and `set wr_vecnames` and ends with `quit`.
+
+## 4. Node names and ground
+
+SPICE node names are the net names of the netlist (`doc/kicad_netlist_usage.md`, "Net names"),
+converted as KiCad does, so that the deck can be compared with KiCad's own export:
+
+| Net | Node |
+|---|---|
+| `/OUT`, `/stage1/OUT`, `/RcStage#1/OUT` | unchanged |
+| `/amp/I{slash}O` | `/amp/I/O` (escapes undone) |
+| `Net-(R1-Pad2)`, `unconnected-(U1-NC-Pad7)`, `/a(b) c` | `Net-_R1-Pad2_`, `unconnected-_U1-NC-Pad7_`, `/a_b__c` (`% ( ) , [ ] < > ~` and whitespace -> `_`) |
+| `GND` (any case), `0` | `0` (the ground) |
+
+`SpiceNetlist::node(net_name)` returns the node name. In front-end commands quote names containing
+`/` or `-`: `v("/OUT")`.
+
+Errors specific to SPICE (each with the trace of the part or the label):
+
+| Error (`CircuitErrorKind`) | Cause |
+|---|---|
+| `SpiceUnsupported` | `spice()` returns `None` |
+| `InvalidSpiceElement` | invalid device letter, suffix or arguments, relative include path, empty model, no elements, duplicate suffixes |
+| `UnknownPinId` | an element or `unused_pins` refers to a pin the part does not have |
+| `SpicePinUnmapped` | a pin is not used by the model (section 2) |
+| `InvalidSpiceNodeName` | a node name ngspice cannot read: non-ASCII characters (ngspice replaces them, which can merge nets), `= { } ' " ;`, or a leading `$` |
+| `SpiceNodeCollision` | two nets give the same node name ignoring case (ngspice would merge them silently), e.g. `/A` and `/a`, or `GND` and `0` |
+| `SpiceElementCollision` | two element names differ only in case |
+| `SpiceModelConflict` | two parts define an inline model with the same name differently |
+| `GroundMissing` | no net named `GND` or `0` is used by an element |
+
+## 5. Running ngspice
+
+`SpiceDeck::run()` writes the deck to a new directory under the system temporary directory
+(`$TMPDIR`), runs ngspice there and returns a `Simulation`:
+
+- `table("ac.txt")` reads a `wrdata` file: `names()`, `scale()`, `column(name)` and
+  `interpolate(name, x)`. Column names are matched case-insensitively and ignoring double quotes
+  (ngspice writes `v("/OUT")` as `v(/OUT)` but keeps the quotes of `vdb("/OUT")`). Write complex
+  AC vectors through `vdb()`, `vm()`, `vp()`, `real()` or `imag()`.
+- `value("f3db")` finds a value printed as `name = value` (by `meas`, or `print` of a `let` vector).
+- `log()` is ngspice's output.
+
+The run fails with `SimulationError::Ngspice` (the log and the kept run directory) if ngspice exits
+with an error or prints a line starting with `Error`. Otherwise the directory is removed when the
+`Simulation` is dropped.
+
+How ngspice is run is chosen by the environment variable `CUPRITE_WIRE_NGSPICE`:
+
+- (default) through the shared library `libngspice` with `python3 -I tools/ngspice_run.py`.
+  The ngspice CLI copies its input with `tmpfile()`, which always writes to `/tmp`, so it does not
+  work where `/tmp` is read-only, such as the Claude Code sandbox.
+- `cli`: `ngspice -b deck.cir`.
+
+The devcontainer provides `ngspice`, `libngspice0` and `python3`; the simulation tests in
+`src/spice/tests.rs` need them.
+
+## 6. Verifying the output
+
+- **Golden tests**: `tests/golden/*.cir`, regenerated with `UPDATE_GOLDEN=1 cargo test`.
+- **Simulation tests**: `src/spice/tests.rs` checks analyses against hand-calculated results
+  (RC corner frequency and time constant, a divider with an ammeter, an amplifier with a subcircuit model).
+- **Comparison with KiCad's SPICE export**:
+  `python3 tools/compare_kicad_cli_netlist.py --spice NETLIST.net...` takes a KiCad netlist and the
+  SPICE deck of the same circuit (`NETLIST.cir`), synthesizes the equivalent schematic as for the
+  `.net` comparison, adds Sim.* fields from the deck (`Sim.Pins` maps the pads to the element's
+  nodes by their nets), exports it with `kicad-cli sch export netlist --format spice`, and compares
+  the element lines. KiCad writes the ground as `GND` (mapped to `0` for the comparison) and orders
+  elements differently (reported, not a difference). Only `R`, `C`, `L` and `X` elements with an
+  inline `.subckt` are supported. `tests/golden/kicad_pair.net` / `kicad_pair.cir` is such a pair.

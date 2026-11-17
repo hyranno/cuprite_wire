@@ -1,12 +1,63 @@
-//! Parts shared by the unit tests.
+//! Parts, circuits and helpers shared by the unit tests.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::{
+    circuit::CircuitBuilder,
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
+    naming::NetLabel,
     parts::Part,
-    spice::SpicePartInfo,
+    spice::{ModelSource, SpiceElement, SpicePartInfo},
+    subcircuit::SubcircuitGenerator,
 };
+
+/// Compares `actual` with `tests/golden/<name>`.
+/// Run the tests with `UPDATE_GOLDEN=1` to (re)generate the files.
+pub fn check_golden(name: &str, actual: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
+    assert_eq!(actual, expected, "output differs from {}", path.display());
+}
+
+/// A 10k / 100n RC low-pass filter between the local nets `IN` and `OUT`, with `GND`.
+pub fn rc_filter() -> CircuitBuilder {
+    let mut circuit = CircuitBuilder::new();
+    let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
+    let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
+    circuit.label(r["1"], NetLabel::local("IN"));
+    circuit.connect(r["2"], c["1"]);
+    circuit.label(c["1"], NetLabel::local("OUT"));
+    circuit.label(c["2"], NetLabel::global("GND"));
+    circuit
+}
+
+/// A 1k / 1u RC low-pass stage. Node 0: input, node 1: output (labeled `OUT` inside).
+#[derive(Debug, Clone)]
+pub struct RcStage;
+
+impl SubcircuitGenerator for RcStage {
+    type Options = ();
+
+    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
+        let mut circuit = CircuitBuilder::new();
+        let input = circuit.add_node();
+        let output = circuit.add_node();
+        let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+        let c = circuit.instantiate_part(Box::new(Capacitor("1u")));
+        circuit.connect(input, r["1"]);
+        circuit.connect(r["2"], output);
+        circuit.connect(output, c["1"]);
+        circuit.label(output, NetLabel::local("OUT"));
+        circuit.label(c["2"], NetLabel::global("GND"));
+        circuit
+    }
+}
 
 fn lib_id(s: &str) -> LibId {
     s.parse().unwrap()
@@ -41,7 +92,7 @@ impl Part for Resistor {
         Some(two_pin_kicad_info("Resistor_SMD:R_0603_1608Metric", "Device:R"))
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        Some(SpicePartInfo {})
+        Some(SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], self.0)))
     }
 }
 
@@ -62,7 +113,7 @@ impl Part for Capacitor {
         Some(two_pin_kicad_info("Capacitor_SMD:C_0603_1608Metric", "Device:C"))
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        Some(SpicePartInfo {})
+        Some(SpicePartInfo::element(SpiceElement::new('C', ["1", "2"], self.0)))
     }
 }
 
@@ -97,7 +148,20 @@ impl Part for OpAmp {
             ..Default::default()
         })
     }
+    /// An ideal amplifier with a gain of 100k (the supply pins are only connected to the model).
+    fn spice(&self) -> Option<SpicePartInfo> {
+        Some(SpicePartInfo::element(
+            SpiceElement::new('X', ["in_p", "in_n", "vdd", "vss", "out"], "ideal_opamp")
+                .with_model(ModelSource::inline("ideal_opamp", IDEAL_OPAMP)),
+        ))
+    }
 }
+
+pub const IDEAL_OPAMP: &str = "\
+.subckt ideal_opamp inp inn vdd vss out
+E1 out 0 inp inn 100k
+.ends ideal_opamp
+";
 
 /// An IC with three GND pads connected inside, and a pad with a name containing `/`.
 #[derive(Debug, Clone)]
@@ -135,47 +199,32 @@ impl Part for MultiGndIc {
     }
 }
 
-/// A simulation-only voltage source without KiCad information.
-#[derive(Debug, Clone)]
-pub struct SpiceSource;
-
-impl Part for SpiceSource {
-    fn get_ref_base_name(&self) -> String {
-        "V".into()
-    }
-    fn pin_ids(&self) -> Vec<String> {
-        vec!["p".into(), "n".into()]
-    }
-    fn value(&self) -> String {
-        "DC 5".into()
-    }
-    fn spice(&self) -> Option<SpicePartInfo> {
-        Some(SpicePartInfo {})
-    }
-}
-
 /// A part whose information is given directly, for testing invalid definitions.
 #[derive(Debug, Clone)]
 pub struct CustomPart {
+    pub ref_base_name: &'static str,
     pub pin_ids: Vec<&'static str>,
     pub internal_connections: Vec<Vec<&'static str>>,
     pub kicad: Option<KicadPartInfo>,
+    pub spice: Option<SpicePartInfo>,
 }
 
 impl CustomPart {
     /// A two-pin part with valid KiCad information.
     pub fn valid() -> Self {
         CustomPart {
+            ref_base_name: "X",
             pin_ids: vec!["1", "2"],
             internal_connections: vec![],
             kicad: Some(two_pin_kicad_info("Custom:Footprint", "Custom:Symbol")),
+            spice: Some(SpicePartInfo::element(SpiceElement::new('X', ["1", "2"], "custom"))),
         }
     }
 }
 
 impl Part for CustomPart {
     fn get_ref_base_name(&self) -> String {
-        "X".into()
+        self.ref_base_name.into()
     }
     fn pin_ids(&self) -> Vec<String> {
         self.pin_ids.iter().map(|s| s.to_string()).collect()
@@ -191,5 +240,8 @@ impl Part for CustomPart {
     }
     fn kicad(&self) -> Option<KicadPartInfo> {
         self.kicad.clone()
+    }
+    fn spice(&self) -> Option<SpicePartInfo> {
+        self.spice.clone()
     }
 }

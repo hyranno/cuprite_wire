@@ -1,0 +1,7 @@
+.title cuprite_wire
+V1 /IN 0 DC 1
+C1 /stage1/OUT 0 1u
+R1 /IN /stage1/OUT 1k
+C2 /RcStage#1/OUT 0 1u
+R2 /stage1/OUT /RcStage#1/OUT 1k
+.end

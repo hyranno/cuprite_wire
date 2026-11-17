@@ -86,6 +86,22 @@ pub enum CircuitErrorKind {
     PinInfoMissing { ref_name: String, pin_id: String },
     /// Two pins of a part are assigned to the same pad.
     DuplicatePad { ref_name: String, pad: String },
+    /// The part has no SPICE information.
+    SpiceUnsupported { ref_name: String },
+    /// An element of the part cannot be written to a SPICE netlist.
+    InvalidSpiceElement { ref_name: String, reason: String },
+    /// A pin of the part is not used by its SPICE model and not declared unused.
+    SpicePinUnmapped { ref_name: String, pin_id: String },
+    /// The name of a net cannot be used as a SPICE node name.
+    InvalidSpiceNodeName { name: String, reason: String },
+    /// Two nets get the same SPICE node name (SPICE names are case-insensitive).
+    SpiceNodeCollision { name: String, other: String, node: String },
+    /// Two elements get the same name, ignoring case.
+    SpiceElementCollision { name: String, other: String },
+    /// Parts define a SPICE model with the same name differently.
+    SpiceModelConflict { name: String },
+    /// No net is the ground of the SPICE netlist.
+    GroundMissing,
 }
 
 impl fmt::Display for CircuitErrorKind {
@@ -120,6 +136,32 @@ impl fmt::Display for CircuitErrorKind {
             }
             CircuitErrorKind::DuplicatePad { ref_name, pad } => {
                 write!(f, "{ref_name}: pad {pad:?} is assigned to more than one pin")
+            }
+            CircuitErrorKind::SpiceUnsupported { ref_name } => {
+                write!(f, "{ref_name}: the part cannot be exported to SPICE")
+            }
+            CircuitErrorKind::InvalidSpiceElement { ref_name, reason } => {
+                write!(f, "{ref_name}: {reason}")
+            }
+            CircuitErrorKind::SpicePinUnmapped { ref_name, pin_id } => write!(
+                f,
+                "{ref_name}: pin ID {pin_id:?} is not used by the SPICE model (declare it in `unused_pins` if intended)"
+            ),
+            CircuitErrorKind::InvalidSpiceNodeName { name, reason } => {
+                write!(f, "net {name:?} cannot be a SPICE node: {reason}")
+            }
+            CircuitErrorKind::SpiceNodeCollision { name, other, node } => write!(
+                f,
+                "nets {name:?} and {other:?} would be merged into SPICE node {node:?} (SPICE names are case-insensitive)"
+            ),
+            CircuitErrorKind::SpiceElementCollision { name, other } => {
+                write!(f, "SPICE element names {name:?} and {other:?} differ only in case")
+            }
+            CircuitErrorKind::SpiceModelConflict { name } => {
+                write!(f, "SPICE model {name:?} is defined differently by more than one part")
+            }
+            CircuitErrorKind::GroundMissing => {
+                write!(f, "no ground net for SPICE: name a net \"GND\" or \"0\"")
             }
         }
     }

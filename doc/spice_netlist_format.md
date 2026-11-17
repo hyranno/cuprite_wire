@@ -142,12 +142,21 @@ the `F` after the suffix is ignored), but cuprite_wire should emit clean numeric
   - The characters `% ( ) , [ ] < > ~` and space are replaced by `_`
     (so `Net-(R1-Pad2)` becomes `Net-_R1-Pad2_`, `Net-(U1-+)` becomes `Net-_U1-+_`).
   - A name starting with `//` is rewritten to start with `/root/`, since `//` opens a comment.
-  - An unconnected pin with no net name gets `NC-<n>` (n counts from 1).
+  - An unconnected pin with no net name gets `NC-<n>` (n counts from 1). Pins in the `.net` always
+    have a net (`unconnected-(R3-Pad2)` for a single pin), and KiCad 9.0.2 writes those as
+    `unconnected-_R3-Pad2_` (observed with `tools/compare_kicad_cli_netlist.py --spice`).
 - Characters that must not appear in a node name, found by testing ngspice 44.2:
   - `,` — it is a separator (`c,d` is read as two tokens).
   - `=` — it is parsed as a parameter assignment (`x=y` gives `Undefined parameter [y]`).
   - `(` `)` — confuse the parser in many contexts.
-  - whitespace, and a leading `*`, `+`, `$`, `;` or `//`.
+  - `{` `}` `'` — expression delimiters: the deck fails to load.
+  - `"` — the name is split at it.
+  - `;` anywhere — starts an inline comment, the rest of the line is lost.
+  - whitespace, a leading `$` (after whitespace it starts a comment), and a leading `//`.
+  - Non-ASCII characters are replaced (`/é` becomes `/__`), so different names can be merged.
+
+  A leading `*` or `+` only matters at the start of a line, so `+5V` and `*a` work as nodes.
+  `#` `:` `@` `.` `!` `&` `|` `\` `?` and a `$` inside a name also work.
   Hierarchical names with `/` and `-` (`/amp/in`, `Net-_U1-+_`) work as element nodes.
 - Because ngspice is case-insensitive, two different net names that differ only in case
   are **silently merged** into one node. cuprite_wire should reject such pairs (or make names unique).
@@ -251,27 +260,32 @@ C1 /out 0 1u
 .end
 ```
 
-## 8. Output policy for cuprite_wire (draft)
+## 8. Output policy for cuprite_wire
 
-- Write: a title line, `.include` lines for the model files of the parts used,
-  the element lines, and `.end`. Analyses and `.control` blocks are supplied by the test, not by the circuit.
-- Separate the netlist body from the test bench so that the same circuit can be simulated
-  with different analyses and stimuli, and can also be exported as a `.subckt`.
-- Element names: SPICE device letter + reference, prepending the letter only when the reference
-  does not already start with it (same rule as KiCad).
-- Node names: reuse the net names of the `.net` output, converted by KiCad's rule (section 4),
-  so that results can be cross-checked against KiCad's export of an equivalent schematic.
-  Reject names that collide case-insensitively or after conversion.
-- Ground: emit the ground net as `0` (or `GND`); require it to exist.
-- Each part definition carries its SPICE description: device letter or subcircuit name,
-  model file, model name, parameters, and the part pin -> SPICE node order mapping
-  (the counterpart of `Sim.Device` / `Sim.Library` / `Sim.Name` / `Sim.Params` / `Sim.Pins`).
-  Parts without a SPICE description (connectors, mechanical parts, ...) must either be excluded
-  explicitly (like `exclude_from_sim`) or cause an error.
-- Write `.include` paths as absolute paths, or run ngspice with the working directory set to the model directory.
-- Emit clean numeric values (`100u`, not `100uF;16V`).
+Implemented in `src/spice/` (usage: `doc/spice_netlist_usage.md`).
+
+- The netlist has a title line, `.include` lines (absolute paths, sorted), inline `.model`/`.subckt`
+  definitions (sorted by name), the element lines, and `.end`. Analyses and `.control` blocks are
+  supplied by the test (`SpiceDeck`), not by the circuit, so the same circuit can be simulated with
+  different analyses and stimuli. Stimuli are simulation-only parts in a test bench circuit.
+- Elements follow the component order of the netlist (subcircuit instance by instance, then by
+  reference). KiCad uses the schematic order; ngspice does not care.
+- Element names: SPICE device letter + reference (+ a suffix for parts with several elements),
+  prepending the letter only when the reference does not already start with it (same rule as KiCad).
+- Node names: the net names of the `.net` output, converted by KiCad's rule (section 4), so that
+  the output can be cross-checked against KiCad's export of an equivalent schematic
+  (`tools/compare_kicad_cli_netlist.py --spice`). Names ngspice cannot read and names that collide
+  case-insensitively are errors.
+- Ground: a net named `GND` (any case) or `0` is written as `0`; a netlist without one is an error.
+- Each part carries its SPICE description (`SpicePartInfo`): device letter, nodes in model order
+  (part pin IDs), arguments, and model files or inline definitions -- the counterpart of
+  `Sim.Device` / `Sim.Library` / `Sim.Name` / `Sim.Params` / `Sim.Pins`. Parts without one are an
+  error; parts not to be simulated (connectors, mechanical parts, ...) are excluded explicitly
+  (`SpicePartInfo::Excluded`, like `exclude_from_sim`). Every pin must be used by the model or
+  declared unused.
+- Arguments with `;` or `$` are rejected, so values are clean (`100u`, not `100uF;16V`).
 - Running: `ngspice -b -o sim.log deck.cir` from a shell. Inside the Claude sandbox use
-  `.claude/skills/spice/scripts/ngspice_run.py` (see `.claude/skills/spice/SKILL.md`).
+  `tools/ngspice_run.py` (see `.claude/skills/spice/SKILL.md`); `SpiceDeck::run` uses it by default.
 
 ## References
 
