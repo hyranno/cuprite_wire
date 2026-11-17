@@ -7,14 +7,16 @@ description: Run and inspect SPICE simulations with ngspice in batch mode, and u
 
 ngspice 44.2 is the simulator KiCad uses (apt packages `ngspice` and `libngspice0`).
 
-## Running inside the Claude sandbox: use `scripts/ngspice_run.py`
+## Running inside the Claude sandbox: use `tools/ngspice_run.py`
 
 The `ngspice` CLI does **not** work in the bash sandbox: `-b` and `-p` copy the input
 with glibc `tmpfile()`, which always writes to `/tmp` (ignores `$TMPDIR`) and fails with
-`tmpfile(): Read-only file system`. Run decks through the shared library instead:
+`tmpfile(): Read-only file system` (so do `-i` with `source` on stdin, and a bare deck argument).
+Run decks through the shared library instead. The script lives in the repository's `tools/`
+because the Rust simulation tests use it too (`src/spice/simulation.rs`):
 
 ```bash
-R=/workspace/.claude/skills/spice/scripts/ngspice_run.py
+R=/workspace/tools/ngspice_run.py
 cd $TMPDIR                                     # relative output paths (wrdata) land here
 python3 -I $R /path/circuit.cir -o sim.log     # deck with a .control block
 python3 -I $R /path/kicad_export.cir -c run -c "print all"   # deck without .control
