@@ -1,0 +1,9 @@
+.title cuprite_wire
+.include "/opt/models/unused.lib"
+.subckt ideal_opamp inp inn vdd vss out
+E1 out 0 inp inn 100k
+.ends ideal_opamp
+XU1A /IN Net-_U1-in_n_a_ +5V 0 Net-_U1-in_n_a_ ideal_opamp
+XU1B Net-_U1-in_n_a_ Net-_U2-+_ +5V 0 Net-_U2-+_ ideal_opamp
+XU2 Net-_U2-+_ /OUT +5V 0 /OUT ideal_opamp
+.end

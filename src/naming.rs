@@ -17,6 +17,11 @@ pub fn escape_name(name: &str) -> String {
     name.replace('/', "{slash}")
 }
 
+/// Reverses [`escape_name`].
+pub fn unescape_name(name: &str) -> String {
+    name.replace("{slash}", "/")
+}
+
 /// Path of subcircuit instance names from the root, e.g. `["amp_left", "stage#1"]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct HierPath(pub Vec<String>);
@@ -226,6 +231,7 @@ mod tests {
         assert_eq!(label(NetLabel::global("+3V3"), &["a"]).net_name(), "+3V3");
         assert_eq!(label(NetLabel::local("OUT"), &[]).net_name(), "/OUT");
         assert_eq!(label(NetLabel::local("I/O"), &["amp"]).net_name(), "/amp/I{slash}O");
+        assert_eq!(unescape_name("/amp/I{slash}O"), "/amp/I/O");
     }
 
     #[test]
