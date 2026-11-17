@@ -7,3 +7,4 @@ edition = "2024"
 dyn-clone = "1.0.20"
 itertools = "0.15.0"
 petgraph = "0.8.3"
+uuid = { version = "1.29.2", features = ["v5"] }

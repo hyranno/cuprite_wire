@@ -192,12 +192,20 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
 | Unnamed | `Net-(R1-Pad2)`, `Net-(U1-+)` | `Net-(<ref>-<pin name or Pad<number>>)` |
 | Single unconnected pin | `unconnected-(U1-NC-Pad7)` | A net with only one pin |
 
+- For an unnamed net, Eeschema prefers a pin that is written by its name alone (`U1-OUT`) to one
+  written with `Pad<number>` (a pin without a name, named as its pad number, or whose name is
+  shared by several pins of the symbol), and among those takes the smallest net name in string
+  order. The pin type does not matter. (Observed with KiCad 9.0.2 using
+  `tools/compare_kicad_cli_netlist.py`.)
 - Characters such as `/` in net names are escaped by Eeschema (e.g. `/` -> `{slash}`).
   When this project uses arbitrary strings as names, follow the same `{slash}`-style escaping.
-- Eeschema sorts nets by name in natural order and assigns `code` from 1.
+- Eeschema sorts nets by name in natural order (case-sensitive: `/B` < `/_x` < `/a9` < `/a10` < `/b`)
+  and assigns `code` from 1.
   Nets containing only power-symbol (`#PWR`) pins are not emitted, so gaps in `code` may appear.
   pcbnew does not care about such gaps.
 - Nodes are sorted by `ref` (string order) then by pin number, with duplicates removed.
+- Components are written sheet by sheet in page order, and by reference in natural order in each
+  sheet (a root `X1` comes before `C1` on page 2).
 
 ## 7. Minimal form
 
@@ -220,17 +228,29 @@ However, without `tstamps` components cannot be matched when updating from a net
       (node (ref "R1") (pin "1")))))
 ```
 
-## 8. Output policy for cuprite_wire (draft)
+## 8. Output policy for cuprite_wire
 
-- Emit: `version "E"`, `components` (`ref` `value` `footprint` `fields` `libsource`
-  `sheetpath` `tstamps`, plus `property` as needed), and `nets` (`code` `name` `class`, with
-  `ref` `pin` `pinfunction` `pintype` in each `node`).
-- May omit: `design` (or keep it minimal), `libparts`, `libraries`.
-- Emit `pin` as the footprint pad number. The mapping from symbol pin names to pad numbers belongs to the part definitions.
-- Generate UUIDs deterministically so that they do not change between exports.
-- Verification: `kicad-cli` cannot read a netlist, so check the import in the pcbnew GUI
-  (File -> Import -> Netlist). Reference output for comparison can be generated with `kicad-cli`
-  following `.claude/skills/kicad/SKILL.md`.
+See `doc/kicad_netlist_usage.md` for how to use the exporter.
+
+- Emit: `version "E"`; `design` with only `source` (optional) and `tool` (no date, so that the output
+  is deterministic); `components` (`ref` `value` `footprint`, `fields` if any, `libsource` if set,
+  value-less `property` flags, `sheetpath` `tstamps`); and `nets` (`code` `name` `class "Default"`,
+  with `ref` `pin` `pinfunction` (if named) `pintype` in each `node`).
+- Omit: `libparts`, `libraries`, `datasheet`, `description`, and the `Sheetname`/`Sheetfile` properties.
+- Emit `pin` as the footprint pad number. The mapping from pin IDs to pad numbers belongs to the
+  part definitions (one pin ID per pad).
+- Generate UUIDs deterministically (UUID v5 from the hierarchical path and the instance names),
+  so that they do not change between exports.
+- Name nets following section 6.1 (global / `/path/LOCAL` / `Net-(...)` / `unconnected-(...)`),
+  write components sheet by sheet (the root first, then each subcircuit instance followed by the
+  ones inside it, in instantiation order, like Eeschema's page order) sorted by reference in natural
+  order, sort nets by natural order, and nodes by reference then pad in string order.
+- Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
+- Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so
+  `tools/check_netlist_import.py` drives the import in the pcbnew GUI (File -> Import -> Netlist)
+  on a virtual X server. Footprint and pad existence is checked by `tools/check_netlist_footprints.py`.
+  `tools/compare_kicad_cli_netlist.py` compares the output with what `kicad-cli` exports for an
+  equivalent schematic.
 
 ## References
 

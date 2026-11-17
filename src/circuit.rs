@@ -5,20 +5,102 @@ use std::{
 };
 
 use petgraph::{
-    algo::kosaraju_scc,
     graph::{NodeIndex, UnGraph},
+    unionfind::UnionFind,
 };
 
 use crate::{
+    error::{CircuitError, CircuitErrorKind},
+    naming::{AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_explicit_name},
     parts::{Part, PartInstance, PinRef},
     subcircuit::{SubcircuitGenerator, SubcircuitInstance},
+    trace::{Loc, Trace},
 };
+
+/// Weight of a node in the net graph.
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+    /// Where the node was created.
+    pub(crate) trace: Trace,
+    /// Labels attached to the node (including those attached inside subcircuits
+    /// when this node is an interface node).
+    pub(crate) labels: Vec<NodeLabel>,
+}
+
+impl NodeInfo {
+    fn new(trace: Trace) -> Self {
+        NodeInfo {
+            trace,
+            labels: Vec::new(),
+        }
+    }
+
+    pub fn trace(&self) -> &Trace {
+        &self.trace
+    }
+
+    pub fn labels(&self) -> &[NodeLabel] {
+        &self.labels
+    }
+}
+
+/// Nodes carry their creation location and labels, and edges carry the location where they were connected.
+pub type NetGraph = UnGraph<NodeInfo, Loc>;
+
+/// Assigns instance names in one (sub)circuit: explicit names are checked for validity and
+/// uniqueness, and automatic names are numbered per base name (`R#1`, `R#2`, ...).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NameRegistry {
+    counters: HashMap<String, u32>,
+    explicit_names: HashMap<String, Trace>,
+}
+
+impl NameRegistry {
+    fn assign(
+        &mut self,
+        explicit_name: Option<&str>,
+        base_name: &str,
+        trace: &Trace,
+        errors: &mut Vec<CircuitError>,
+    ) -> String {
+        let Some(name) = explicit_name else {
+            let counter = self.counters.entry(base_name.to_string()).or_insert(0);
+            *counter += 1;
+            return format!("{base_name}{AUTO_NAME_SEPARATOR}{counter}");
+        };
+        if let Err(reason) = check_explicit_name(name) {
+            errors.push(CircuitError::new(
+                CircuitErrorKind::InvalidName {
+                    name: name.to_string(),
+                    reason,
+                },
+                trace.clone(),
+            ));
+        } else if let Some(previous) = self.explicit_names.get(name) {
+            errors.push(
+                CircuitError::new(
+                    CircuitErrorKind::DuplicateInstanceName {
+                        name: name.to_string(),
+                    },
+                    trace.clone(),
+                )
+                .with_note("the name is first used here", previous.clone()),
+            );
+        } else {
+            self.explicit_names.insert(name.to_string(), trace.clone());
+        }
+        name.to_string()
+    }
+}
 
 pub struct CircuitBuilder<B = ()> {
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) ref_name_counters: HashMap<String, u32>,
-    pub subcircuits: Vec<SubcircuitInstance<B>>,
-    pub nets: UnGraph<(), &'static Location<'static>>,
+    pub(crate) subcircuits: Vec<SubcircuitInstance<B>>,
+    pub(crate) nets: NetGraph,
+    pub(crate) subcircuit_names: NameRegistry,
+    pub(crate) part_names: NameRegistry,
+    pub(crate) errors: Vec<CircuitError>,
 }
 
 impl<B> Clone for CircuitBuilder<B> {
@@ -28,6 +110,9 @@ impl<B> Clone for CircuitBuilder<B> {
             ref_name_counters: self.ref_name_counters.clone(),
             subcircuits: self.subcircuits.clone(),
             nets: self.nets.clone(),
+            subcircuit_names: self.subcircuit_names.clone(),
+            part_names: self.part_names.clone(),
+            errors: self.errors.clone(),
         }
     }
 }
@@ -39,7 +124,8 @@ impl<B> Debug for CircuitBuilder<B> {
             .field("ref_name_counters", &self.ref_name_counters)
             .field("subcircuits", &self.subcircuits)
             .field("nets", &self.nets)
-            .finish()
+            .field("errors", &self.errors)
+            .finish_non_exhaustive()
     }
 }
 
@@ -48,11 +134,16 @@ impl<B> CircuitBuilder<B> {
         CircuitBuilder {
             parts: Vec::new(),
             subcircuits: Vec::new(),
-            nets: UnGraph::new_undirected(),
+            nets: NetGraph::new_undirected(),
             ref_name_counters: HashMap::new(),
+            subcircuit_names: NameRegistry::default(),
+            part_names: NameRegistry::default(),
+            errors: Vec::new(),
         }
     }
 
+    /// Expands all subcircuits. This always succeeds; problems found while describing the
+    /// circuit are reported when it is converted to a netlist.
     pub fn build(&self, options: &B) -> BuiltCircuit {
         self.clone().expand(options).into()
     }
@@ -63,21 +154,66 @@ impl<B> CircuitBuilder<B> {
             ref_name_counters,
             subcircuits,
             nets,
+            subcircuit_names: _,
+            part_names: _,
+            errors,
         } = self;
         let mut expanded = ExpandedCircuit {
             parts,
             ref_name_counters,
             nets,
+            errors,
         };
 
         for instance in subcircuits {
             let subcircuit = instance.generator.generate(options);
-            expanded.merge(subcircuit, &instance.node_mapping);
+            expanded.merge(subcircuit, &instance);
         }
 
         expanded
     }
 
+    /// Creates a new node (a point that pins and other nodes can be connected to).
+    #[track_caller]
+    pub fn add_node(&mut self) -> NodeIndex {
+        self.nets.add_node(NodeInfo::new(Trace::new(Location::caller())))
+    }
+
+    /// Connects two nodes.
+    #[track_caller]
+    pub fn connect(&mut self, a: NodeIndex, b: NodeIndex) {
+        self.nets.add_edge(a, b, Location::caller());
+    }
+
+    /// Gives a name to the net containing `node`.
+    ///
+    /// Nodes with the same global label, or with the same local label in the same
+    /// (sub)circuit instance, are connected. If a net ends up with several names,
+    /// one of them is used (see the netlist conversion) and a warning is reported.
+    #[track_caller]
+    pub fn label(&mut self, node: NodeIndex, label: NetLabel) {
+        let trace = Trace::new(Location::caller());
+        if label.name().is_empty() {
+            self.errors.push(CircuitError::new(
+                CircuitErrorKind::InvalidName {
+                    name: String::new(),
+                    reason: "net labels must not be empty",
+                },
+                trace.clone(),
+            ));
+        }
+        self.nets[node].labels.push(NodeLabel {
+            label,
+            scope: HierPath::default(),
+            trace,
+        });
+    }
+
+    /// Instantiates a subcircuit with an automatic name (`<base name>#<n>`).
+    ///
+    /// `interface_nodes` are node indices inside the generated subcircuit;
+    /// the returned map gives the corresponding new nodes in this circuit.
+    #[track_caller]
     pub fn instantiate_subcircuit<G, F>(
         &mut self,
         generator: G,
@@ -89,31 +225,105 @@ impl<B> CircuitBuilder<B> {
         G: SubcircuitGenerator + 'static,
         F: Fn(&B) -> G::Options + Clone + 'static,
     {
-        let mut node_mapping = HashMap::new();
-        for node in interface_nodes {
-            node_mapping.insert(*node, self.nets.add_node(()));
-        }
+        self.instantiate_subcircuit_impl(None, generator, interface_nodes, options_for_generator)
+    }
+
+    /// Instantiates a subcircuit with an explicit name, used in hierarchical net names
+    /// (`/name/LABEL`) and as the key of the deterministic UUIDs of the parts inside it.
+    #[track_caller]
+    pub fn instantiate_subcircuit_named<G, F>(
+        &mut self,
+        name: &str,
+        generator: G,
+        interface_nodes: &HashSet<NodeIndex>,
+        options_for_generator: F,
+    ) -> HashMap<NodeIndex, NodeIndex>
+    where
+        B: 'static,
+        G: SubcircuitGenerator + 'static,
+        F: Fn(&B) -> G::Options + Clone + 'static,
+    {
+        self.instantiate_subcircuit_impl(Some(name), generator, interface_nodes, options_for_generator)
+    }
+
+    #[track_caller]
+    fn instantiate_subcircuit_impl<G, F>(
+        &mut self,
+        name: Option<&str>,
+        generator: G,
+        interface_nodes: &HashSet<NodeIndex>,
+        options_for_generator: F,
+    ) -> HashMap<NodeIndex, NodeIndex>
+    where
+        B: 'static,
+        G: SubcircuitGenerator + 'static,
+        F: Fn(&B) -> G::Options + Clone + 'static,
+    {
+        let location = Location::caller();
+        let name = self.subcircuit_names.assign(
+            name,
+            &generator.base_name(),
+            &Trace::new(location),
+            &mut self.errors,
+        );
+        let mut sorted_interface_nodes: Vec<_> = interface_nodes.iter().copied().collect();
+        sorted_interface_nodes.sort();
+        let node_mapping: HashMap<_, _> = sorted_interface_nodes
+            .into_iter()
+            .map(|node| (node, self.nets.add_node(NodeInfo::new(Trace::new(location)))))
+            .collect();
         self.subcircuits.push(SubcircuitInstance::new(
             generator,
             options_for_generator,
             node_mapping.clone(),
+            name,
+            location,
         ));
         node_mapping
     }
 
+    /// Instantiates a part with an automatic name (`<ref base name>#<n>`) and returns
+    /// the nodes of its pins, keyed by pin ID.
+    ///
+    /// The instance name is the key of the deterministic UUID of the part. Automatic names
+    /// shift when a part of the same kind is added or removed before this one in the same
+    /// (sub)circuit; use [`Self::instantiate_part_named`] to keep the UUID stable.
+    #[track_caller]
     pub fn instantiate_part(&mut self, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        self.instantiate_part_impl(None, part)
+    }
+
+    /// Instantiates a part with an explicit name, unique in this (sub)circuit.
+    #[track_caller]
+    pub fn instantiate_part_named(&mut self, name: &str, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        self.instantiate_part_impl(Some(name), part)
+    }
+
+    #[track_caller]
+    fn instantiate_part_impl(&mut self, name: Option<&str>, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
+        let trace = Trace::new(Location::caller());
+        let name = self
+            .part_names
+            .assign(name, &part.get_ref_base_name(), &trace, &mut self.errors);
         let mut pin_mapping = HashMap::new();
         for pin in part.pin_ids() {
-            pin_mapping.insert(pin, self.nets.add_node(()));
+            pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
         }
-        let ref_base_name = part.get_ref_base_name();
-        let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
-        let ref_number = *counter;
-        *counter += 1;
+        // Unknown pin IDs are skipped here and reported when the netlist is created.
+        for group in part.internal_connections() {
+            let nodes: Vec<_> = group.iter().filter_map(|pin| pin_mapping.get(pin)).collect();
+            for pair in nodes.windows(2) {
+                self.nets.add_edge(*pair[0], *pair[1], trace.0[0]);
+            }
+        }
+        let ref_number = next_ref_number(&mut self.ref_name_counters, part.as_ref());
         self.parts.push(PartInstance {
             part,
             ref_number,
             pin_mapping: pin_mapping.clone(),
+            name,
+            path: HierPath::default(),
+            trace,
         });
         pin_mapping
     }
@@ -125,24 +335,48 @@ impl<B> Default for CircuitBuilder<B> {
     }
 }
 
+fn next_ref_number(counters: &mut HashMap<String, u32>, part: &dyn Part) -> u32 {
+    let counter = counters.entry(part.get_ref_base_name()).or_insert(1);
+    let ref_number = *counter;
+    *counter += 1;
+    ref_number
+}
+
 #[derive(Debug, Clone)]
 pub struct ExpandedCircuit {
     parts: Vec<PartInstance>,
     ref_name_counters: HashMap<String, u32>,
-    nets: UnGraph<(), &'static Location<'static>>,
+    nets: NetGraph,
+    errors: Vec<CircuitError>,
 }
 
 impl ExpandedCircuit {
-    fn merge(&mut self, other: ExpandedCircuit, overriding_nodes: &HashMap<NodeIndex, NodeIndex>) {
+    /// Merges an expanded subcircuit generated for `instance`.
+    fn merge<B>(&mut self, other: ExpandedCircuit, instance: &SubcircuitInstance<B>) {
+        let location = instance.location;
+        let name = instance.name.as_str();
+        let outer_label = |label: &NodeLabel| NodeLabel {
+            label: label.label.clone(),
+            scope: label.scope.prepended(name),
+            trace: label.trace.prepended(location),
+        };
+
         let mut index_map = HashMap::<NodeIndex, NodeIndex>::new();
         for node in other.nets.node_indices() {
-            if let Some(&merged_node) = overriding_nodes.get(&node) {
-                self.nets[merged_node] = other.nets[node];
-                index_map.insert(node, merged_node);
-            } else {
-                let new_index = self.nets.add_node(());
-                index_map.insert(node, new_index);
-            }
+            let inner = &other.nets[node];
+            let labels = inner.labels.iter().map(outer_label);
+            let merged_node = match instance.node_mapping.get(&node) {
+                // The interface node keeps its own trace and collects the labels from both sides.
+                Some(&merged_node) => {
+                    self.nets[merged_node].labels.extend(labels);
+                    merged_node
+                }
+                None => self.nets.add_node(NodeInfo {
+                    trace: inner.trace.prepended(location),
+                    labels: labels.collect(),
+                }),
+            };
+            index_map.insert(node, merged_node);
         }
 
         for edge in other.nets.edge_indices() {
@@ -150,26 +384,29 @@ impl ExpandedCircuit {
             self.nets.add_edge(
                 index_map[&source],
                 index_map[&target],
-                *other.nets.edge_weight(edge).unwrap(),
+                other.nets[edge],
             );
         }
 
         for part in other.parts {
-            let new_pin_mapping = part
+            let pin_mapping = part
                 .pin_mapping
                 .iter()
                 .map(|(pin, node)| (pin.clone(), index_map[node]))
                 .collect();
-            let ref_base_name = part.part.get_ref_base_name();
-            let counter = self.ref_name_counters.entry(ref_base_name).or_insert(1);
-            let ref_number = *counter;
-            *counter += 1;
+            let ref_number = next_ref_number(&mut self.ref_name_counters, part.part.as_ref());
             self.parts.push(PartInstance {
-                part: part.part,
                 ref_number,
-                pin_mapping: new_pin_mapping,
+                pin_mapping,
+                name: part.name,
+                path: part.path.prepended(name),
+                trace: part.trace.prepended(location),
+                part: part.part,
             });
         }
+
+        self.errors
+            .extend(other.errors.into_iter().map(|error| error.prepended(location)));
     }
 }
 
@@ -178,19 +415,26 @@ impl From<ExpandedCircuit> for BuiltCircuit {
         BuiltCircuit {
             parts: expanded.parts,
             nets: expanded.nets,
+            errors: expanded.errors,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct BuiltCircuit {
-    parts: Vec<PartInstance>,
-    nets: UnGraph<(), &'static Location<'static>>,
+    pub(crate) parts: Vec<PartInstance>,
+    pub(crate) nets: NetGraph,
+    /// Errors found while describing the circuit (reported by the netlist conversion).
+    pub(crate) errors: Vec<CircuitError>,
 }
 
 impl BuiltCircuit {
-    pub fn nets(&self) -> &UnGraph<(), &'static Location<'static>> {
+    pub fn nets(&self) -> &NetGraph {
         &self.nets
+    }
+
+    pub fn errors(&self) -> &[CircuitError] {
+        &self.errors
     }
 
     pub fn pin_refs_by_node(&self) -> HashMap<NodeIndex, PinRef> {
@@ -211,10 +455,37 @@ impl BuiltCircuit {
             .collect()
     }
 
+    /// Groups nodes into nets: nodes connected by edges, by the same global label,
+    /// or by the same local label in the same subcircuit instance.
+    /// Each group is sorted, and groups are sorted by their first node.
+    pub fn connected_nodes(&self) -> Vec<Vec<NodeIndex>> {
+        let mut union_find = UnionFind::<usize>::new(self.nets.node_count());
+        for edge in self.nets.edge_indices() {
+            let (a, b) = self.nets.edge_endpoints(edge).unwrap();
+            union_find.union(a.index(), b.index());
+        }
+        let mut first_node_by_name = HashMap::<(bool, String), NodeIndex>::new();
+        for node in self.nets.node_indices() {
+            for label in &self.nets[node].labels {
+                let key = (matches!(label.label, NetLabel::Global(_)), label.net_name());
+                let first = *first_node_by_name.entry(key).or_insert(node);
+                union_find.union(first.index(), node.index());
+            }
+        }
+
+        let mut groups = HashMap::<usize, Vec<NodeIndex>>::new();
+        for node in self.nets.node_indices() {
+            groups.entry(union_find.find(node.index())).or_default().push(node);
+        }
+        let mut groups: Vec<_> = groups.into_values().collect();
+        groups.sort();
+        groups
+    }
+
     pub fn collect_connected_part_pins(&self) -> Vec<Vec<PinRef>> {
-        let connected_nodes = kosaraju_scc(&self.nets);
         let pin_refs = self.pin_refs_by_node();
-        connected_nodes.into_iter()
+        self.connected_nodes()
+            .into_iter()
             .map(|nodes| nodes.into_iter().filter_map(|node| pin_refs.get(&node).cloned()).collect())
             .collect()
     }
@@ -227,7 +498,6 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use crate::{
-        get_location,
         parts::{Part, PinRef},
         subcircuit::SubcircuitGenerator,
     };
@@ -248,8 +518,13 @@ mod tests {
         fn pin_ids(&self) -> Vec<String> {
             vec!["pin1".to_string(), "pin2".to_string()]
         }
+
+        fn value(&self) -> String {
+            "test".to_string()
+        }
     }
     impl TestPart {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestPartPins {
             let pins = circuit.instantiate_part(Box::new(TestPart));
             TestPartPins { pin1: pins["pin1"], pin2: pins["pin2"] }
@@ -268,20 +543,21 @@ mod tests {
 
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            let node1 = circuit.nets.add_node(());
-            let node2 = circuit.nets.add_node(());
+            let node1 = circuit.add_node();
+            let node2 = circuit.add_node();
             let part1_pins = TestPart::instantiate(&mut circuit);
             let part2_pins = TestPart::instantiate(&mut circuit);
 
-            circuit.nets.add_edge(node1, part1_pins.pin1, get_location());
-            circuit.nets.add_edge(part1_pins.pin2, node2, get_location());
-            circuit.nets.add_edge(node1, part2_pins.pin1, get_location());
-            circuit.nets.add_edge(part2_pins.pin2, node2, get_location());
+            circuit.connect(node1, part1_pins.pin1);
+            circuit.connect(part1_pins.pin2, node2);
+            circuit.connect(node1, part2_pins.pin1);
+            circuit.connect(part2_pins.pin2, node2);
 
             circuit
         }
     }
     impl TestSubcircuitGenerator1 {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator1Pins {
             let local_pin1 = NodeIndex::new(0);
             let local_pin2 = NodeIndex::new(1);
@@ -311,17 +587,18 @@ mod tests {
 
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            let node1 = circuit.nets.add_node(());
-            let node2 = circuit.nets.add_node(());
+            let node1 = circuit.add_node();
+            let node2 = circuit.add_node();
             let subcircuit_pins = TestSubcircuitGenerator1::instantiate(&mut circuit);
             let part_pins = TestPart::instantiate(&mut circuit);
-            circuit.nets.add_edge(node1, subcircuit_pins.pin1, get_location());
-            circuit.nets.add_edge(subcircuit_pins.pin2, part_pins.pin1, get_location());
-            circuit.nets.add_edge(part_pins.pin2, node2, get_location());
+            circuit.connect(node1, subcircuit_pins.pin1);
+            circuit.connect(subcircuit_pins.pin2, part_pins.pin1);
+            circuit.connect(part_pins.pin2, node2);
             circuit
         }
     }
     impl TestSubcircuitGenerator2 {
+        #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator2Pins {
             let local_pin1 = NodeIndex::new(0);
             let local_pin2 = NodeIndex::new(1);
@@ -362,7 +639,7 @@ mod tests {
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
             let interface_nodes =
-                HashSet::from([circuit.nets.add_node(()), circuit.nets.add_node(())]);
+                HashSet::from([circuit.add_node(), circuit.add_node()]);
             circuit.instantiate_subcircuit(
                 LeafOptionsGenerator,
                 &interface_nodes,
@@ -382,8 +659,8 @@ mod tests {
 
         fn construct_subcircuit(&self, options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            circuit.nets.add_node(());
-            circuit.nets.add_node(());
+            circuit.add_node();
+            circuit.add_node();
             for _ in 0..options.part_count {
                 circuit.instantiate_part(Box::new(TestPart));
             }
@@ -560,5 +837,296 @@ mod tests {
         .collect();
 
         assert_eq!(actual, expected);
+    }
+
+    #[derive(Debug, Clone)]
+    struct TracedSubcircuitGenerator;
+    static TRACED_PART_LINE: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+    impl SubcircuitGenerator for TracedSubcircuitGenerator {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let (_, line) = (circuit.instantiate_part(Box::new(TestPart)), line!());
+            *TRACED_PART_LINE.lock().unwrap() = line;
+            circuit
+        }
+    }
+
+    #[test]
+    fn test_traces_follow_subcircuit_instantiations() {
+        let mut circuit = CircuitBuilder::new();
+        let (_, part_line) = (TestPart::instantiate(&mut circuit), line!());
+        #[rustfmt::skip]
+        let (_, subcircuit_line) = (circuit.instantiate_subcircuit(TracedSubcircuitGenerator, &HashSet::new(), |o: &()| *o), line!());
+        let (node, node_line) = (circuit.add_node(), line!());
+        let circuit = circuit.build(&());
+
+        let lines = |trace: &Trace| trace.0.iter().map(|loc| loc.line()).collect::<Vec<_>>();
+        assert!(circuit.parts.iter().all(|part| part.trace.0.iter().all(|loc| loc.file() == file!())));
+        assert_eq!(lines(&circuit.parts[0].trace), vec![part_line]);
+        assert_eq!(
+            lines(&circuit.parts[1].trace),
+            vec![subcircuit_line, *TRACED_PART_LINE.lock().unwrap()]
+        );
+        assert_eq!(lines(&circuit.nets[node].trace), vec![node_line]);
+        // Pin nodes of a part inside the subcircuit carry the subcircuit trace too.
+        let inner_pin = circuit.parts[1].pin_mapping["pin1"];
+        assert_eq!(lines(&circuit.nets[inner_pin].trace), lines(&circuit.parts[1].trace));
+    }
+
+    #[derive(Debug, Clone)]
+    struct MultiGndPart;
+    impl Part for MultiGndPart {
+        fn get_ref_base_name(&self) -> String {
+            "U".to_string()
+        }
+
+        fn pin_ids(&self) -> Vec<String> {
+            ["VCC", "GND1", "GND2", "GND3"].map(String::from).to_vec()
+        }
+
+        fn value(&self) -> String {
+            "multi_gnd".to_string()
+        }
+
+        fn internal_connections(&self) -> Vec<Vec<String>> {
+            vec![["GND1", "GND2", "GND3", "unknown"].map(String::from).to_vec()]
+        }
+    }
+
+    #[test]
+    fn test_internal_connections_are_connected() {
+        let mut circuit = CircuitBuilder::new();
+        circuit.instantiate_part(Box::new(MultiGndPart));
+        let circuit = circuit.build(&());
+
+        let groups: Vec<Vec<String>> = circuit
+            .collect_connected_part_pins()
+            .into_iter()
+            .map(|pins| pins.into_iter().map(|pin| pin.pin_id).sorted().collect())
+            .sorted()
+            .collect();
+        assert_eq!(
+            groups,
+            vec![vec!["GND1", "GND2", "GND3"], vec!["VCC"]]
+        );
+    }
+
+    #[derive(Debug, Clone)]
+    struct LabeledSubcircuitGenerator;
+    impl SubcircuitGenerator for LabeledSubcircuitGenerator {
+        type Options = ();
+
+        // Interface node 0 is labeled "IN" inside; a part pin is labeled "OUT" (local)
+        // and "VCC" (global).
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let input = circuit.add_node();
+            circuit.label(input, NetLabel::local("IN"));
+            let pins = TestPart::instantiate(&mut circuit);
+            circuit.connect(input, pins.pin1);
+            circuit.label(pins.pin2, NetLabel::local("OUT"));
+            let pins = TestPart::instantiate(&mut circuit);
+            circuit.label(pins.pin1, NetLabel::global("VCC"));
+            circuit
+        }
+    }
+
+    fn connected_pin_names(circuit: &BuiltCircuit) -> Vec<Vec<String>> {
+        circuit
+            .collect_connected_part_pins()
+            .into_iter()
+            .map(|pins| {
+                pins.into_iter()
+                    .map(|pin| format!("{}.{}", pin.part_ref_name, pin.pin_id))
+                    .sorted()
+                    .collect::<Vec<_>>()
+            })
+            .filter(|pins| !pins.is_empty())
+            .sorted()
+            .collect()
+    }
+
+    #[test]
+    fn test_labels_connect_nets() {
+        let mut circuit = CircuitBuilder::new();
+        let interface = HashSet::from([NodeIndex::new(0)]);
+        // U1 is the top-level part; U2, U3 / U4, U5 are inside the subcircuits.
+        let left = circuit.instantiate_subcircuit_named("left", LabeledSubcircuitGenerator, &interface, |o: &()| *o);
+        circuit.instantiate_subcircuit_named("right", LabeledSubcircuitGenerator, &interface, |o: &()| *o);
+        let u5 = TestPart::instantiate(&mut circuit);
+        circuit.label(u5.pin1, NetLabel::global("VCC"));
+        circuit.label(u5.pin2, NetLabel::local("OUT"));
+        circuit.label(left[&NodeIndex::new(0)], NetLabel::local("A"));
+        let circuit = circuit.build(&());
+
+        assert_eq!(
+            connected_pin_names(&circuit),
+            vec![
+                vec!["U1.pin1", "U3.pin1", "U5.pin1"],
+                vec!["U1.pin2"],
+                vec!["U2.pin1"],
+                vec!["U2.pin2"],
+                vec!["U3.pin2"],
+                vec!["U4.pin1"],
+                vec!["U4.pin2"],
+                vec!["U5.pin2"],
+            ]
+        );
+
+        let paths: Vec<_> = circuit.parts.iter().map(|part| part.path.to_string()).collect();
+        assert_eq!(paths, vec!["/", "/left/", "/left/", "/right/", "/right/"]);
+
+        // The outer node of the interface has both the outer and the inner label.
+        let names: Vec<_> = circuit.nets[left[&NodeIndex::new(0)]]
+            .labels
+            .iter()
+            .map(NodeLabel::net_name)
+            .collect();
+        assert_eq!(names, vec!["/A", "/left/IN"]);
+    }
+
+    #[test]
+    fn test_unused_names_still_connect() {
+        let mut circuit = CircuitBuilder::new();
+        let u1 = TestPart::instantiate(&mut circuit);
+        let u2 = TestPart::instantiate(&mut circuit);
+        circuit.label(u1.pin1, NetLabel::local("ALPHA"));
+        circuit.label(u1.pin1, NetLabel::local("ZED"));
+        circuit.label(u2.pin1, NetLabel::local("ZED"));
+        let circuit = circuit.build(&());
+        assert_eq!(
+            connected_pin_names(&circuit),
+            vec![vec!["U1.pin1", "U2.pin1"], vec!["U1.pin2"], vec!["U2.pin2"]]
+        );
+    }
+
+    #[test]
+    fn test_automatic_subcircuit_names() {
+        let mut circuit = CircuitBuilder::new();
+        TestSubcircuitGenerator2::instantiate(&mut circuit);
+        TestSubcircuitGenerator1::instantiate(&mut circuit);
+        TestSubcircuitGenerator2::instantiate(&mut circuit);
+        let circuit = circuit.build(&());
+        let paths: Vec<_> = circuit.parts.iter().map(|part| part.path.to_string()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "/TestSubcircuitGenerator2#1/",
+                "/TestSubcircuitGenerator2#1/TestSubcircuitGenerator1#1/",
+                "/TestSubcircuitGenerator2#1/TestSubcircuitGenerator1#1/",
+                "/TestSubcircuitGenerator1#1/",
+                "/TestSubcircuitGenerator1#1/",
+                "/TestSubcircuitGenerator2#2/",
+                "/TestSubcircuitGenerator2#2/TestSubcircuitGenerator1#1/",
+                "/TestSubcircuitGenerator2#2/TestSubcircuitGenerator1#1/",
+            ]
+        );
+    }
+
+    #[derive(Debug, Clone)]
+    struct BadNamesGenerator;
+    static BAD_NAME_LINES: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+    impl SubcircuitGenerator for BadNamesGenerator {
+        type Options = ();
+
+        #[rustfmt::skip]
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let none = HashSet::new();
+            let first = line!(); circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let second = line!(); circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let hash = line!(); circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let node = circuit.add_node();
+            let label = line!(); circuit.label(node, NetLabel::local(""));
+            *BAD_NAME_LINES.lock().unwrap() = vec![first, second, hash, label];
+            circuit
+        }
+    }
+
+    #[test]
+    fn test_invalid_names_are_reported_with_traces() {
+        let mut circuit = CircuitBuilder::new();
+        #[rustfmt::skip]
+        let outer = line!(); circuit.instantiate_subcircuit(BadNamesGenerator, &HashSet::new(), |o: &()| *o);
+        let circuit = circuit.build(&());
+        let [first, second, hash, label] = BAD_NAME_LINES.lock().unwrap()[..] else {
+            panic!()
+        };
+        let lines = |trace: &Trace| trace.0.iter().map(|loc| loc.line()).collect::<Vec<_>>();
+
+        let errors = circuit.errors();
+        assert_eq!(errors.len(), 3);
+        assert_eq!(errors[0].kind, CircuitErrorKind::DuplicateInstanceName { name: "a".into() });
+        assert_eq!(lines(&errors[0].trace), vec![outer, second]);
+        assert_eq!(lines(&errors[0].notes[0].trace), vec![outer, first]);
+        assert!(matches!(&errors[1].kind, CircuitErrorKind::InvalidName { name, .. } if name == "b#1"));
+        assert_eq!(lines(&errors[1].trace), vec![outer, hash]);
+        assert!(matches!(&errors[2].kind, CircuitErrorKind::InvalidName { name, .. } if name.is_empty()));
+        assert_eq!(lines(&errors[2].trace), vec![outer, label]);
+    }
+
+    #[derive(Debug, Clone)]
+    struct NamedPartsGenerator {
+        reversed: bool,
+    }
+    impl SubcircuitGenerator for NamedPartsGenerator {
+        type Options = ();
+
+        fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
+            let mut circuit = CircuitBuilder::new();
+            let mut names = vec!["first", "second"];
+            if self.reversed {
+                names.reverse();
+            }
+            for name in names {
+                circuit.instantiate_part_named(name, Box::new(TestPart));
+            }
+            circuit.instantiate_part(Box::new(TestPart));
+            circuit.instantiate_part(Box::new(MultiGndPart));
+            circuit
+        }
+    }
+
+    fn uuids_by_name(circuit: &BuiltCircuit) -> HashMap<String, uuid::Uuid> {
+        circuit
+            .parts
+            .iter()
+            .map(|part| (format!("{}{}", part.path, part.name), part.uuid()))
+            .collect()
+    }
+
+    #[test]
+    fn test_part_uuids_are_stable() {
+        let build = |reversed: bool, extra_part: bool| {
+            let mut circuit = CircuitBuilder::new();
+            if extra_part {
+                circuit.instantiate_part(Box::new(MultiGndPart));
+            }
+            circuit.instantiate_subcircuit_named("sub", NamedPartsGenerator { reversed }, &HashSet::new(), |o: &()| *o);
+            circuit.build(&())
+        };
+
+        let base = build(false, false);
+        let reordered = build(true, false);
+        let names: Vec<_> = uuids_by_name(&base).into_keys().sorted().collect();
+        assert_eq!(names, vec!["/sub/U#1", "/sub/U#2", "/sub/first", "/sub/second"]);
+        // Reordering explicitly named parts keeps every UUID even though the references change.
+        assert_eq!(uuids_by_name(&base), uuids_by_name(&reordered));
+        let ref_of = |circuit: &BuiltCircuit, name: &str| {
+            circuit.parts.iter().find(|part| part.name == name).unwrap().ref_name()
+        };
+        assert_eq!(ref_of(&base, "first"), "U1");
+        assert_eq!(ref_of(&reordered, "first"), "U2");
+
+        // Adding a part outside the subcircuit does not change the UUIDs inside it.
+        let extended = build(false, true);
+        let mut extended_uuids = uuids_by_name(&extended);
+        extended_uuids.remove("/U#1");
+        assert_eq!(uuids_by_name(&base), extended_uuids);
+
+        let all: HashSet<_> = uuids_by_name(&extended).into_values().collect();
+        assert_eq!(all.len(), extended.parts.len());
     }
 }

@@ -1,12 +1,13 @@
-pub mod parts;
-pub mod subcircuit;
 pub mod circuit;
+pub mod error;
+pub mod kicad;
+pub mod naming;
+pub mod netlist;
+pub mod parts;
+pub mod sexpr;
+pub mod spice;
+pub mod subcircuit;
+pub mod trace;
 
-use std::panic::Location;
-
-
-#[track_caller]
-pub fn get_location() -> &'static Location<'static> {
-    Location::caller()
-}
-
+#[cfg(test)]
+mod test_parts;
