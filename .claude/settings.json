@@ -63,37 +63,6 @@
       "Bash(git push *)",
       "Bash(git remote *)",
       "Bash(gh *)"
-    ],
-    "ask": [
-      "Bash(git commit *)",
-      "Bash(git reset *)",
-      "Bash(git checkout *)",
-      "Bash(git switch *)",
-      "Bash(git restore *)",
-      "Bash(git clean *)",
-      "Bash(git rebase *)",
-      "Bash(git merge *)",
-      "Bash(git tag *)",
-      "Bash(git stash *)",
-      "Bash(git config *)",
-      "Bash(git branch -d *)",
-      "Bash(git branch -D *)",
-      "Bash(git branch --delete *)",
-      "Bash(git branch -m *)",
-      "Bash(git branch -M *)",
-      "Bash(git branch --move *)",
-      "Bash(git branch -c *)",
-      "Bash(git branch -C *)",
-      "Bash(git branch --copy *)",
-      "Bash(git branch -f *)",
-      "Bash(git branch --force *)",
-      "Bash(git branch -u *)",
-      "Bash(git branch --set-upstream-to*)",
-      "Bash(git branch --unset-upstream*)",
-      "Bash(git branch -t *)",
-      "Bash(git branch --track*)",
-      "Bash(git branch --no-track *)",
-      "Bash(git branch --edit-description*)"
     ]
   },
   "sandbox": {
@@ -140,10 +109,16 @@
         "~/.zshrc",
         "~/.zshenv",
         "~/.bashrc",
-        "~/.bash_profile"
+        "~/.bash_profile",
+
+        "//usr/local/cargo/bin/**",
+        "//usr/local/cargo/env",
+        "//usr/local/cargo/config",
+        "//usr/local/cargo/config.toml"
       ],
       "allowWrite": [
-        "//var/lib/xkb"
+        "//var/lib/xkb",
+        "//usr/local/cargo"
       ],
       "denyRead": [
         "//**/*.env*",

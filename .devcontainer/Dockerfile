@@ -19,3 +19,5 @@ RUN \
   rm -rf /var/lib/apt/lists/*
 
 RUN rustup component add rustfmt clippy rust-analyzer
+# To deny claude from writing to the cargo config
+RUN touch "$CARGO_HOME/config.toml"
