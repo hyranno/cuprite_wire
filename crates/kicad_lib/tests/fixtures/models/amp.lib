@@ -1,0 +1,8 @@
+* A test amplifier written for cuprite_wire (MIT).
+.include "clamp.lib"
+.subckt amp in+ in- vcc vee out params: GAIN=10
+E1 int 0 in+ in- {GAIN}
+R1 int out 10
+D1 out vcc clamp
+D2 vee out clamp
+.ends amp

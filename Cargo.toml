@@ -1,11 +1,22 @@
-[package]
-name = "cuprite_wire"
-version = "0.1.0"
+[workspace]
+members = ["crates/kicad_lib", "crates/macros"]
+
+[workspace.package]
 edition = "2024"
 license = "MIT"
 
+[package]
+name = "cuprite_wire"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
 [dependencies]
+cuprite_wire_macros = { path = "crates/macros" }
 dyn-clone = "1.0.20"
 itertools = "0.15.0"
 petgraph = "0.8.3"
 uuid = { version = "1.29.2", features = ["v5"] }
+
+[dev-dependencies]
+trybuild = "1.0.125"
