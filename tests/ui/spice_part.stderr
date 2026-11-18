@@ -1,0 +1,35 @@
+error: no .subckt or .model named "VSUP1" in $DIR/crates/kicad_lib/tests/fixtures/models/vsup01.lib; similar names: VSUP01; subcircuits not used by others: VSUP01
+ --> tests/ui/spice_part.rs:7:15
+  |
+7 |         name: "VSUP1",
+  |               ^^^^^^^
+
+error: the model has no port "RESET"; its ports are CTR CTS GND RESET_B SENSE VDD
+  --> tests/ui/spice_part.rs:16:15
+   |
+16 |         pins: { "RESET" => "reset_n" },
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: subcircuit VSUP01 has no parameter "TD"; its parameters are VTH=0.5 VDDMIN=0.8
+  --> tests/ui/spice_part.rs:25:17
+   |
+25 |         params: { "VTH" => "0.6", "TD" => "1m" },
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: the library includes "vsup01_aux.lib" with `.LIB`, which ngspice reads only in its PSpice mode; use `dialect: pspice` or `sim_model: inline`
+  --> tests/ui/spice_part.rs:34:18
+   |
+34 |         dialect: ngspice,
+   |                  ^^^^^^^
+
+error: `name: "NAME"` is required
+  --> tests/ui/spice_part.rs:39:12
+   |
+39 |     struct NoName {
+   |            ^^^^^^
+
+error: unknown key `unused`; expected one of: library, name, value, ref_base, pins, internal_connections, params, dialect, sim_model
+  --> tests/ui/spice_part.rs:48:9
+   |
+48 |         unused: ["CTR"],
+   |         ^^^^^^

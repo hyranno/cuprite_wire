@@ -1,0 +1,81 @@
+error: no pin is mapped to the ports RESET_B of subcircuit VSUP01
+       pins and ports:
+         1 (CTR)          => CTR
+         2 (CTS)          => CTS
+         3 (GND)          => GND
+         4 (VDD)          => VDD
+         5 (SENSE)        => SENSE
+         6 (~{RESET_N})   => -
+       suggested from the names (not applied; check them against the datasheet):
+         "6" => "RESET_B",
+  --> tests/ui/sim.rs:12:19
+   |
+12 |             pins: { "1" => "CTR", "2" => "CTS", "3" => "GND", "4" => "VDD", "5" => "SENSE" },
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: subcircuit VSUP01 has no port "RESET_N"; its ports are CTR CTS GND RESET_B SENSE VDD
+  --> tests/ui/sim.rs:24:19
+   |
+24 |             pins: { "1" => "CTR", "2" => "CTS", "3" => "GND", "4" => "VDD", "5" => "SENSE", "6" => "RESET_N" },
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: port CTR is mapped twice (pins "1" and "2")
+  --> tests/ui/sim.rs:36:19
+   |
+36 |             pins: { "1" => "CTR", "2" => "CTR", "3" => "GND", "4" => "VDD", "5" => "SENSE", "6" => "RESET_B" },
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: pins not mapped to the model: 3 (GND), 4 (VDD); map them in `pins`, or declare them with `unused: ["3", "4"]`
+       pins and ports:
+         1 (CTR)          => -
+         2 (CTS)          => -
+         3 (GND)          => -
+         4 (VDD)          => -
+         5 (SENSE)        => IN
+         6 (~{RESET_N})   => OUT
+  --> tests/ui/sim.rs:48:19
+   |
+48 |             pins: { "5" => "IN", "6" => "OUT" },
+   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: subcircuit VSUP01 has no parameter "TD"; its parameters are VTH=0.5 VDDMIN=0.8
+  --> tests/ui/sim.rs:63:21
+   |
+63 |             params: { "TD" => "1m" },
+   |                     ^^^^^^^^^^^^^^^^
+
+error: subcircuit VSUP_LOCKED is encrypted, which ngspice cannot read; ask the vendor for an unencrypted model
+  --> tests/ui/sim.rs:74:19
+   |
+74 |             name: "VSUP_LOCKED",
+   |                   ^^^^^^^^^^^^^
+
+error: subcircuit VSUP_DIGITAL has `OPTIONAL:` ports (DPWR, DGND), which ngspice does not support
+  --> tests/ui/sim.rs:86:19
+   |
+86 |             name: "VSUP_DIGITAL",
+   |                   ^^^^^^^^^^^^^^
+
+error: the library has both PSpice constructs (`IF(` (line 12) of vsup_unsupported.lib) and LTspice constructs (`uplim(` (line 13) of vsup_unsupported.lib); give the dialect with `dialect: pspice` or `dialect: ltspice`
+   --> tests/ui/sim.rs:97:14
+    |
+ 97 |           sim: {
+    |  ______________^
+ 98 | |             library: "${TEST_MODELS}/vsup_unsupported.lib",
+ 99 | |             name: "VSUP_MIXED",
+100 | |             pins: { "5" => "IN", "6" => "OUT" },
+101 | |             unused: ["1", "2", "3", "4"],
+102 | |         },
+    | |_________^
+
+error: give each model a distinct `suffix` (e.g. "A", "B")
+   --> tests/ui/sim.rs:112:13
+    |
+112 |             { library: "${TEST_MODELS}/clamp.lib", name: "clamp", pins: { "3" => "A", "4" => "K" } },
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`
+   --> tests/ui/sim.rs:122:16
+    |
+122 |         spice: none,
+    |                ^^^^

@@ -15,7 +15,7 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use crate::{
     Error,
-    binding::{BindOptions, ModelBinding, ModelInfo, PartPin, bind},
+    binding::{BindOptions, ModelBinding, ModelInfo, PartPin, PartPins, bind},
     resolve::Resolver,
     spice_lib::Dialect,
     symbol::Symbol,
@@ -274,7 +274,7 @@ fn library_model(
         })
         .collect();
     let options = BindOptions {
-        pins: &part_pins,
+        pins: PartPins::Given(&part_pins),
         strict: false,
         internal_connections: &[],
         mode: input.model_mode,

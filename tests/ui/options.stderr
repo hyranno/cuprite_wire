@@ -1,4 +1,4 @@
-error: unknown key `colour`; expected one of: symbol, footprint, value, ref_base, pins, internal_connections, extra_pads, spice, sim_model, fields, symbol_dir, footprint_dir, sim_library_dir
+error: unknown key `colour`; expected one of: symbol, footprint, value, ref_base, pins, internal_connections, extra_pads, spice, sim, sim_model, fields, symbol_dir, footprint_dir, sim_library_dir
  --> tests/ui/options.rs:4:9
   |
 4 |         colour: "red",

@@ -72,8 +72,16 @@ pub struct PartPin {
     pub name: Option<String>,
 }
 
+/// The pins of the part being bound.
+#[derive(Debug, Clone, Copy)]
+pub enum PartPins<'a> {
+    Given(&'a [PartPin]),
+    /// The part is made from the model: its pins are the ports (`spice_part!`).
+    Ports,
+}
+
 pub struct BindOptions<'a> {
-    pub pins: &'a [PartPin],
+    pub pins: PartPins<'a>,
     /// Every pin must be mapped, declared unused, or connected inside the part to a mapped pin.
     /// Otherwise (KiCad's `Sim.Pins`), pins that are not mapped are unused, and without any mapping
     /// the pins are connected to the ports in order.
@@ -146,7 +154,7 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
             }));
         }
     }
-    if options.strict {
+    if let (true, PartPins::Given(pins)) = (options.strict, options.pins) {
         let covered = |pin: &String| {
             mapped.contains(pin)
                 || unused.contains(pin)
@@ -155,7 +163,7 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
                     .iter()
                     .any(|group| group.contains(pin) && group.iter().any(|other| mapped.contains(other)))
         };
-        let missing: Vec<&PartPin> = options.pins.iter().filter(|pin| !covered(&pin.id)).collect();
+        let missing: Vec<&PartPin> = pins.iter().filter(|pin| !covered(&pin.id)).collect();
         if !missing.is_empty() {
             let list: Vec<String> = missing.iter().map(|pin| describe_pin(pin)).collect();
             let ids: Vec<String> = missing.iter().map(|pin| format!("{:?}", pin.id)).collect();
@@ -164,7 +172,7 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
                 list.join(", "),
                 ids.join(", ")
             );
-            message.push_str(&pin_table(options.pins, &elements));
+            message.push_str(&pin_table(pins, &elements));
             return Err(BindingError {
                 element: 0,
                 field: BindingField::Pins,
@@ -246,27 +254,35 @@ fn bind_one(
     }
 
     // Pins to ports.
-    let part_pin = |id: &str| options.pins.iter().any(|pin| pin.id == id);
+    let (part_pins, mapping): (Vec<PartPin>, Vec<(String, String)>) = match options.pins {
+        PartPins::Given(pins) => (pins.to_vec(), binding.pins.clone()),
+        PartPins::Ports => (
+            ports.iter().map(|port| PartPin { id: port.clone(), name: None }).collect(),
+            ports.iter().map(|port| (port.clone(), port.clone())).collect(),
+        ),
+    };
+    let part_pins = part_pins.as_slice();
+    let part_pin = |id: &str| part_pins.iter().any(|pin| pin.id == id);
     let mut nodes: Vec<Option<String>> = vec![None; ports.len()];
-    if binding.pins.is_empty() && !options.strict {
+    if mapping.is_empty() && !options.strict {
         // KiCad without `Sim.Pins`: the pins in order.
-        if options.pins.len() != ports.len() {
+        if part_pins.len() != ports.len() {
             return Err(fail(
                 Pins,
                 format!(
                     "the symbol has {} pins but {what} has {} ({}); add Sim.Pins",
-                    options.pins.len(),
+                    part_pins.len(),
                     ports.len(),
                     ports.join(" ")
                 ),
             ));
         }
-        for (node, pin) in nodes.iter_mut().zip(options.pins) {
+        for (node, pin) in nodes.iter_mut().zip(part_pins) {
             *node = Some(pin.id.clone());
         }
     }
     let mut seen_pins = BTreeSet::new();
-    for (pin, port) in &binding.pins {
+    for (pin, port) in &mapping {
         if !part_pin(pin) {
             return Err(fail(Pins, format!("the part has no pin {pin:?}")));
         }
@@ -316,9 +332,8 @@ fn bind_one(
                 dialect_reason: String::new(),
             }),
         };
-        message.push_str(&pin_table(options.pins, std::slice::from_ref(&partial)));
-        let free_pins: Vec<&PartPin> = options
-            .pins
+        message.push_str(&pin_table(part_pins, std::slice::from_ref(&partial)));
+        let free_pins: Vec<&PartPin> = part_pins
             .iter()
             .filter(|pin| !seen_pins.contains(&pin.id) && !binding.unused.contains(&pin.id))
             .collect();
@@ -329,8 +344,7 @@ fn bind_one(
     let unmapped_pins: Vec<String> = if options.strict {
         Vec::new()
     } else {
-        options
-            .pins
+        part_pins
             .iter()
             .filter(|pin| !nodes.contains(&pin.id) && !binding.unused.contains(&pin.id))
             .map(|pin| pin.id.clone())
@@ -728,7 +742,7 @@ mod tests {
 
     fn run(bindings: &[ModelBinding], pins: &[PartPin], mode: ModelMode) -> Result<Bound, BindingError> {
         let options = BindOptions {
-            pins,
+            pins: PartPins::Given(pins),
             strict: true,
             internal_connections: &[],
             mode,
@@ -787,7 +801,7 @@ mod tests {
             })
             .collect();
         let options = BindOptions {
-            pins: &pins,
+            pins: PartPins::Given(&pins),
             strict: false,
             internal_connections: &[],
             mode: ModelMode::Include,
@@ -806,7 +820,7 @@ mod tests {
         assert_eq!(run(&[declared], &pins, ModelMode::Include).unwrap().1, ["3"]);
         // ... or be connected to a mapped pin inside the part.
         let options = BindOptions {
-            pins: &pins,
+            pins: PartPins::Given(&pins),
             strict: true,
             internal_connections: &[strings(&["1", "3"])],
             mode: ModelMode::Include,
@@ -816,7 +830,7 @@ mod tests {
         let mut positional = binding;
         positional.pins.clear();
         let options = BindOptions {
-            pins: &pins[..2],
+            pins: PartPins::Given(&pins[..2]),
             strict: false,
             internal_connections: &[],
             mode: ModelMode::Include,

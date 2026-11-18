@@ -2,7 +2,7 @@
 //! Run with `cargo test -p cuprite_wire_kicad_lib -- --ignored`.
 
 use cuprite_wire_kicad_lib::{
-    part::{FootprintOption, PartOptions, load_part},
+    part::{CommonOptions, FootprintOption, PartOptions, load_part},
     resolve::Resolver,
     sim::{Args, ModelDef, SpiceDef, Value},
 };
@@ -13,9 +13,12 @@ fn resolver() -> Resolver {
 
 fn options(symbol: &str, footprint: Option<&str>) -> PartOptions {
     PartOptions {
+        common: CommonOptions {
+            type_name: "T".into(),
+            ..Default::default()
+        },
         symbol: symbol.into(),
         footprint: footprint.map_or(FootprintOption::None, |f| FootprintOption::Given(f.into())),
-        type_name: "T".into(),
         ..Default::default()
     }
 }
@@ -25,7 +28,7 @@ fn options(symbol: &str, footprint: Option<&str>) -> PartOptions {
 fn test_kicad_parts() {
     let mut r = resolver();
     let mut opts = options("Device:R", Some("Resistor_SMD:R_0603_1608Metric"));
-    opts.value = Some(Value::Param);
+    opts.common.value = Some(Value::Param);
     let part = load_part(&opts, &mut r).unwrap();
     assert!(matches!(part.spice, SpiceDef::Elements { ref elements, .. } if elements[0].device == 'R'));
 
