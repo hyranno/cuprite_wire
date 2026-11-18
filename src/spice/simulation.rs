@@ -9,36 +9,25 @@ use std::{
 
 use crate::spice::SpiceDeck;
 
-/// Environment variable selecting how ngspice is run: `library` (default) or `cli`.
-pub const NGSPICE_ENV: &str = "CUPRITE_WIRE_NGSPICE";
-
-/// How ngspice is run.
+/// The ngspice program, run in batch mode (`ngspice -b deck.cir`).
+///
+/// glibc `tmpfile()`, which the CLI copies its input with, ignores `$TMPDIR`; where `/tmp` is
+/// read-only (e.g. the Claude Code sandbox), the devcontainer's `ngspice` wrapper redirects it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ngspice {
-    /// Through the shared library (`libngspice`), with `tools/ngspice_run.py`.
-    ///
-    /// The ngspice CLI copies its input with `tmpfile()`, which always writes to `/tmp`;
-    /// this way also works where `/tmp` is not writable (e.g. the Claude Code sandbox).
-    SharedLibrary { python: PathBuf, script: PathBuf },
-    /// `ngspice -b deck.cir`.
-    Cli { program: PathBuf },
+pub struct Ngspice {
+    pub program: PathBuf,
+}
+
+impl Default for Ngspice {
+    /// `ngspice` from `PATH`.
+    fn default() -> Self {
+        Ngspice {
+            program: "ngspice".into(),
+        }
+    }
 }
 
 impl Ngspice {
-    /// [`Ngspice::Cli`] if the environment variable [`NGSPICE_ENV`] is `cli`,
-    /// otherwise [`Ngspice::SharedLibrary`] with `python3` and this crate's `tools/ngspice_run.py`.
-    pub fn from_env() -> Self {
-        match std::env::var(NGSPICE_ENV).as_deref() {
-            Ok("cli") => Ngspice::Cli {
-                program: "ngspice".into(),
-            },
-            _ => Ngspice::SharedLibrary {
-                python: "python3".into(),
-                script: Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/ngspice_run.py"),
-            },
-        }
-    }
-
     /// Writes the deck into a new temporary directory and runs it there, so that relative
     /// `wrdata` paths land in that directory. Fails if ngspice reports an error.
     ///
@@ -48,27 +37,16 @@ impl Ngspice {
         let dir = create_run_dir()?;
         let deck_path = dir.join("deck.cir");
         fs::write(&deck_path, deck.to_string())?;
-        // ngspice reads `.spiceinit` in its working directory, both as a program and as a library,
-        // before the deck; the compatibility mode cannot be set from the deck.
+        // ngspice reads `.spiceinit` in its working directory before the deck;
+        // the compatibility mode cannot be set from the deck.
         if let Some(mode) = deck.netlist().ngbehavior() {
             fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
         }
-        let mut command = match self {
-            Ngspice::SharedLibrary { python, script } => {
-                let mut command = Command::new(python);
-                command.arg("-I").arg(script).arg(&deck_path);
-                if !deck.has_control() {
-                    command.args(["-c", "run"]);
-                }
-                command
-            }
-            Ngspice::Cli { program } => {
-                let mut command = Command::new(program);
-                command.arg("-b").arg(&deck_path);
-                command
-            }
-        };
-        let output = command.current_dir(&dir).output()?;
+        let output = Command::new(&self.program)
+            .arg("-b")
+            .arg(&deck_path)
+            .current_dir(&dir)
+            .output()?;
         let log = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),

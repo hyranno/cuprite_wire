@@ -51,13 +51,13 @@ impl SpiceDeck {
         self
     }
 
-    pub(crate) fn has_control(&self) -> bool {
+    fn has_control(&self) -> bool {
         !self.control.is_empty()
     }
 
-    /// Runs the deck with the simulator selected by the environment ([`Ngspice::from_env`]).
+    /// Runs the deck with `ngspice` from `PATH` ([`Ngspice::default`]).
     pub fn run(&self) -> Result<Simulation, SimulationError> {
-        Ngspice::from_env().run(self)
+        Ngspice::default().run(self)
     }
 }
 

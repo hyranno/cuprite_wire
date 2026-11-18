@@ -9,7 +9,7 @@ pub mod sources;
 pub use deck::SpiceDeck;
 pub use netlist::{GROUND, SpiceNetlist, spice_node_name};
 pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProblem};
-pub use simulation::{NGSPICE_ENV, Ngspice, Simulation, SimulationError, Table};
+pub use simulation::{Ngspice, Simulation, SimulationError, Table};
 pub use sources::{Ammeter, IndependentSource, SourceKind, Waveform};
 
 #[cfg(test)]

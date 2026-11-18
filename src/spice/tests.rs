@@ -1,7 +1,6 @@
 //! Export and simulation tests of whole circuits.
 //!
-//! The simulation tests run ngspice (see [`Ngspice::from_env`]); they need `python3` and
-//! `libngspice`, which the devcontainer provides.
+//! The simulation tests run the `ngspice` program, which the devcontainer provides.
 
 use std::collections::HashSet;
 

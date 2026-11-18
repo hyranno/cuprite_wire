@@ -145,15 +145,13 @@ after the title, `* requires: set ngbehavior=ps (.spiceinit)`, for running it by
 without such models run in the default mode. See `doc/spice_part_macro.md` section 4 for what the
 modes change.
 
-How ngspice is run is chosen by the environment variable `CUPRITE_WIRE_NGSPICE`:
+`run()` runs `ngspice -b deck.cir` (`Ngspice::default()`, the program from `PATH`); another
+program can be given with `Ngspice { program }.run(&deck)`.
+The CLI copies its input with glibc `tmpfile()`, which always writes to `/tmp`; the devcontainer's
+`ngspice` wrapper (`.devcontainer/tmpfile_shim.c`) redirects it to `$TMPDIR`, so it also runs
+where `/tmp` is read-only, such as the Claude Code sandbox.
 
-- (default) through the shared library `libngspice` with `python3 -I tools/ngspice_run.py`.
-  The ngspice CLI copies its input with `tmpfile()`, which always writes to `/tmp`, so it does not
-  work where `/tmp` is read-only, such as the Claude Code sandbox.
-- `cli`: `ngspice -b deck.cir`.
-
-The devcontainer provides `ngspice`, `libngspice0` and `python3`; the simulation tests in
-`src/spice/tests.rs` need them.
+The devcontainer provides `ngspice`; the simulation tests in `src/spice/tests.rs` need it.
 
 ## 6. Verifying the output
 
