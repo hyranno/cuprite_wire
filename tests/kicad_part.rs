@@ -124,7 +124,7 @@ fn test_inline_subcircuit() {
         .iter()
         .map(|m| match m {
             ModelSource::Inline { name, .. } => name.as_str(),
-            ModelSource::Include(_) => panic!(),
+            ModelSource::Include { .. } => panic!(),
         })
         .collect();
     assert_eq!(names, ["amp", "clamp"]);
