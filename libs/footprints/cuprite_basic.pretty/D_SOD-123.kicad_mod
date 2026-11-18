@@ -1,0 +1,13 @@
+(footprint "D_SOD-123"
+	(version 20241229)
+	(generator "cuprite_wire_generate_basic_library")
+	(layer "F.Cu")
+	(descr "Diode, SOD-123 (cathode: pad 1)")
+	(property "Reference" "REF**" (at 0 -2.0 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+	(property "Value" "D_SOD-123" (at 0 2.0 0) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+	(attr smd)
+	(fp_rect (start -1.35 -0.8) (end 1.35 0.8) (stroke (width 0.1) (type solid)) (fill no) (layer "F.Fab"))
+	(fp_rect (start -2.35 -1.0) (end 2.35 1.0) (stroke (width 0.05) (type solid)) (fill no) (layer "F.CrtYd"))
+	(pad "1" smd roundrect (at -1.65 0) (size 0.9 1.2) (layers "F.Cu" "F.Mask" "F.Paste") (roundrect_rratio 0.25))
+	(pad "2" smd roundrect (at 1.65 0) (size 0.9 1.2) (layers "F.Cu" "F.Mask" "F.Paste") (roundrect_rratio 0.25))
+)

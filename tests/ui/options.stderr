@@ -1,0 +1,35 @@
+error: unknown key `colour`; expected one of: symbol, footprint, value, ref_base, pins, internal_connections, extra_pads, spice, sim_model, fields, symbol_dir, footprint_dir, sim_library_dir
+ --> tests/ui/options.rs:4:9
+  |
+4 |         colour: "red",
+  |         ^^^^^^
+
+error: `symbol: "Library:Name"` is required
+ --> tests/ui/options.rs:9:12
+  |
+9 |     struct NoSymbol {
+  |            ^^^^^^^^
+
+error: `symbol` is given twice
+  --> tests/ui/options.rs:17:9
+   |
+17 |         symbol: "test:R",
+   |         ^^^^^^
+
+error: expected `auto` or `none` or `excluded`
+  --> tests/ui/options.rs:24:16
+   |
+24 |         spice: maybe,
+   |                ^^^^^
+
+error: the part has no pin "3"
+  --> tests/ui/options.rs:33:15
+   |
+33 |         pins: { "1" => "a", "3" => "b" },
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: the part has no pin ID "x"
+  --> tests/ui/options.rs:42:31
+   |
+42 |         internal_connections: [["1", "x"]],
+   |                               ^^^^^^^^^^^^

@@ -1,81 +1,14 @@
 //! Parts and subcircuits shared by the examples.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 
 use cuprite_wire::{
+    basic::{Capacitor0603, Resistor0603},
     circuit::CircuitBuilder,
-    kicad::{KicadPartInfo, KicadPinInfo, PinType},
     naming::NetLabel,
-    parts::Part,
-    spice::{SpiceElement, SpicePartInfo},
     subcircuit::SubcircuitGenerator,
 };
 use petgraph::graph::NodeIndex;
-
-/// A two-terminal passive part (resistor or capacitor) in an 0603 package.
-#[derive(Debug, Clone)]
-pub struct Passive {
-    ref_base_name: &'static str,
-    symbol: &'static str,
-    footprint: &'static str,
-    value: String,
-}
-
-impl Passive {
-    pub fn resistor(value: &str) -> Box<Self> {
-        Box::new(Passive {
-            ref_base_name: "R",
-            symbol: "Device:R",
-            footprint: "Resistor_SMD:R_0603_1608Metric",
-            value: value.into(),
-        })
-    }
-
-    pub fn capacitor(value: &str) -> Box<Self> {
-        Box::new(Passive {
-            ref_base_name: "C",
-            symbol: "Device:C",
-            footprint: "Capacitor_SMD:C_0603_1608Metric",
-            value: value.into(),
-        })
-    }
-}
-
-impl Part for Passive {
-    fn get_ref_base_name(&self) -> String {
-        self.ref_base_name.into()
-    }
-
-    fn pin_ids(&self) -> Vec<String> {
-        vec!["1".into(), "2".into()]
-    }
-
-    fn value(&self) -> String {
-        self.value.clone()
-    }
-
-    fn spice(&self) -> Option<SpicePartInfo> {
-        // The reference prefix (R, C) is also the SPICE device letter.
-        let device = self.ref_base_name.chars().next()?;
-        Some(SpicePartInfo::element(SpiceElement::new(
-            device,
-            ["1", "2"],
-            &self.value,
-        )))
-    }
-
-    fn kicad(&self) -> Option<KicadPartInfo> {
-        Some(KicadPartInfo {
-            footprint: Some(self.footprint.parse().unwrap()),
-            pins: BTreeMap::from([
-                ("1".into(), KicadPinInfo::new("1", None, PinType::Passive)),
-                ("2".into(), KicadPinInfo::new("2", None, PinType::Passive)),
-            ]),
-            lib_source: Some(self.symbol.parse().unwrap()),
-            ..Default::default()
-        })
-    }
-}
 
 /// One RC stage. Interface nodes: 0 = input, 1 = output.
 #[derive(Debug, Clone)]
@@ -88,8 +21,8 @@ impl SubcircuitGenerator for RcStage {
         let mut circuit = CircuitBuilder::new();
         let input = circuit.add_node();
         let output = circuit.add_node();
-        let r = circuit.instantiate_part_named("r", Passive::resistor("10k"));
-        let c = circuit.instantiate_part_named("c", Passive::capacitor("100n"));
+        let r = circuit.instantiate_part_named("r", Box::new(Resistor0603::new("10k")));
+        let c = circuit.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
         circuit.connect(input, r["1"]);
         circuit.connect(r["2"], output);
         circuit.connect(output, c["1"]);

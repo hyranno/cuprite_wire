@@ -1,0 +1,25 @@
+.title basic_parts
+.model __DiodeSod123 D is=2.5n n=1.8 rs=0.6 cjo=2p
+.model __Led0603 D is=1e-19 n=1.9 rs=5 cjo=10p
+.subckt cuprite_opamp in+ in- vcc vee out
+Rin in+ in- 10Meg
+G1 0 n1 in+ in- 1m
+R1 n1 0 100Meg
+C1 n1 0 159p
+E1 n2 0 n1 0 1
+Rout n2 out 50
+Rvcc vcc 0 1G
+Rvee vee 0 1G
+.ends cuprite_opamp
+.subckt cuprite_opamp_dual out1 in1- in1+ vee in2+ in2- out2 vcc
+X1 in1+ in1- vcc vee out1 cuprite_opamp
+X2 in2+ in2- vcc vee out2 cuprite_opamp
+.ends cuprite_opamp_dual
+C1 Net-_C1-Pad1_ 0 100n
+D1 /OUT +5V __DiodeSod123
+D2 Net-_D2-A_ 0 __Led0603
+L1 /IN Net-_C1-Pad1_ 10u
+R1 Net-_U1--_ Net-_D2-A_ 10k
+XU1 /IN Net-_U1--_ +5V 0 Net-_U1--_ cuprite_opamp
+XU2 /OUT /OUT Net-_C1-Pad1_ 0 0 Net-_U2---Pad6_ Net-_U2---Pad6_ +5V cuprite_opamp_dual
+.end

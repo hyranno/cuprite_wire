@@ -28,7 +28,16 @@ nodes by their nets), parts without an element are excluded from the simulation,
 compared after mapping KiCad's ground `GND` to `0`; their order is reported separately.
 Only R, C, L and X (with an inline `.subckt`) elements are supported.
 
-Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] [--spice] NETLIST...
+With --library-symbols, the components use their library symbols (`libsource`, looked up in
+`libs/symbols` and the installed KiCad libraries) instead of synthesized ones, with one symbol
+instance per unit, and every pin is connected by a label with its net's name placed on the pin
+(single-pin nets of automatic names get none, so KiCad names them). This checks the pin numbers,
+names and types of parts generated from the libraries by `kicad_part!`. With --spice as well,
+the symbols keep their own Sim.* fields, so the elements KiCad derives from them are compared
+with the ones cuprite_wire derived; built-in model names (`__<name>`) are compared as `__model`.
+Only netlists of a single sheet are supported.
+
+Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] [--spice] [--library-symbols] NETLIST...
 """
 
 import argparse
@@ -42,7 +51,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from kicad_netlist import TOKEN, children, parse, read, value
+from kicad_netlist import TOKEN, children, parse, project_symbol_libs, read, symbol_lib_path, value
 
 # Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_format.md §8).
 KNOWN_DIFFERENCES = {
@@ -56,6 +65,13 @@ KNOWN_DIFFERENCES = {
 }
 DROPPED_PROPERTIES = re.compile(r'"(Sheetname|Sheetfile|ki_[^"]*)"')
 DROPPED_FIELDS = {'"Footprint"', '"Datasheet"', '"Description"'}
+# With --library-symbols: the simulation model is written to the SPICE deck, not to the .net.
+LIBRARY_KNOWN_DIFFERENCES = {
+    "Sim.* fields and properties": "not written to the .net",
+    "tstamps of units 2..": "multi-unit components have one unique id (one symbol instance)",
+    "datasheet / description of components, ki_* fields": "not written",
+}
+SIM_PROPERTY = re.compile(r'"Sim[._][^"]*"')
 
 PIN_PITCH = 2.54
 COMPONENT_PITCH = 60.96
@@ -306,10 +322,11 @@ def parse_raw(text):
     return stack[0][0]
 
 
-def normalize(tree, ours):
-    """Drops what is listed in KNOWN_DIFFERENCES from KiCad's netlist (`tree`)."""
-    has_libsource = {value(c, "ref"): bool(children(c, "libsource"))
-                     for c in children(children(ours, "components")[0], "comp")}
+def normalize(tree, ours, library_symbols=False):
+    """Drops what is listed in KNOWN_DIFFERENCES (and LIBRARY_KNOWN_DIFFERENCES with
+    `library_symbols`) from KiCad's netlist (`tree`)."""
+    our_comps = {value(c, "ref"): c for c in children(children(ours, "components")[0], "comp")}
+    has_libsource = {ref: bool(children(c, "libsource")) for ref, c in our_comps.items()}
     tree = [item for item in tree
             if not (isinstance(item, list) and item[0] in ("design", "libparts", "libraries"))]
     for comp in children(children(tree, "components")[0], "comp"):
@@ -320,12 +337,23 @@ def normalize(tree, ours):
             if not isinstance(item, list):
                 kept.append(item)
             elif item[0] == "fields":
-                fields = [f for f in item[1:] if value(f, "name") not in DROPPED_FIELDS]
+                fields = [f for f in item[1:] if value(f, "name") not in DROPPED_FIELDS
+                          and not (library_symbols and (SIM_PROPERTY.fullmatch(value(f, "name") or "")
+                                                        or (value(f, "name") or "").startswith('"ki_')))]
                 if fields:
                     kept.append(["fields", *fields])
             elif item[0] == "libsource":
                 if has_libsource.get(ref):
                     kept.append([i for i in item if not (isinstance(i, list) and i[0] == "description")])
+            elif library_symbols and item[0] == "tstamps":
+                # The unit sharing the unique id of our component (KiCad sorts them).
+                ours_tstamps = children(our_comps[ref], "tstamps") if ref in our_comps else []
+                mine = ours_tstamps[0][1] if ours_tstamps else None
+                kept.append([item[0], mine if mine in item[1:] else item[1]])
+            elif library_symbols and item[0] in ("datasheet", "description"):
+                pass
+            elif item[0] == "property" and library_symbols and SIM_PROPERTY.fullmatch(value(item, "name") or ""):
+                pass
             elif item[0] == "property" and (DROPPED_PROPERTIES.fullmatch(value(item, "name") or "")
                                             or value(item, "name") in field_names
                                             and value(item, "value") is not None):
@@ -352,9 +380,10 @@ def lines(tree, depth=0):
     return result
 
 
-def compare(path, work, env):
+def compare(path, work, env, library_symbols=False):
     project = {"name": "compare", "uuid": new_uuid()}
-    files, notes = synthesize(path, project)
+    files, notes = (synthesize_library(path, project) if library_symbols
+                    else synthesize(path, project))
     for name, text in files.items():
         (work / name).write_text(text)
     schematic = work / "compare.kicad_sch"
@@ -365,7 +394,7 @@ def compare(path, work, env):
     if run.returncode or not exported.exists():
         return [f"kicad-cli failed: {run.stdout}{run.stderr}"], notes
     ours = parse_raw(Path(path).read_text(encoding="utf-8"))
-    theirs = normalize(parse_raw(exported.read_text(encoding="utf-8")), ours)
+    theirs = normalize(parse_raw(exported.read_text(encoding="utf-8")), ours, library_symbols)
     ours = [item for item in ours if not (isinstance(item, list) and item[0] == "design")]
     return list(difflib.unified_diff(lines(ours), lines(theirs), "cuprite_wire", "kicad-cli",
                                      lineterm="")), notes
@@ -384,7 +413,8 @@ def read_deck(path):
     elements, models, subckts, block = [], [], {}, None
     for line in Path(path).read_text(encoding="utf-8").splitlines()[1:]:  # the first line is the title
         tokens = line.split()
-        if not tokens or line.startswith("*"):
+        # Continuation lines ('+') belong to the `.model` lines KiCad writes for built-in models.
+        if not tokens or line.startswith(("*", "+")):
             continue
         keyword = tokens[0].lower()
         if block is not None:
@@ -439,16 +469,22 @@ def sim_fields(netlist, elements, subckts, library):
     return (fields, set(netlist.components) - set(fields)), compared
 
 
-def compare_spice(path, work, env):
+def compare_spice(path, work, env, library_symbols=False):
     deck = Path(path).with_suffix(".cir")
     if not deck.exists():
         raise ValueError(f"no SPICE deck {deck}")
     elements, models, subckts = read_deck(deck)
-    library = (work / "models.lib").resolve()
-    library.write_text("\n".join(models) + "\n")
-    sim, ours = sim_fields(read(path), elements, subckts, library)
     project = {"name": "compare", "uuid": new_uuid()}
-    files, notes = synthesize(path, project, sim)
+    if library_symbols:
+        netlist = read(path)
+        simulated = {t[0] if t[0] in netlist.components else t[0][1:] for t in elements}
+        ours = [normalize_models(" ".join(tokens)) for tokens in elements]
+        files, notes = synthesize_library(path, project, set(netlist.components) - simulated)
+    else:
+        library = (work / "models.lib").resolve()
+        library.write_text("\n".join(models) + "\n")
+        sim, ours = sim_fields(read(path), elements, subckts, library)
+        files, notes = synthesize(path, project, sim)
     for name, text in files.items():
         (work / name).write_text(text)
     exported = work / "kicad.cir"
@@ -459,10 +495,168 @@ def compare_spice(path, work, env):
         return [f"kicad-cli failed: {run.stdout}{run.stderr}"], notes
     theirs = [" ".join("0" if t.lower() == "gnd" else t for t in tokens)
               for tokens in read_deck(exported)[0]]
+    if library_symbols:
+        theirs = [normalize_models(line) for line in theirs]
     diff = list(difflib.unified_diff(sorted(ours), sorted(theirs), str(deck), "kicad-cli", lineterm=""))
     if not diff and ours != theirs:
         notes.append("element order differs: kicad-cli writes " + ", ".join(t.split()[0] for t in theirs))
     return diff, notes
+
+
+def normalize_models(line):
+    """Built-in model names depend on the exporter (`__D1` in KiCad, `__<type>` in cuprite_wire)."""
+    return re.sub(r"(?<=\s)__\S+", "__model", line)
+
+
+def unquote(atom):
+    return re.sub(r"\\(.)", r"\1", atom[1:-1]) if atom.startswith('"') else atom
+
+
+def dump(tree):
+    """Writes a tree of parse_raw() back (atoms as they were written)."""
+    if not isinstance(tree, list):
+        return tree
+    return "(" + " ".join(dump(item) for item in tree) + ")"
+
+
+def raw_children(node, name):
+    return [item for item in node[1:] if isinstance(item, list) and item and item[0] == name]
+
+
+_LIBRARIES = {}
+
+
+def library_symbol(library, name):
+    """The raw tree of a library symbol, with `extends` flattened and named `Library:Name`."""
+    if library not in _LIBRARIES:
+        path = symbol_lib_path(library)
+        if not path.exists():
+            raise ValueError(f"symbol library {library} not found")
+        tree = parse_raw(path.read_text(encoding="utf-8"))
+        _LIBRARIES[library] = {unquote(s[1]): s for s in raw_children(tree, "symbol")}
+    symbols = _LIBRARIES[library]
+    if name not in symbols:
+        raise ValueError(f"symbol {library}:{name} not found")
+    symbol = [list(item) if isinstance(item, list) else item for item in symbols[name]]
+    extends = raw_children(symbol, "extends")
+    if extends:
+        parent = library_symbol(library, unquote(extends[0][1]))
+        parent_name = unquote(parent[1]).split(":", 1)[1]
+        overrides = {unquote(p[1]): p for p in raw_children(symbol, "property")}
+        flat = [parent[0], parent[1]]
+        for item in parent[2:]:
+            if isinstance(item, list) and item[0] == "property" and unquote(item[1]) in overrides:
+                item = overrides.pop(unquote(item[1]))
+            elif isinstance(item, list) and item[0] == "symbol":
+                item = [item[0], '"' + name + unquote(item[1])[len(parent_name):] + '"', *item[2:]]
+            elif isinstance(item, list) and raw_children(symbol, item[0]) and item[0] != "property":
+                item = raw_children(symbol, item[0])[0]  # flags overridden by the derived symbol
+            flat.append(item)
+        flat[2:2] = list(overrides.values())
+        symbol = flat
+    symbol[1] = '"' + f"{library}:{name}" + '"'
+    return symbol
+
+
+def symbol_units(symbol):
+    """{unit: [(pin number, x, y)]} of body style 1; unit 0 holds the pins shared by all units."""
+    name = unquote(symbol[1]).split(":", 1)[1]
+    units = {}
+    for sub in raw_children(symbol, "symbol"):
+        unit, style = (int(n) for n in unquote(sub[1])[len(name) + 1:].split("_"))
+        if style > 1:
+            continue
+        for pin in raw_children(sub, "pin"):
+            number = unquote(raw_children(pin, "number")[0][1])
+            at = raw_children(pin, "at")[0]
+            units.setdefault(unit, []).append((number, float(at[1]), float(at[2])))
+    return units
+
+
+def synthesize_library(path, project, sim_excluded=None):
+    """Returns ({file name: text}, notes) of a one-sheet schematic using the library symbols.
+
+    `sim_excluded`: references to exclude from the simulation (--spice); None keeps the flag of
+    the symbol.
+    """
+    netlist = read(path)
+    root_tree = parse(open(path, encoding="utf-8").read())
+    notes = []
+    comps = {value(c, "ref"): c for c in children(children(root_tree, "components")[0], "comp")}
+    instance = "/" + project["uuid"]
+    out = ['(kicad_sch (version 20231120) (generator "cuprite_wire_compare")',
+           f"(uuid {quote(project['uuid'])})", '(paper "A0")', "(lib_symbols"]
+    lib_ids = {}
+    for ref, comp in comps.items():
+        source = children(comp, "libsource")
+        if not source:
+            raise ValueError(f"{ref} has no libsource")
+        lib_ids[ref] = (value(source[0], "lib"), value(source[0], "part"))
+        if netlist.components[ref].sheet_names.strip("/"):
+            raise ValueError("only netlists of a single sheet are supported")
+    symbols = {lib_id: library_symbol(*lib_id) for lib_id in sorted(set(lib_ids.values()))}
+    for symbol in symbols.values():
+        out.append(dump(symbol))
+    out.append(")")
+
+    nets = {}
+    for (ref, pad), node in netlist.nodes.items():
+        nets.setdefault(node.net, []).append((ref, pad))
+    project_libs = project_symbol_libs()
+    x = 25.4
+    y = 101.6
+    for ref, comp in comps.items():
+        lib_id = lib_ids[ref]
+        symbol = symbols[lib_id]
+        properties = {unquote(p[1]): unquote(p[2]) for p in raw_children(symbol, "property")}
+        properties.update({"Reference": ref, "Value": netlist.components[ref].value,
+                           "Footprint": netlist.components[ref].footprint})
+        properties.update(netlist.components[ref].fields)
+        if lib_id[0] in project_libs and "Sim.Library" in properties:
+            # The project's models are next to its symbol library, not in KiCad's symbol directory.
+            properties["Sim.Library"] = properties["Sim.Library"].replace(
+                "${KICAD9_SYMBOL_DIR}", str(project_libs[lib_id[0]].parent))
+        flags = netlist.components[ref].properties
+        sim_flag = "yes" if sim_excluded is not None and ref in sim_excluded else "no"
+        if sim_excluded is None:
+            sim_flag = next((f[1] for f in raw_children(symbol, "exclude_from_sim")), "no")
+        units = symbol_units(symbol)
+        shared = units.pop(0, [])
+        uid = comp_uuid = netlist.components[ref].path.rsplit("/", 1)[1]
+        for unit in sorted(units) or [1]:
+            out.append(f"(symbol (lib_id {quote(':'.join(lib_id))}) (at {mm(x)} {mm(y)} 0) (unit {unit}) "
+                       f"(exclude_from_sim {sim_flag}) "
+                       f"(in_bom {'no' if 'exclude_from_bom' in flags else 'yes'}) "
+                       f"(on_board {'no' if 'exclude_from_board' in flags else 'yes'}) "
+                       f"(dnp {'yes' if 'dnp' in flags else 'no'}) (uuid {quote(uid)})")
+            for i, (key, text) in enumerate(properties.items()):
+                out.append(prop(key, text, (x, y + 10 + 2 * i), hidden=key != "Reference"))
+            out.append(f"(instances (project {quote(project['name'])} "
+                       f"(path {quote(instance)} (reference {quote(ref)}) (unit {unit})))))")
+            # A label on every pin end (schematic y grows downwards).
+            pins = units.get(unit, []) + (shared if unit == min(units, default=1) else [])
+            for number, px, py in pins:
+                node = netlist.nodes.get((ref, number))
+                if node is None:
+                    raise ValueError(f"{ref}: pin {number} of the symbol is not in the netlist")
+                net = node.net
+                auto = net.startswith(("Net-(", "unconnected-("))
+                if auto and len(nets[net]) == 1:
+                    continue
+                kind, text = ("label", net[1:]) if net.startswith("/") else ("global_label", net)
+                shape = "" if kind == "label" else " (shape passive)"
+                out.append(f"({kind} {quote(text)}{shape} (at {mm(x + px)} {mm(y - py)} 0) "
+                           f"(effects (font (size 1.27 1.27)) (justify left bottom)) (uuid {quote(new_uuid())}))")
+            x += COMPONENT_PITCH
+            uid = new_uuid()
+        del comp_uuid
+    multi_pin_auto = sorted(n for n, nodes in nets.items()
+                            if n.startswith(("Net-(", "unconnected-(")) and len(nodes) > 1)
+    if multi_pin_auto:
+        notes.append("named by labels, so their names are not compared: " + ", ".join(multi_pin_auto))
+    out.append('(sheet_instances (path "/" (page "1")))')
+    out.append(")")
+    return {"compare.kicad_sch": "\n".join(out) + "\n"}, notes
 
 
 def main():
@@ -471,6 +665,8 @@ def main():
                         help="keep the synthesized schematics and KiCad's netlists in DIR")
     parser.add_argument("--spice", action="store_true",
                         help="compare the SPICE deck NETLIST.cir with kicad-cli's SPICE export")
+    parser.add_argument("--library-symbols", action="store_true",
+                        help="use the components' library symbols (and their Sim.* fields)")
     parser.add_argument("netlists", nargs="+")
     args = parser.parse_args()
 
@@ -479,7 +675,8 @@ def main():
     env = kicad_env(root / "kicad")
     if not args.spice:
         print("Ignored (intentional differences):")
-        for what, why in KNOWN_DIFFERENCES.items():
+        known = {**KNOWN_DIFFERENCES, **(LIBRARY_KNOWN_DIFFERENCES if args.library_symbols else {})}
+        for what, why in known.items():
             print(f"  {what}: {why}")
     failed = False
     try:
@@ -487,7 +684,7 @@ def main():
             work = root / f"{i}-{Path(path).stem}"
             work.mkdir(exist_ok=True)
             try:
-                diff, notes = (compare_spice if args.spice else compare)(path, work, env)
+                diff, notes = (compare_spice if args.spice else compare)(path, work, env, args.library_symbols)
             except ValueError as e:
                 print(f"{path}: skipped: {e}")
                 continue

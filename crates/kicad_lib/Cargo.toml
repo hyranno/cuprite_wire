@@ -1,0 +1,8 @@
+[package]
+name = "cuprite_wire_kicad_lib"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Reads KiCad symbol and footprint libraries and SPICE model libraries for cuprite_wire"
+
+[dependencies]

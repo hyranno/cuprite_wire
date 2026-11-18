@@ -1,0 +1,17 @@
+error: symbol "MISSING" not found in the library
+ --> tests/ui/unknown_symbol.rs:3:17
+  |
+3 |         symbol: "test:MISSING",
+  |                 ^^^^^^^^^^^^^^
+
+error: symbol library "nolib" not found ($DIR/crates/kicad_lib/tests/fixtures/symbols/nolib.kicad_sym)
+  --> tests/ui/unknown_symbol.rs:10:17
+   |
+10 |         symbol: "nolib:R",
+   |                 ^^^^^^^^^
+
+error: power symbols are not parts; use a global net label (NetLabel::global) instead
+  --> tests/ui/unknown_symbol.rs:17:17
+   |
+17 |         symbol: "test:GND",
+   |                 ^^^^^^^^^^

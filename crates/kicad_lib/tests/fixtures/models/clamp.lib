@@ -1,0 +1,2 @@
+* A clamp diode model written for cuprite_wire (MIT).
+.model clamp D N=0.01

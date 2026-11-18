@@ -38,7 +38,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from kicad_netlist import read
+from kicad_netlist import project_footprint_libs, project_symbol_libs, read
 
 PLUGIN = Path(__file__).resolve().parent / "pcbnew_gui" / "import_netlist_plugin.py"
 KICAD_VERSION = "9.0"
@@ -58,8 +58,13 @@ class KicadEnv:
         }
         config = self.root / "config" / "kicad" / KICAD_VERSION
         config.mkdir(parents=True, exist_ok=True)
-        for table in ("fp-lib-table", "sym-lib-table"):
-            shutil.copy(f"/usr/share/kicad/template/{table}", config / table)
+        # The installed libraries and the project's (libs/).
+        for table, libs in (("fp-lib-table", project_footprint_libs()), ("sym-lib-table", project_symbol_libs())):
+            text = Path(f"/usr/share/kicad/template/{table}").read_text().rstrip()
+            assert text.endswith(")"), table
+            entries = "".join(f'  (lib (name "{name}")(type "KiCad")(uri "{path}")(options "")(descr ""))\n'
+                              for name, path in libs.items())
+            (config / table).write_text(text[:-1] + entries + ")\n")
         # An existing kicad_common.json skips the first-run "Welcome to KiCad" dialog.
         (config / "kicad_common.json").write_text("{}\n")
         plugins = self.root / "data" / "kicad" / KICAD_VERSION / "scripting" / "plugins"
