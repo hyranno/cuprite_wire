@@ -1,3 +1,4 @@
+pub mod basic;
 pub mod circuit;
 pub mod error;
 pub mod kicad;

@@ -2,7 +2,7 @@
 """Check that the footprints and pads referenced by KiCad netlists exist.
 
 Every `footprint` of a `comp` must be loadable from the installed footprint
-libraries, and every `pin` of a `node` must be a pad number of that footprint.
+libraries (or the project's libraries in `libs/footprints`), and every `pin` of a `node` must be a pad number of that footprint.
 The import into pcbnew itself is checked by `check_netlist_import.py`.
 
 Usage: python3 tools/check_netlist_footprints.py [--footprint-dir DIR] NETLIST...
@@ -13,7 +13,7 @@ import sys
 
 import pcbnew
 
-from kicad_netlist import read
+from kicad_netlist import KICAD_FOOTPRINT_DIR, footprint_lib_path, read
 
 
 def check(path, footprint_dir):
@@ -22,7 +22,9 @@ def check(path, footprint_dir):
     pads_by_ref = {}
     for ref, comp in netlist.components.items():
         library, name = comp.footprint.split(":", 1)
-        footprint = pcbnew.FootprintLoad(f"{footprint_dir}/{library}.pretty", name)
+        lib_path = footprint_lib_path(library, footprint_dir)
+        # FootprintLoad raises for a library that does not exist.
+        footprint = pcbnew.FootprintLoad(str(lib_path), name) if lib_path.is_dir() else None
         if footprint is None:
             problems.append(f"{ref}: footprint {library}:{name} not found")
             continue
@@ -35,7 +37,7 @@ def check(path, footprint_dir):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--footprint-dir", default="/usr/share/kicad/footprints")
+    parser.add_argument("--footprint-dir", default=str(KICAD_FOOTPRINT_DIR))
     parser.add_argument("netlists", nargs="+")
     args = parser.parse_args()
     failed = False
