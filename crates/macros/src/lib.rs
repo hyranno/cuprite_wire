@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use cuprite_wire_kicad_lib::{
     part::{OptionKey, PartDef, load_part},
     resolve::Resolver,
-    sim::{Args, ModelDef, SpiceDef, Value},
+    sim::{Args, ElementDef, ModelDef, SpiceDef, Value},
+    spice_lib::Dialect,
 };
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
@@ -236,28 +237,11 @@ fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let body = match &part.spice {
         SpiceDef::Unsupported => return None,
         SpiceDef::Excluded => quote!(#krate::spice::SpicePartInfo::Excluded),
-        SpiceDef::Element(element) => {
-            let device = element.device;
-            let nodes = &element.nodes;
-            let args = match &element.args {
-                Args::Fixed(text) => quote!(#text),
-                Args::Value { prefix } => quote!(format!("{}{}", #prefix, self.value)),
-            };
-            let models = element.models.iter().map(|model| match model {
-                ModelDef::Include(path) => {
-                    let path = path.to_string_lossy();
-                    quote!(.with_model(#krate::spice::ModelSource::include(#path)))
-                }
-                ModelDef::Inline { name, text } => {
-                    quote!(.with_model(#krate::spice::ModelSource::inline(#name, #text)))
-                }
-            });
-            let unused = &element.unused_pins;
-            let unused = (!unused.is_empty()).then(|| quote!(.with_unused_pins([#(#unused),*])));
+        SpiceDef::Elements { elements, unused_pins } => {
+            let elements = elements.iter().map(|element| element_tokens(element, krate));
+            let unused = (!unused_pins.is_empty()).then(|| quote!(.with_unused_pins([#(#unused_pins),*])));
             quote! {
-                #krate::spice::SpicePartInfo::element(
-                    #krate::spice::SpiceElement::new(#device, [#(#nodes),*], #args) #(#models)*
-                )
+                #krate::spice::SpicePartInfo::elements([#(#elements),*])
                 #unused
             }
         }
@@ -267,6 +251,32 @@ fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
             Some(#body)
         }
     })
+}
+
+fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
+    let device = element.device;
+    let nodes = &element.nodes;
+    let args = match &element.args {
+        Args::Fixed(text) => quote!(#text),
+        Args::Value { prefix } => quote!(format!("{}{}", #prefix, self.value)),
+    };
+    let dialect = match element.dialect {
+        Dialect::Ngspice => None,
+        Dialect::Pspice => Some(quote!(.pspice())),
+        Dialect::Ltspice => Some(quote!(.ltspice())),
+    };
+    let models = element.models.iter().map(|model| match model {
+        ModelDef::Include(path) => {
+            let path = path.to_string_lossy();
+            quote!(.with_model(#krate::spice::ModelSource::include(#path) #dialect))
+        }
+        ModelDef::Inline { name, text } => {
+            quote!(.with_model(#krate::spice::ModelSource::inline(#name, #text) #dialect))
+        }
+    });
+    let suffix = &element.suffix;
+    let suffix = (!suffix.is_empty()).then(|| quote!(.with_suffix(#suffix)));
+    quote!(#krate::spice::SpiceElement::new(#device, [#(#nodes),*], #args) #suffix #(#models)*)
 }
 
 /// Documentation appended to the user's: where the part comes from and its pins.

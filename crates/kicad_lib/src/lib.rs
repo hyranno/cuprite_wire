@@ -4,6 +4,7 @@
 //! This crate is used by the `kicad_part!` macro at compile time. It does not depend on
 //! `proc_macro`, so it can be tested and used on its own.
 
+pub mod binding;
 pub mod footprint;
 pub mod part;
 pub mod resolve;

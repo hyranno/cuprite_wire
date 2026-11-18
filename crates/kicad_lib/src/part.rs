@@ -298,14 +298,17 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                 )),
             })?;
             match def {
-                SpiceDef::Element(mut element) => {
-                    element.nodes = to_ids(&element.nodes);
-                    element.unused_pins = to_ids(&element.unused_pins);
+                SpiceDef::Elements {
+                    mut elements,
+                    unused_pins,
+                } => {
+                    for element in &mut elements {
+                        element.nodes = to_ids(&element.nodes);
+                    }
+                    let mut unused_pins = to_ids(&unused_pins);
                     // Extra pads are not part of the model.
-                    element
-                        .unused_pins
-                        .extend(options.extra_pads.iter().map(|pad| id_of[pad.as_str()].to_string()));
-                    SpiceDef::Element(element)
+                    unused_pins.extend(options.extra_pads.iter().map(|pad| id_of[pad.as_str()].to_string()));
+                    SpiceDef::Elements { elements, unused_pins }
                 }
                 other => other,
             }
@@ -362,7 +365,10 @@ fn check_symbol(symbol: &Symbol) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::{Args, ElementDef};
+    use crate::{
+        sim::{Args, ElementDef},
+        spice_lib::Dialect,
+    };
 
     fn resolver() -> Resolver {
         let mut resolver = Resolver::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"), |_| None);
@@ -395,13 +401,18 @@ mod tests {
         assert_eq!(part.pins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["1", "2"]);
         assert_eq!(
             part.spice,
-            SpiceDef::Element(ElementDef {
-                device: 'R',
-                nodes: strings(&["1", "2"]),
-                args: Args::Value { prefix: "".into() },
-                models: vec![],
+            SpiceDef::Elements {
+                elements: vec![ElementDef {
+                    device: 'R',
+                    suffix: String::new(),
+                    nodes: strings(&["1", "2"]),
+                    args: Args::Value { prefix: "".into() },
+                    models: vec![],
+                    dialect: Dialect::Ngspice,
+                    info: None,
+                }],
                 unused_pins: vec![],
-            })
+            }
         );
         assert_eq!(r.files.len(), 2);
     }
