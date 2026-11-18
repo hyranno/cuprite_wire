@@ -20,3 +20,11 @@ uuid = { version = "1.29.2", features = ["v5"] }
 
 [dev-dependencies]
 trybuild = "1.0.125"
+
+[features]
+# Tests generating parts from the KiCad 9 libraries in /usr/share/kicad (the devcontainer has them).
+kicad-libraries = []
+
+[[test]]
+name = "kicad_libraries"
+required-features = ["kicad-libraries"]
