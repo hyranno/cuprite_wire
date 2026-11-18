@@ -25,6 +25,13 @@ trybuild = "1.0.125"
 # Tests generating parts from the KiCad 9 libraries in /usr/share/kicad (the devcontainer has them).
 kicad-libraries = []
 
+# Tests with vendor models downloaded into $CUPRITE_VENDOR_MODELS_DIR (they cannot be committed).
+vendor-models = []
+
 [[test]]
 name = "kicad_libraries"
 required-features = ["kicad-libraries"]
+
+[[test]]
+name = "vendor_models"
+required-features = ["vendor-models"]
