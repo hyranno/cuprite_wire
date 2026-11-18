@@ -7,28 +7,23 @@ description: Run and inspect SPICE simulations with ngspice in batch mode, and u
 
 ngspice 44.2 is the simulator KiCad uses (apt packages `ngspice` and `libngspice0`).
 
-## Running inside the Claude sandbox: use `tools/ngspice_run.py`
-
-The `ngspice` CLI does **not** work in the bash sandbox: `-b` and `-p` copy the input
-with glibc `tmpfile()`, which always writes to `/tmp` (ignores `$TMPDIR`) and fails with
-`tmpfile(): Read-only file system` (so do `-i` with `source` on stdin, and a bare deck argument).
-Run decks through the shared library instead. The script lives in the repository's `tools/`
-because the Rust simulation tests use it too (`src/spice/simulation.rs`):
+## Running
 
 ```bash
-R=/workspace/tools/ngspice_run.py
-cd $TMPDIR                                     # relative output paths (wrdata) land here
-python3 -I $R /path/circuit.cir -o sim.log     # deck with a .control block
-python3 -I $R /path/kicad_export.cir -c run -c "print all"   # deck without .control
+cd $TMPDIR                                   # relative output paths (wrdata) land here
+ngspice -b -o sim.log /path/circuit.cir      # deck with a .control block
+ngspice -b /path/kicad_export.cir            # deck without .control: runs its dot-analyses
 ```
 
-- The deck is loaded with `source`; each `-c` is an ngspice front-end command run afterwards.
-- `--cwd DIR` sets the directory for relative `.include` / `wrdata` paths.
-- Exit status 1 when ngspice prints an error. Warnings (e.g. an ignored malformed
-  element line) do **not** fail the run - read the output.
-- The deck path must not contain whitespace.
+This also works inside the Claude bash sandbox. The CLI copies its input with glibc
+`tmpfile()`, which always writes to `/tmp` (ignores `$TMPDIR`), and `/tmp` is read-only there;
+the devcontainer's `/usr/local/bin/ngspice` wrapper preloads a shim
+(`.devcontainer/tmpfile_shim.c`) that puts the file in `$TMPDIR`. If `ngspice` fails with
+`tmpfile(): Read-only file system`, the container was built without it (`which ngspice`
+shows `/usr/bin/ngspice`).
 
-Outside the sandbox (user's terminal) the CLI works as usual: `ngspice -b -o sim.log circuit.cir`.
+- Warnings (e.g. an ignored malformed element line) do **not** fail the run - read the output.
+- `SpiceDeck::run` in the Rust code runs the same command (`src/spice/simulation.rs`).
 
 ## Control blocks
 
