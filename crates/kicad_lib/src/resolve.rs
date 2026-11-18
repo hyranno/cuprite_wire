@@ -8,7 +8,12 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{Error, footprint::Footprint, spice_lib::SpiceLib, symbol::SymbolLib};
+use crate::{
+    Error,
+    footprint::Footprint,
+    spice_lib::{self, SpiceLib},
+    symbol::SymbolLib,
+};
 
 pub const SYMBOL_DIR_ENV: &str = "KICAD9_SYMBOL_DIR";
 pub const FOOTPRINT_DIR_ENV: &str = "KICAD9_FOOTPRINT_DIR";
@@ -72,7 +77,7 @@ impl Resolver {
             self.track(&path);
             return Err(Error::new(format!("symbol library {library:?} not found ({})", path.display())));
         }
-        self.load(&path, |text| SymbolLib::parse(text))
+        self.load(&path, utf8, SymbolLib::parse)
     }
 
     pub fn footprint(&mut self, library: &str, name: &str) -> Result<Arc<Footprint>, Error> {
@@ -84,11 +89,11 @@ impl Resolver {
             self.track(&path);
             return Err(Error::new(format!("footprint {library}:{name} not found ({})", path.display())));
         }
-        self.load(&path, |text| Footprint::parse(text))
+        self.load(&path, utf8, Footprint::parse)
     }
 
     pub fn spice_lib(&mut self, path: &Path) -> Result<Arc<SpiceLib>, Error> {
-        self.load(path, |text| Ok(SpiceLib::parse(text)))
+        self.load(path, |bytes| Ok(spice_lib::decode(bytes)), SpiceLib::parse)
     }
 
     /// Resolves a `Sim.Library` value: expands `${VAR}` and makes relative paths absolute.
@@ -126,10 +131,11 @@ impl Resolver {
     fn load<T: Send + Sync + 'static>(
         &mut self,
         path: &Path,
+        decode: fn(Vec<u8>) -> Result<String, Error>,
         parse: impl FnOnce(&str) -> Result<T, Error>,
     ) -> Result<Arc<T>, Error> {
         let path = self.track(path);
-        cached(&path, parse).map_err(|e| e.context(path.display()))
+        cached(&path, decode, parse).map_err(|e| e.context(path.display()))
     }
 
     fn track(&mut self, path: &Path) -> PathBuf {
@@ -139,6 +145,11 @@ impl Resolver {
         }
         path
     }
+}
+
+/// KiCad files are UTF-8.
+fn utf8(bytes: Vec<u8>) -> Result<String, Error> {
+    String::from_utf8(bytes).map_err(|_| Error::new("the file is not valid UTF-8"))
 }
 
 /// `KICAD<n>_SYMBOL_DIR` of any version names the symbol directory (older projects
@@ -163,6 +174,7 @@ type Entry = (SystemTime, u64, Arc<dyn std::any::Any + Send + Sync>);
 /// the process may outlive edits to the file (e.g. in rust-analyzer).
 fn cached<T: Send + Sync + 'static>(
     path: &Path,
+    decode: fn(Vec<u8>) -> Result<String, Error>,
     parse: impl FnOnce(&str) -> Result<T, Error>,
 ) -> Result<Arc<T>, Error> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Entry>>> = OnceLock::new();
@@ -175,8 +187,8 @@ fn cached<T: Send + Sync + 'static>(
     {
         return Ok(value);
     }
-    let text = std::fs::read_to_string(path).map_err(|e| Error::new(e.to_string()))?;
-    let value = Arc::new(parse(&text)?);
+    let bytes = std::fs::read(path).map_err(|e| Error::new(e.to_string()))?;
+    let value = Arc::new(parse(&decode(bytes)?)?);
     cache
         .lock()
         .unwrap()

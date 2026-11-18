@@ -12,7 +12,7 @@ use crate::{
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     naming::unescape_name,
     netlist::{Component, Netlist},
-    spice::{ModelSource, SpiceDeck, SpicePartInfo, SpiceProblem},
+    spice::{ModelSource, SpiceDeck, SpiceDialect, SpicePartInfo, SpiceProblem},
     trace::Trace,
 };
 
@@ -25,6 +25,8 @@ pub const GROUND: &str = "0";
 pub struct SpiceNetlist {
     title: String,
     includes: BTreeSet<PathBuf>,
+    /// Dialects of the models, with whether the model is inline (selecting ngspice's compatibility mode).
+    dialects: BTreeSet<(SpiceDialect, bool)>,
     /// Inline model definitions, sorted by name (case-insensitively).
     models: Vec<String>,
     elements: Vec<SpiceLine>,
@@ -117,6 +119,7 @@ impl Netlist {
         // (element name, net indices, args, trace)
         let mut lines = Vec::new();
         let mut includes = BTreeSet::new();
+        let mut dialects = BTreeSet::new();
         // Lowercase name -> (definition, trace of the first user).
         let mut models: BTreeMap<String, (String, &Trace)> = BTreeMap::new();
         for (index, component) in self.components.iter().enumerate() {
@@ -136,11 +139,12 @@ impl Netlist {
                     })
                     .collect::<Vec<_>>();
                 for model in &element.models {
+                    dialects.insert((model.dialect(), matches!(model, ModelSource::Inline { .. })));
                     match model {
-                        ModelSource::Include(path) => {
+                        ModelSource::Include { path, .. } => {
                             includes.insert(path.clone());
                         }
-                        ModelSource::Inline { name, text } => {
+                        ModelSource::Inline { name, text, .. } => {
                             let text = text.trim_end().to_string();
                             match models.entry(name.to_ascii_lowercase()) {
                                 std::collections::btree_map::Entry::Vacant(entry) => {
@@ -201,6 +205,7 @@ impl Netlist {
             SpiceNetlist {
                 title: env!("CARGO_PKG_NAME").to_string(),
                 includes,
+                dialects,
                 models: models.into_values().map(|(text, _)| text).collect(),
                 elements,
                 nodes,
@@ -350,6 +355,14 @@ impl SpiceNetlist {
         self.nodes.get(net_name).map(String::as_str)
     }
 
+    /// The value of ngspice's `ngbehavior` the models need (`ps`, `psa`, `lt`, ...; see
+    /// [`SpiceDialect::ngbehavior`]), or `None` for the default mode. [`Ngspice::run`](crate::spice::Ngspice::run) sets it; to run the deck
+    /// yourself, put `set ngbehavior=<value>` into `.spiceinit` in the working directory
+    /// (`.options ngbehavior=` in the deck has no effect).
+    pub fn ngbehavior(&self) -> Option<&'static str> {
+        SpiceDialect::ngbehavior(self.dialects.iter().copied())
+    }
+
     /// A deck of this netlist, to add analyses and run it.
     pub fn deck(self) -> SpiceDeck {
         SpiceDeck::new(self)
@@ -358,6 +371,9 @@ impl SpiceNetlist {
     /// Writes everything but `.end`.
     pub(crate) fn fmt_body(&self, f: &mut impl fmt::Write) -> fmt::Result {
         writeln!(f, ".title {}", self.title)?;
+        if let Some(mode) = self.ngbehavior() {
+            writeln!(f, "* requires: set ngbehavior={mode} (.spiceinit)")?;
+        }
         for path in &self.includes {
             writeln!(f, ".include \"{}\"", path.display())?;
         }

@@ -283,6 +283,9 @@ Implemented in `src/spice/` (usage: `doc/spice_netlist_usage.md`).
   error; parts not to be simulated (connectors, mechanical parts, ...) are excluded explicitly
   (`SpicePartInfo::Excluded`, like `exclude_from_sim`). Every pin must be used by the model or
   declared unused.
+- Models written for PSpice or LTspice (`ModelSource::pspice()` / `ltspice()`) need ngspice's
+  compatibility mode, which a deck cannot set itself: a comment after the title line,
+  `* requires: set ngbehavior=ps (.spiceinit)`, says which (`doc/spice_part_macro.md` section 4).
 - Arguments with `;` or `$` are rejected, so values are clean (`100u`, not `100uF;16V`).
 - Running: `ngspice -b -o sim.log deck.cir` from a shell. Inside the Claude sandbox use
   `tools/ngspice_run.py` (see `.claude/skills/spice/SKILL.md`); `SpiceDeck::run` uses it by default.

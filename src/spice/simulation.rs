@@ -41,10 +41,18 @@ impl Ngspice {
 
     /// Writes the deck into a new temporary directory and runs it there, so that relative
     /// `wrdata` paths land in that directory. Fails if ngspice reports an error.
+    ///
+    /// If the models need a compatibility mode ([`SpiceNetlist::ngbehavior`](crate::spice::SpiceNetlist::ngbehavior)),
+    /// it is set with a `.spiceinit` file in that directory.
     pub fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
         let dir = create_run_dir()?;
         let deck_path = dir.join("deck.cir");
         fs::write(&deck_path, deck.to_string())?;
+        // ngspice reads `.spiceinit` in its working directory, both as a program and as a library,
+        // before the deck; the compatibility mode cannot be set from the deck.
+        if let Some(mode) = deck.netlist().ngbehavior() {
+            fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
+        }
         let mut command = match self {
             Ngspice::SharedLibrary { python, script } => {
                 let mut command = Command::new(python);

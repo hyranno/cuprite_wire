@@ -174,7 +174,7 @@ impl SpiceElement {
         }
         for model in &self.models {
             match model {
-                ModelSource::Include(path) => {
+                ModelSource::Include { path, .. } => {
                     if !path.is_absolute() {
                         invalid(format!("include path {} is not absolute", path.display()));
                     } else if path.to_str().is_none_or(|s| s.contains(['"', '\n', '\r'])) {
@@ -184,7 +184,7 @@ impl SpiceElement {
                         ));
                     }
                 }
-                ModelSource::Inline { name, text } => {
+                ModelSource::Inline { name, text, .. } => {
                     if name.is_empty() || name.chars().any(|c| c.is_whitespace() || c.is_control())
                     {
                         invalid(format!(
@@ -218,22 +218,101 @@ pub enum ModelSource {
     /// A model library written as `.include "<path>"`. The path must be absolute
     /// (e.g. `concat!(env!("CARGO_MANIFEST_DIR"), "/models/x.lib")`), since ngspice resolves
     /// relative paths against its working directory.
-    Include(PathBuf),
+    Include { path: PathBuf, dialect: SpiceDialect },
     /// A `.model` or `.subckt` definition written into the deck. Definitions are deduplicated
     /// by name (case-insensitively, like SPICE); two different definitions with the same name are an error.
-    Inline { name: String, text: String },
+    Inline {
+        name: String,
+        text: String,
+        dialect: SpiceDialect,
+    },
 }
 
 impl ModelSource {
+    /// A model library in ngspice's dialect; see [`ModelSource::pspice`] for others.
     pub fn include(path: impl Into<PathBuf>) -> Self {
-        ModelSource::Include(path.into())
+        ModelSource::Include {
+            path: path.into(),
+            dialect: SpiceDialect::Ngspice,
+        }
     }
 
+    /// A definition in ngspice's dialect; see [`ModelSource::pspice`] for others.
     pub fn inline(name: impl Into<String>, text: impl Into<String>) -> Self {
         ModelSource::Inline {
             name: name.into(),
             text: text.into(),
+            dialect: SpiceDialect::Ngspice,
         }
+    }
+
+    pub fn dialect(&self) -> SpiceDialect {
+        match self {
+            ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => *dialect,
+        }
+    }
+
+    pub fn with_dialect(mut self, new: SpiceDialect) -> Self {
+        match &mut self {
+            ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => *dialect = new,
+        }
+        self
+    }
+
+    /// Marks the model as written for PSpice (e.g. vendor models using `IF(...)`):
+    /// decks using it run ngspice in its PSpice compatibility mode.
+    pub fn pspice(self) -> Self {
+        self.with_dialect(SpiceDialect::Pspice)
+    }
+
+    /// Marks the model as written for LTspice: decks using it run ngspice in its LTspice
+    /// compatibility mode.
+    pub fn ltspice(self) -> Self {
+        self.with_dialect(SpiceDialect::Ltspice)
+    }
+}
+
+/// The SPICE dialect a model is written in. Models in another dialect than ngspice's make
+/// ngspice run in a compatibility mode (`set ngbehavior=...`; see [`SpiceDialect::ngbehavior`]).
+///
+/// ngspice 44 translates PSpice's `IF(...)`, `&`, `|`, `STP(...)`, `LIMIT(...)` and `.LIB file`
+/// in its PSpice mode, and LTspice's `uplim(...)` / `dnlim(...)` in its LTspice mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum SpiceDialect {
+    #[default]
+    Ngspice,
+    Pspice,
+    Ltspice,
+}
+
+impl SpiceDialect {
+    /// The value of ngspice's `ngbehavior` for models in these dialects, each with whether it is
+    /// written into the deck (inline) rather than included: `None` (the default mode) for ngspice's
+    /// own dialect, else `ps`, `lt` or `ltps`, followed by `a` if a model is inline.
+    ///
+    /// Without `a`, ngspice translates only the included files, which keeps the rest of the deck
+    /// in its own dialect (e.g. a `$` after whitespace starts a comment only in the default mode).
+    pub fn ngbehavior(
+        models: impl IntoIterator<Item = (SpiceDialect, bool)>,
+    ) -> Option<&'static str> {
+        let (mut pspice, mut ltspice, mut all) = (false, false, false);
+        for (dialect, inline) in models {
+            match dialect {
+                SpiceDialect::Ngspice => continue,
+                SpiceDialect::Pspice => pspice = true,
+                SpiceDialect::Ltspice => ltspice = true,
+            }
+            all |= inline;
+        }
+        Some(match (pspice, ltspice, all) {
+            (false, false, _) => return None,
+            (true, false, false) => "ps",
+            (true, false, true) => "psa",
+            (false, true, false) => "lt",
+            (false, true, true) => "lta",
+            (true, true, false) => "ltps",
+            (true, true, true) => "ltpsa",
+        })
     }
 }
 
@@ -310,6 +389,22 @@ mod tests {
         assert_eq!(
             SpicePartInfo::elements([]).check(&[], &[]),
             vec![SpiceProblem::NoElements]
+        );
+    }
+
+    #[test]
+    fn test_dialects() {
+        let model = ModelSource::include("/m.lib").pspice();
+        assert_eq!(model.dialect(), SpiceDialect::Pspice);
+        assert_eq!(ModelSource::inline("m", ".model m D").dialect(), SpiceDialect::Ngspice);
+        use SpiceDialect::*;
+        assert_eq!(SpiceDialect::ngbehavior([(Ngspice, false), (Ngspice, true)]), None);
+        assert_eq!(SpiceDialect::ngbehavior([(Ngspice, true), (Pspice, false)]), Some("ps"));
+        assert_eq!(SpiceDialect::ngbehavior([(Pspice, true)]), Some("psa"));
+        assert_eq!(SpiceDialect::ngbehavior([(Ltspice, false)]), Some("lt"));
+        assert_eq!(
+            SpiceDialect::ngbehavior([(Ltspice, false), (Pspice, true), (Ngspice, false)]),
+            Some("ltpsa")
         );
     }
 }

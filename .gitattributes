@@ -1,0 +1,2 @@
+# Test models with CRLF line ends and Windows-1252 text, kept as written.
+crates/kicad_lib/tests/fixtures/models/*.lib -text

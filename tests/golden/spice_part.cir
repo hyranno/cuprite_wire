@@ -1,0 +1,6 @@
+.title spice_part
+* requires: set ngbehavior=ps (.spiceinit)
+.include "${CARGO_MANIFEST_DIR}/crates/kicad_lib/tests/fixtures/models/vsup01.lib"
+R1 VDD /RESET_N 100k
+XU1 0 0 0 /RESET_N /SENSE VDD VSUP01
+.end

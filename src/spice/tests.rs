@@ -377,6 +377,54 @@ fn test_simulate_subcircuit_model() {
     assert!((out - 1.0).abs() < 1e-3, "out = {out}");
 }
 
+/// A window comparator written for PSpice (`IF` and `&` work only in ngspice's PSpice mode).
+const PSPICE_WINDOW: &str = ".SUBCKT WINDOW IN OUT
+E1 OUT 0 VALUE = { IF(V(IN) > 1 & V(IN) < 2, 5, 0) }
+.ENDS WINDOW
+";
+
+/// A model marked as PSpice makes the deck run in ngspice's PSpice mode.
+#[test]
+fn test_simulate_pspice_model() {
+    let deck = |model: ModelSource| {
+        let mut circuit = CircuitBuilder::new();
+        let window = circuit.instantiate_part(Box::new(CustomPart {
+            ref_base_name: "U",
+            pin_ids: vec!["in", "out"],
+            internal_connections: vec![],
+            kicad: None,
+            spice: Some(SpicePartInfo::element(
+                SpiceElement::new('X', ["in", "out"], "WINDOW").with_model(model),
+            )),
+        }));
+        let input = circuit.instantiate_part(IndependentSource::voltage(1.5));
+        let load = circuit.instantiate_part(Box::new(Resistor("1k")));
+        circuit.connect(input["p"], window["in"]);
+        circuit.connect(window["out"], load["1"]);
+        circuit.label(window["out"], NetLabel::local("OUT"));
+        circuit.label(input["n"], NetLabel::global("GND"));
+        circuit.label(load["2"], NetLabel::global("GND"));
+        export(&circuit)
+            .deck()
+            .control(["op", r#"let out = v("/OUT")"#, "print out"])
+    };
+    let pspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW).pspice());
+    // Inline models need the mode for the whole deck (`a`), not only for included files.
+    assert_eq!(pspice.netlist().ngbehavior(), Some("psa"));
+    let text = pspice.to_string();
+    assert!(
+        text.starts_with(".title cuprite_wire\n* requires: set ngbehavior=psa (.spiceinit)\n"),
+        "{text}"
+    );
+    let sim = pspice.run().unwrap();
+    assert!((sim.value("out").unwrap() - 5.0).abs() < 1e-6, "{}", sim.log());
+
+    let ngspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW));
+    assert_eq!(ngspice.netlist().ngbehavior(), None);
+    assert!(!ngspice.to_string().contains("requires"));
+    assert!(ngspice.run().is_err(), "the default mode does not read the PSpice syntax");
+}
+
 /// A deck that ngspice rejects is reported with its log.
 #[test]
 fn test_simulation_error() {
