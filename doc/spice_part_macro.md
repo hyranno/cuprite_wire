@@ -182,8 +182,12 @@ from what the library (and the files it includes) uses, and record it in the ele
 - Mappings taken from vendor symbol files (`.olb`) or from header comments
   (`* PINOUT ORDER ...`), which follow no common format.
 
-**Convergence options.** TI's models often recommend `.OPTIONS` (e.g. `ITL4`, `RELTOL`). Parts do
-not set options; add them in the test bench: `netlist.deck().directive(".options itl4=100")`.
+**Convergence options.** Vendor models may need options for ngspice to converge. Parts do not
+set options; add them in the test bench, e.g. `netlist.deck().directive(".options rshunt=1e12")`.
+With TI's LMx58/LM2904 model, the operating point fails without it (gmin and source stepping), and
+the transient operating point ngspice falls back to leaves the output above the supply, without
+any error: check results against what the circuit can do. Transient models (e.g. TI's TPS3899
+model) are meant for `.tran`, as in the vendor's test bench.
 
 ## 6. Licenses of vendor models
 
@@ -197,7 +201,9 @@ cuprite_wire's own tests follow this: the model in `crates/kicad_lib/tests/fixtu
 is written for the project in the style of TI's models (CRLF, a Windows-1252 comment, `.LIB`,
 `PARAMS:`, `IF(...)` with `&`). Tests with real models are opt-in:
 `CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
-(`tests/vendor_models.rs` lists the files it expects).
+(`tests/vendor_models.rs` lists the files it expects: TI's TPS3899DL transient model and LMx58/LM2904
+model, checked with ngspice 44.2 on 2026-11-18). The TPS3899 model is marked "All rights reserved",
+so it is only read from that directory (e.g. the git-ignored `vendor_models.local/`).
 
 ## 7. Verifying
 
