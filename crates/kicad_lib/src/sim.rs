@@ -11,7 +11,11 @@
 //!
 //! Anything else is an error: the macro user decides with `spice: none` / `spice: excluded`.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use crate::{
     Error,
@@ -184,7 +188,7 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
                 return Err(Error::new("Sim.Device SUBCKT needs Sim.Library and Sim.Name"));
             };
             let (definition, models) = library_definition(library, name, input.model_mode, resolver)?;
-            let DefinitionKind::Subckt { ports } = &definition.kind else {
+            let DefinitionKind::Subckt { ports, .. } = &definition.kind else {
                 return Err(Error::new(format!("{name:?} in {library:?} is a .model, not a subcircuit")));
             };
             let ports: Vec<&str> = ports.iter().map(String::as_str).collect();
@@ -386,6 +390,47 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
     }
 }
 
+/// Names that a definition may refer to: the words of its text after the keyword and its own name.
+/// Names may contain `+` and `-` (`IN+`), which are also operators, so both forms are returned.
+fn referenced_names(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('*'))
+        .flat_map(|line| line.split(|c: char| c.is_whitespace() || "(),={}'\"*/<>&|?:!^;".contains(c)))
+        .filter(|word| !word.is_empty())
+        .skip(2)
+        .flat_map(|word| std::iter::once(word).chain(word.split(['+', '-']).filter(|w| !w.is_empty())))
+}
+
+/// A library file with the section that is read (`None`: outside the sections).
+type LibSection = (Arc<SpiceLib>, Option<String>);
+
+/// Reads a library and the files it includes, each with the section that is read.
+fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibSection>, Error> {
+    let mut libs = Vec::new();
+    let mut queue = vec![(path.to_path_buf(), None::<String>)];
+    let mut seen = BTreeSet::new();
+    while let Some((file, section)) = queue.pop() {
+        let key = (file.clone(), section.as_ref().map(|s| s.to_ascii_lowercase()));
+        if !seen.insert(key) || seen.len() > 32 {
+            continue;
+        }
+        let lib = resolver.spice_lib(&file)?;
+        if let Some(section) = &section
+            && !lib.sections.iter().any(|s| s.eq_ignore_ascii_case(section))
+        {
+            return Err(Error::new(format!("{} has no section {section:?}", file.display())));
+        }
+        let dir = file.parent().map(PathBuf::from).unwrap_or_default();
+        // Relative paths are relative to the including file, as in ngspice.
+        queue.extend(
+            lib.includes(section.as_deref())
+                .map(|include| (dir.join(&include.path), include.section.clone())),
+        );
+        libs.push((lib, section));
+    }
+    Ok(libs)
+}
+
 /// Finds the definition `name` in a library (following its `.include` lines) and returns it
 /// with the model sources the element needs.
 fn library_definition(
@@ -395,34 +440,35 @@ fn library_definition(
     resolver: &mut Resolver,
 ) -> Result<(Definition, Vec<ModelDef>), Error> {
     let path = resolver.sim_library_path(library)?;
-    let mut libs: Vec<std::sync::Arc<SpiceLib>> = Vec::new();
-    let mut queue = vec![path.clone()];
-    let mut seen = BTreeSet::new();
-    while let Some(file) = queue.pop() {
-        if !seen.insert(file.clone()) || seen.len() > 32 {
-            continue;
-        }
-        let lib = resolver.spice_lib(&file)?;
-        let dir = file.parent().map(PathBuf::from).unwrap_or_default();
-        queue.extend(lib.includes.iter().map(|include| dir.join(include)));
-        libs.push(lib);
-    }
-    let find = |name: &str| libs.iter().find_map(|lib| lib.find(name)).cloned();
+    let libs = read_library(&path, resolver)?;
+    let find = |name: &str| {
+        libs.iter()
+            .find_map(|(lib, section)| lib.find_in(name, section.as_deref()))
+            .cloned()
+    };
     let definition = find(name).ok_or_else(|| {
         Error::new(format!("no .subckt or .model named {name:?} in {}", path.display()))
     })?;
     let models = match mode {
         ModelMode::Include => vec![ModelDef::Include(path)],
         ModelMode::Inline => {
-            // The definition and the top-level definitions it refers to by name.
+            // The definition and the top-level definitions (also `.param` / `.func`) it refers to by name.
+            let find_any = |name: &str| {
+                libs.iter()
+                    .find_map(|(lib, section)| {
+                        lib.definitions(section.as_deref())
+                            .find(|d| d.name.eq_ignore_ascii_case(name))
+                    })
+                    .cloned()
+            };
             let mut out: Vec<Definition> = Vec::new();
             let mut pending = vec![definition.clone()];
             while let Some(def) = pending.pop() {
                 if out.iter().any(|d| d.name.eq_ignore_ascii_case(&def.name)) {
                     continue;
                 }
-                for token in def.text.split(|c: char| c.is_whitespace() || "(),=".contains(c)).skip(2) {
-                    if let Some(referenced) = find(token) {
+                for token in referenced_names(&def.text) {
+                    if let Some(referenced) = find_any(token) {
                         pending.push(referenced);
                     }
                 }

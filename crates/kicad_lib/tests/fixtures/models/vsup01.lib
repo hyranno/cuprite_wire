@@ -1,0 +1,23 @@
+*$
+* VSUP01 - a voltage supervisor model written for the cuprite_wire tests (MIT).
+* It imitates the style of vendor PSpice models; it is not a vendor model.
+* RESET_B is high (VDD) while SENSE > VTH and VDD > VDDMIN, and low otherwise.
+* Output resistance: 100 Ohm; delay: none (0 µs).
+*$
+.LIB "vsup01_aux.lib"
+.PARAM VSUP_RON = 100
+.FUNC VSUP_DRIVE(en, vdd) {en * vdd}
+*$
+.SUBCKT VSUP01 CTR CTS GND RESET_B SENSE VDD
++ PARAMS: VTH=0.5 VDDMIN = 0.8
+R_CTR CTR GND 1MEG
+R_CTS CTS GND 1MEG
+E_LOGIC N_LOGIC GND VALUE = { IF(V(SENSE,GND) > VTH & V(VDD,GND) > VDDMIN, 1, 0) } ; reset logic
+R_LOGIC N_LOGIC GND 1MEG
+X_OUT N_LOGIC RESET_B VDD GND VSUP_OUTSTAGE
+D_ESD GND SENSE D_VSUP_ESD
+.ENDS VSUP01
+*$
+.MODEL D_VSUP_ESD D(IS=1E-15
++ N=1.5)
+*$
