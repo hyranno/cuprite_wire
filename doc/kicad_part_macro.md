@@ -45,10 +45,11 @@ Only `symbol` is required. Options are separated by commas.
 | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs connected inside the part | stacked pins only |
 | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins of the part | none |
 | `spice` | `auto`, `none` (`spice()` returns `None`) or `excluded` (excluded from the simulation) | `auto` |
+| `sim` | a library model mapped to the pins by hand, replacing the symbol's `Sim.*` fields (section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
 | `fields` | `{ "MPN" => "..." }`: fields written to the footprint | none |
 | `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD9_SYMBOL_DIR` / `$KICAD9_FOOTPRINT_DIR`, else `/usr/share/kicad/symbols` / `footprints` |
-| `sim_library_dir` | base of relative `Sim.Library` paths, relative to the crate | the crate |
+| `sim_library_dir` | base of relative `Sim.Library` / `sim` library paths, relative to the crate | the crate |
 
 A library nickname is the file name: `Library:Name` is the symbol `Name` in
 `<symbol dir>/Library.kicad_sym`, and the footprint `<footprint dir>/Library.pretty/Name.kicad_mod`.
@@ -121,6 +122,32 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   compile error. Choose `spice: none` (not simulated) or `spice: excluded` explicitly.
 - Built-in models are named after the generated type (`__Diode`), while KiCad names them after the
   reference (`__D1`); the definitions are the same.
+- The library model is checked as described in `doc/spice_part_macro.md` section 3 (except that
+  pins missing from `Sim.Pins` are unused, as in KiCad), and its dialect is detected: models written
+  for PSpice or LTspice run in ngspice's compatibility mode (`doc/spice_part_macro.md` section 4).
+
+**The `sim` block.** When the symbol has no (or wrong) `Sim.*` fields, e.g. a vendor's symbol,
+give the model and the mapping in the macro. The keys are those of `Sim.*`, with the pins mapped
+by number to the `.subckt` ports, as in `Sim.Pins`:
+
+```rust
+kicad_part! {
+    pub struct Vsup {
+        symbol: "test:VSUP",
+        sim: {
+            library: "models/vsup01.lib",
+            name: "VSUP01",
+            pins: { "1" => "CTR", "2" => "CTS", "3" => "GND", "4" => "VDD", "5" => "SENSE", "6" => "RESET_B" },
+            // unused: ["7"], params: { "VTH" => "0.6" }, dialect: pspice,
+        },
+    }
+}
+```
+
+Unlike `Sim.Pins`, every pin must be mapped, listed in `unused`, or connected inside the part to a
+mapped pin. A list of models with suffixes (`sim: [{ ..., suffix: "A" }, ...]`) uses a
+single-amplifier model for each unit. See `doc/spice_part_macro.md` for the keys, the checks and
+the dialects, and for `spice_part!`, which makes a part from a model alone.
 
 ## 5. Rebuilds and errors
 
@@ -177,9 +204,11 @@ constructor argument, the op-amps' models are inlined). To import their netlists
   KiCad libraries, compares the netlists of a circuit using them with `tests/golden/kicad_libraries.*`,
   and simulates it with KiCad's models.
 - `python3 tools/compare_kicad_cli_netlist.py --library-symbols [--spice] NETLIST...` builds a
-  schematic from the components' library symbols (with their `Sim.*` fields for `--spice`) and
-  compares KiCad's export with ours: pin numbers, names and types, and the SPICE elements KiCad
-  derives from the symbols. `tests/golden/basic_parts.net` and `tests/golden/kicad_libraries.net`
-  are the same as KiCad's.
+  schematic from the components' library symbols (with their `Sim.*` fields for `--spice`, replaced by
+  those of the netlist for parts with a `sim` block) and compares KiCad's export with ours: pin
+  numbers, names and types, and the SPICE elements KiCad derives from the symbols.
+  `tests/golden/basic_parts.net`, `tests/golden/kicad_libraries.net` and (with
+  `--symbol-dir crates/kicad_lib/tests/fixtures/symbols`) `tests/golden/spice_part.net` are the same
+  as KiCad's.
 - `python3 tools/check_netlist_footprints.py` and `tools/check_netlist_import.py` (see
   `doc/kicad_netlist_usage.md`) also find the footprints of `libs/`.
