@@ -2,6 +2,7 @@
 name = "cuprite_wire"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
 
 [dependencies]
 dyn-clone = "1.0.20"
