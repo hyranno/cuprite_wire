@@ -178,4 +178,53 @@ mod tests {
             assert!(range.contains(&out), "forward voltage {out} not in {range:?}");
         }
     }
+
+    /// A circuit with every basic part; its netlists are compared with KiCad's export by
+    /// `tools/compare_kicad_cli_netlist.py --library-symbols [--spice] tests/golden/basic_parts.net`.
+    #[test]
+    fn test_golden() {
+        let mut c = CircuitBuilder::new();
+        let single = c.instantiate_part_named("single", Box::new(OpAmpSot23::new("LMV321")));
+        let dual = c.instantiate_part_named("dual", Box::new(DualOpAmpSoic8::new("LM358")));
+        let r = c.instantiate_part_named("r", Box::new(Resistor0603::new("10k")));
+        let cap = c.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
+        let l = c.instantiate_part_named("l", Box::new(Inductor0603::new("10u")));
+        let d = c.instantiate_part_named("d", Box::new(DiodeSod123::new("1N4148")));
+        let led = c.instantiate_part_named("led", Box::new(Led0603::new("red")));
+        let gnd = NetLabel::global("GND");
+        let vcc = NetLabel::global("+5V");
+        // Single op-amp: a follower of IN driving the LED through R.
+        c.label(single["in_p"], NetLabel::local("IN"));
+        c.connect(single["out"], single["in_n"]);
+        c.connect(single["out"], r["1"]);
+        c.connect(r["2"], led["a"]);
+        c.label(led["k"], gnd.clone());
+        c.label(single["vcc"], vcc.clone());
+        c.label(single["vee"], gnd.clone());
+        // Dual op-amp: channel A buffers IN through an LC filter, channel B follows ground.
+        c.connect(dual["in_p_a"], l["2"]);
+        c.label(l["1"], NetLabel::local("IN"));
+        c.connect(dual["in_p_a"], cap["1"]);
+        c.label(cap["2"], gnd.clone());
+        c.connect(dual["out_a"], dual["in_n_a"]);
+        c.label(dual["out_a"], NetLabel::local("OUT"));
+        c.connect(dual["out_b"], dual["in_n_b"]);
+        c.label(dual["in_p_b"], gnd.clone());
+        c.label(dual["vcc"], vcc.clone());
+        c.label(dual["vee"], gnd.clone());
+        // The diode clamps OUT to +5V.
+        c.connect(d["a"], dual["out_a"]);
+        c.label(d["k"], vcc);
+        let netlist = c.build(&()).to_netlist().unwrap();
+        let mut out = Vec::new();
+        netlist
+            .to_kicad()
+            .unwrap()
+            .with_source("src/basic.rs")
+            .write(&mut out)
+            .unwrap();
+        crate::test_parts::check_golden("basic_parts.net", &String::from_utf8(out).unwrap());
+        let spice = netlist.to_spice().unwrap().with_title("basic_parts");
+        crate::test_parts::check_golden("basic_parts.cir", &spice.to_string());
+    }
 }

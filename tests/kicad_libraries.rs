@@ -54,6 +54,18 @@ kicad_part! {
 }
 
 kicad_part! {
+    /// An exposed pad without a symbol pin, connected to V- inside the part (`extra_pads`).
+    struct Lm358Ep {
+        symbol: "Amplifier_Operational:LM358",
+        footprint: "Package_SO:SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm",
+        pins: { "9" => "ep" },
+        extra_pads: ["9"],
+        internal_connections: [["4", "ep"]],
+        spice: excluded,
+    }
+}
+
+kicad_part! {
     struct Npn {
         symbol: "Simulation_SPICE:NPN",
         footprint: "Package_TO_SOT_SMD:SOT-23",
@@ -172,4 +184,31 @@ fn test_simulate() {
     // The transistor is on, so OUT is pulled low.
     let out = sim.value("out").unwrap();
     assert!(out < 1.0, "out = {out}");
+}
+
+/// The netlist of a part with an extra pad, to check that pcbnew accepts a pad that is not a
+/// pin of the symbol (`tools/check_netlist_import.py tests/golden/kicad_libraries_ep.net`).
+#[test]
+fn test_golden_extra_pad() {
+    let mut c = CircuitBuilder::new();
+    let u = c.instantiate_part_named("u", Box::new(Lm358Ep));
+    let r = c.instantiate_part_named("r", Box::new(Resistor::new("10k")));
+    for (out, inv, noninv) in [("1", "2", "3"), ("7", "6", "5")] {
+        c.connect(u[out], u[inv]);
+        c.label(u[noninv], NetLabel::global("GND"));
+    }
+    c.connect(u["8"], r["1"]);
+    c.label(u["8"], NetLabel::global("+5V"));
+    c.label(r["2"], NetLabel::global("GND"));
+    c.label(u["4"], NetLabel::global("GND"));
+    let mut out = Vec::new();
+    c.build(&())
+        .to_netlist()
+        .unwrap()
+        .to_kicad()
+        .unwrap()
+        .with_source("tests/kicad_libraries.rs")
+        .write(&mut out)
+        .unwrap();
+    check_golden("kicad_libraries_ep.net", &String::from_utf8(out).unwrap());
 }
