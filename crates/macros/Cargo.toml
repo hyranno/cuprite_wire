@@ -7,6 +7,8 @@ description = "Procedural macros generating cuprite_wire parts from KiCad librar
 
 [lib]
 proc-macro = true
+# Examples of the macro need cuprite_wire, which depends on this crate; they are tested there.
+doctest = false
 
 [dependencies]
 cuprite_wire_kicad_lib = { path = "../kicad_lib" }

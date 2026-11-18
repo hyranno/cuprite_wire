@@ -68,6 +68,10 @@ impl Resolver {
 
     pub fn symbol_lib(&mut self, library: &str) -> Result<Arc<SymbolLib>, Error> {
         let path = self.symbol_dir().join(format!("{library}.kicad_sym"));
+        if !path.is_file() {
+            self.track(&path);
+            return Err(Error::new(format!("symbol library {library:?} not found ({})", path.display())));
+        }
         self.load(&path, |text| SymbolLib::parse(text))
     }
 
@@ -76,6 +80,10 @@ impl Resolver {
             .footprint_dir()
             .join(format!("{library}.pretty"))
             .join(format!("{name}.kicad_mod"));
+        if !path.is_file() {
+            self.track(&path);
+            return Err(Error::new(format!("footprint {library}:{name} not found ({})", path.display())));
+        }
         self.load(&path, |text| Footprint::parse(text))
     }
 
@@ -120,11 +128,16 @@ impl Resolver {
         path: &Path,
         parse: impl FnOnce(&str) -> Result<T, Error>,
     ) -> Result<Arc<T>, Error> {
+        let path = self.track(path);
+        cached(&path, parse).map_err(|e| e.context(path.display()))
+    }
+
+    fn track(&mut self, path: &Path) -> PathBuf {
         let path = normalize(path);
         if !self.files.contains(&path) {
             self.files.push(path.clone());
         }
-        cached(&path, parse).map_err(|e| e.context(path.display()))
+        path
     }
 }
 

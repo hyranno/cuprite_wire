@@ -1,0 +1,5 @@
+error: footprint test:SOIC-8-EP has pads without a symbol pin: 9; list them in `extra_pads` (and connect them, e.g. with `internal_connections`)
+ --> tests/ui/footprint_pads.rs:5:20
+  |
+5 |         footprint: "test:SOIC-8-EP",
+  |                    ^^^^^^^^^^^^^^^^
