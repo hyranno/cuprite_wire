@@ -35,9 +35,13 @@ instance per unit, and every pin is connected by a label with its net's name pla
 names and types of parts generated from the libraries by `kicad_part!`. With --spice as well,
 the symbols keep their own Sim.* fields, so the elements KiCad derives from them are compared
 with the ones cuprite_wire derived; built-in model names (`__<name>`) are compared as `__model`.
-Only netlists of a single sheet are supported.
+Only netlists of a single sheet are supported. Sim.* fields of a component in the netlist (written
+for the `sim` block of `kicad_part!`) replace those of its symbol, so KiCad derives the element from
+the mapping cuprite_wire wrote; `${CARGO_MANIFEST_DIR}` in them is this repository.
+--symbol-dir adds a directory of symbol libraries (e.g. `crates/kicad_lib/tests/fixtures/symbols`).
 
-Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] [--spice] [--library-symbols] NETLIST...
+Usage: python3 tools/compare_kicad_cli_netlist.py [--keep DIR] [--spice] [--library-symbols]
+       [--symbol-dir DIR]... NETLIST...
 """
 
 import argparse
@@ -51,6 +55,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
+import kicad_netlist
 from kicad_netlist import TOKEN, children, parse, project_symbol_libs, read, symbol_lib_path, value
 
 # Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_format.md §8).
@@ -67,7 +72,7 @@ DROPPED_PROPERTIES = re.compile(r'"(Sheetname|Sheetfile|ki_[^"]*)"')
 DROPPED_FIELDS = {'"Footprint"', '"Datasheet"', '"Description"'}
 # With --library-symbols: the simulation model is written to the SPICE deck, not to the .net.
 LIBRARY_KNOWN_DIFFERENCES = {
-    "Sim.* fields and properties": "not written to the .net",
+    "Sim.* fields and properties": "not written to the .net (except for the `sim` block of kicad_part!)",
     "tstamps of units 2..": "multi-unit components have one unique id (one symbol instance)",
     "datasheet / description of components, ki_* fields": "not written",
 }
@@ -81,6 +86,8 @@ HUB_Y = 25.4  # every net's hub is on this line
 
 def kicad_env(root):
     return {
+        # Golden netlists write paths in this repository as `${CARGO_MANIFEST_DIR}/...`.
+        "CARGO_MANIFEST_DIR": str(Path(__file__).resolve().parent.parent),
         "XDG_CONFIG_HOME": str(root / "config"),
         "XDG_CACHE_HOME": str(root / "cache"),
         "XDG_DATA_HOME": str(root / "data"),
@@ -332,6 +339,8 @@ def normalize(tree, ours, library_symbols=False):
     for comp in children(children(tree, "components")[0], "comp"):
         ref = value(comp, "ref")
         field_names = {value(f, "name") for fields in children(comp, "fields") for f in fields[1:]}
+        # Sim.* fields cuprite_wire wrote (the `sim` block) are compared.
+        our_fields = {value(f, "name") for fields in children(our_comps.get(ref, []), "fields") for f in fields[1:]}
         kept = []
         for item in comp[1:]:
             if not isinstance(item, list):
@@ -339,6 +348,7 @@ def normalize(tree, ours, library_symbols=False):
             elif item[0] == "fields":
                 fields = [f for f in item[1:] if value(f, "name") not in DROPPED_FIELDS
                           and not (library_symbols and (SIM_PROPERTY.fullmatch(value(f, "name") or "")
+                                                        and value(f, "name") not in our_fields
                                                         or (value(f, "name") or "").startswith('"ki_')))]
                 if fields:
                     kept.append(["fields", *fields])
@@ -667,8 +677,11 @@ def main():
                         help="compare the SPICE deck NETLIST.cir with kicad-cli's SPICE export")
     parser.add_argument("--library-symbols", action="store_true",
                         help="use the components' library symbols (and their Sim.* fields)")
+    parser.add_argument("--symbol-dir", action="append", default=[], metavar="DIR",
+                        help="another directory of symbol libraries, searched first")
     parser.add_argument("netlists", nargs="+")
     args = parser.parse_args()
+    kicad_netlist.EXTRA_SYMBOL_DIRS.extend(Path(d).resolve() for d in args.symbol_dir)
 
     root = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="netlist-compare-"))
     root.mkdir(parents=True, exist_ok=True)

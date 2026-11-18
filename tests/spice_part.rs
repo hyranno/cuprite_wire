@@ -6,6 +6,8 @@
 //! 1 `CTR`, 2 `CTS`, 3 `GND`, 4 `VDD`, 5 `SENSE`, 6 `~{RESET_N}`: neither the order nor all the names
 //! match, so the mapping is written by hand.
 
+use std::path::Path;
+
 use cuprite_wire::{
     circuit::CircuitBuilder,
     kicad_part,
@@ -248,4 +250,47 @@ fn test_simulate() {
     // Without the PSpice mode, ngspice does not know `IF`.
     let error = reset_voltage(Box::new(VsupNgspice::new()), ["4", "5", "3", "6", "1", "2"], 0.55).unwrap_err();
     assert!(error.contains("no such function 'if'") || error.contains("syntax error"), "{error}");
+}
+
+/// The golden netlists of a circuit with the supervisor, with the crate directory written as
+/// `${CARGO_MANIFEST_DIR}` (KiCad expands it in `Sim.Library`). KiCad derives the same element from
+/// the `Sim.*` fields written for the `sim` block:
+/// `KICAD9_SYMBOL_DIR=... python3 tools/compare_kicad_cli_netlist.py --library-symbols --spice
+/// --symbol-dir crates/kicad_lib/tests/fixtures/symbols tests/golden/spice_part.net`.
+/// Run with `UPDATE_GOLDEN=1` to (re)generate them.
+#[test]
+fn test_golden() {
+    let mut circuit = CircuitBuilder::new();
+    let u = circuit.instantiate_part_named("sup", Box::new(Vsup::new()));
+    let pullup = circuit.instantiate_part_named("pullup", Box::new(Resistor::new("100k")));
+    circuit.connect(pullup["1"], u["4"]);
+    circuit.connect(pullup["2"], u[Vsup::RESET_N]);
+    circuit.label(u["4"], NetLabel::global("VDD"));
+    circuit.label(u["5"], NetLabel::local("SENSE"));
+    circuit.label(u[Vsup::RESET_N], NetLabel::local("RESET_N"));
+    for pin in ["1", "2", "3"] {
+        circuit.label(u[pin], NetLabel::global("GND"));
+    }
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    let mut out = Vec::new();
+    netlist
+        .to_kicad()
+        .unwrap()
+        .with_source("tests/spice_part.rs")
+        .write(&mut out)
+        .unwrap();
+    check_golden("spice_part.net", &String::from_utf8(out).unwrap());
+    check_golden("spice_part.cir", &netlist.to_spice().unwrap().with_title("spice_part").to_string());
+}
+
+fn check_golden(name: &str, actual: &str) {
+    let actual = actual.replace(env!("CARGO_MANIFEST_DIR"), "${CARGO_MANIFEST_DIR}");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write(&path, actual).unwrap();
+        return;
+    }
+    let expected = std::fs::read_to_string(&path)
+        .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
+    assert_eq!(actual, expected, "output differs from {}", path.display());
 }
