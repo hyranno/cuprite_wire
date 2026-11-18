@@ -305,3 +305,5 @@ Implemented in `src/spice/` (usage: `doc/spice_netlist_usage.md`).
 - Do not commit reference outputs generated from the KiCad demos or their model libraries
   (the vendor `.lib` files have their own licenses). Create test circuits and expected outputs in this project.
 - Vendor SPICE models used in tests must be checked for redistribution terms before being committed.
+- Do not commit KiCad library files (symbols, footprints, `Simulation_SPICE.sp`) or excerpts of them;
+  `kicad_part!` reads them at compile time (see `doc/kicad_part_macro.md` section 6).

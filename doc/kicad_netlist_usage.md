@@ -23,6 +23,10 @@ netlist.write(&mut file)?;        // or `netlist.to_string()`
 
 ## 2. Defining parts
 
+Parts are usually generated from KiCad libraries with `kicad_part!`, which reads the symbol and
+the footprint at compile time and checks the pins against the pads (`doc/kicad_part_macro.md`).
+`cuprite_wire::basic` has ready-made basic parts. Parts can also be written by hand.
+
 `Part` is format-independent. Format-specific information is returned as an `Option`:
 
 ```rust
@@ -53,8 +57,9 @@ impl Part for Passive {
   Pins connected inside the part are declared with `internal_connections()`; they are connected
   when the part is instantiated (like stacked pins in a KiCad symbol).
 - `LibId` (`Library:Name`) is checked when it is parsed or created with `LibId::new`.
-- Whether a pad number exists in the footprint is not checked (it would require reading the
-  footprint libraries). Use `tools/check_netlist_footprints.py` (section 6).
+- For hand-written parts, whether a pad number exists in the footprint is not checked (it would
+  require reading the footprint libraries; `kicad_part!` does it). Use
+  `tools/check_netlist_footprints.py` (section 6).
 
 ### Parts that do not support a format
 
@@ -171,8 +176,8 @@ Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in 
   review the diff. Do not add outputs generated from the KiCad demos (see the license notes in
   `doc/kicad_netlist_format.md`).
 - **Footprints and pads**: `python3 tools/check_netlist_footprints.py NETLIST...` checks with KiCad's
-  `pcbnew` Python module that every footprint exists in the installed libraries and every `pin` is a
-  pad of it.
+  `pcbnew` Python module that every footprint exists in the installed libraries (or in `libs/`) and
+  every `pin` is a pad of it.
 - **Import into pcbnew**: `python3 tools/check_netlist_import.py [--keep DIR] NETLIST...` imports
   each netlist with the real pcbnew GUI and checks the result. pcbnew's netlist reader is not
   available from Python or `kicad-cli`, so the script runs pcbnew on a virtual X server (Xvfb, installed
