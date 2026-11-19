@@ -218,7 +218,10 @@ pub enum ModelSource {
     /// A model library written as `.include "<path>"`. The path must be absolute
     /// (e.g. `concat!(env!("CARGO_MANIFEST_DIR"), "/models/x.lib")`), since ngspice resolves
     /// relative paths against its working directory.
-    Include { path: PathBuf, dialect: SpiceDialect },
+    Include {
+        path: PathBuf,
+        dialect: SpiceDialect,
+    },
     /// A `.model` or `.subckt` definition written into the deck. Definitions are deduplicated
     /// by name (case-insensitively, like SPICE); two different definitions with the same name are an error.
     Inline {
@@ -254,7 +257,9 @@ impl ModelSource {
 
     pub fn with_dialect(mut self, new: SpiceDialect) -> Self {
         match &mut self {
-            ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => *dialect = new,
+            ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => {
+                *dialect = new
+            }
         }
         self
     }
@@ -396,10 +401,19 @@ mod tests {
     fn test_dialects() {
         let model = ModelSource::include("/m.lib").pspice();
         assert_eq!(model.dialect(), SpiceDialect::Pspice);
-        assert_eq!(ModelSource::inline("m", ".model m D").dialect(), SpiceDialect::Ngspice);
+        assert_eq!(
+            ModelSource::inline("m", ".model m D").dialect(),
+            SpiceDialect::Ngspice
+        );
         use SpiceDialect::*;
-        assert_eq!(SpiceDialect::ngbehavior([(Ngspice, false), (Ngspice, true)]), None);
-        assert_eq!(SpiceDialect::ngbehavior([(Ngspice, true), (Pspice, false)]), Some("ps"));
+        assert_eq!(
+            SpiceDialect::ngbehavior([(Ngspice, false), (Ngspice, true)]),
+            None
+        );
+        assert_eq!(
+            SpiceDialect::ngbehavior([(Ngspice, true), (Pspice, false)]),
+            Some("ps")
+        );
         assert_eq!(SpiceDialect::ngbehavior([(Pspice, true)]), Some("psa"));
         assert_eq!(SpiceDialect::ngbehavior([(Ltspice, false)]), Some("lt"));
         assert_eq!(

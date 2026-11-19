@@ -36,7 +36,12 @@ pub trait Part: Debug + DynClone {
     /// information. ERC treats pins without a type as [`PinType::Passive`].
     fn pin_types(&self) -> BTreeMap<String, PinType> {
         self.kicad()
-            .map(|info| info.pins.into_iter().map(|(id, pin)| (id, pin.pin_type)).collect())
+            .map(|info| {
+                info.pins
+                    .into_iter()
+                    .map(|(id, pin)| (id, pin.pin_type))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -61,11 +66,7 @@ impl PartInstance {
     }
 
     pub fn ref_name(&self) -> String {
-        format!(
-            "{}{}",
-            self.part.get_ref_base_name(),
-            self.ref_number
-        )
+        format!("{}{}", self.part.get_ref_base_name(), self.ref_number)
     }
 }
 

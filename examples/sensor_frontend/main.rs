@@ -46,7 +46,11 @@ fn board() -> CircuitBuilder {
     let bias = MidSupply.place(&mut board, "bias");
     let preamp = Preamp::default().place(&mut board, "preamp");
     let filter = LowPass.place(&mut board, "filter");
-    for (stage_vcc, stage_gnd) in [(bias.vcc, bias.gnd), (preamp.vcc, preamp.gnd), (filter.vcc, filter.gnd)] {
+    for (stage_vcc, stage_gnd) in [
+        (bias.vcc, bias.gnd),
+        (preamp.vcc, preamp.gnd),
+        (filter.vcc, filter.gnd),
+    ] {
         board.connect(stage_vcc, vcc);
         board.connect(stage_gnd, gnd);
     }
@@ -85,7 +89,12 @@ mod tests {
     /// The board as a whole: the subcircuits are connected consistently.
     #[test]
     fn board_erc() {
-        board().build(&()).to_netlist().unwrap().erc(&ErcSettings::default()).assert_clean();
+        board()
+            .build(&())
+            .to_netlist()
+            .unwrap()
+            .erc(&ErcSettings::default())
+            .assert_clean();
     }
 
     /// The board exports to KiCad: every part has a footprint with its pads.

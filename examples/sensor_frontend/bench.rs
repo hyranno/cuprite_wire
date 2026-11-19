@@ -43,7 +43,13 @@ impl Bench {
 
     /// Runs ngspice with the front-end `commands`; panics with the log on failure.
     pub fn simulate<S: Into<String>>(&self, commands: impl IntoIterator<Item = S>) -> Simulation {
-        let netlist = self.circuit.build(&()).to_netlist().unwrap().to_spice().unwrap();
+        let netlist = self
+            .circuit
+            .build(&())
+            .to_netlist()
+            .unwrap()
+            .to_spice()
+            .unwrap();
         let deck = netlist.deck().control(commands);
         deck.run().unwrap_or_else(|error| panic!("{error}\n{deck}"))
     }

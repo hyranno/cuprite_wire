@@ -112,12 +112,23 @@ pub struct ModelInfo {
 /// The elements of a part, with pins in node order, and the pins not connected to any element.
 pub type Bound = (Vec<ElementDef>, Vec<String>);
 
-pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Resolver) -> Result<Bound, BindingError> {
+pub fn bind(
+    bindings: &[ModelBinding],
+    options: &BindOptions,
+    resolver: &mut Resolver,
+) -> Result<Bound, BindingError> {
     let mut elements = Vec::new();
     let mut unused: Vec<String> = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
-        let at = |field| move |error| BindingError { element: index, field, error };
-        let (element, unmapped) = bind_one(binding, options, resolver).map_err(|(field, e)| at(field)(e))?;
+        let at = |field| {
+            move |error| BindingError {
+                element: index,
+                field,
+                error,
+            }
+        };
+        let (element, unmapped) =
+            bind_one(binding, options, resolver).map_err(|(field, e)| at(field)(e))?;
         for pin in binding.unused.iter().chain(&unmapped) {
             if !unused.contains(pin) {
                 unused.push(pin.clone());
@@ -131,7 +142,9 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
             return Err(BindingError {
                 element: index,
                 field: BindingField::Unused,
-                error: Error::new(format!("pin {pin:?} is mapped to a port, so it cannot be unused")),
+                error: Error::new(format!(
+                    "pin {pin:?} is mapped to a port, so it cannot be unused"
+                )),
             });
         }
     }
@@ -143,8 +156,13 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
             field: BindingField::Suffix,
             error: Error::new(message),
         };
-        if !suffix.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err(error(format!("suffix {suffix:?} may only contain ASCII letters, digits and '_'")));
+        if !suffix
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(error(format!(
+                "suffix {suffix:?} may only contain ASCII letters, digits and '_'"
+            )));
         }
         if !suffixes.insert(suffix.to_ascii_uppercase()) {
             return Err(error(if bindings.len() > 1 && suffix.is_empty() {
@@ -158,10 +176,9 @@ pub fn bind(bindings: &[ModelBinding], options: &BindOptions, resolver: &mut Res
         let covered = |pin: &String| {
             mapped.contains(pin)
                 || unused.contains(pin)
-                || options
-                    .internal_connections
-                    .iter()
-                    .any(|group| group.contains(pin) && group.iter().any(|other| mapped.contains(other)))
+                || options.internal_connections.iter().any(|group| {
+                    group.contains(pin) && group.iter().any(|other| mapped.contains(other))
+                })
         };
         let missing: Vec<&PartPin> = pins.iter().filter(|pin| !covered(&pin.id)).collect();
         if !missing.is_empty() {
@@ -192,7 +209,9 @@ fn bind_one(
 ) -> Result<(ElementDef, Vec<String>), FieldError> {
     use BindingField::{Library, Name, Params, Pins, Unused};
     let fail = |field, message: String| (field, Error::new(message));
-    let path = resolver.sim_library_path(&binding.library).map_err(|e| (Library, e))?;
+    let path = resolver
+        .sim_library_path(&binding.library)
+        .map_err(|e| (Library, e))?;
     let libs = read_library(&path, resolver).map_err(|e| (Library, e))?;
     let found = libs
         .iter()
@@ -212,7 +231,10 @@ fn bind_one(
             params,
         } => {
             if !optional_ports.is_empty() {
-                let names: Vec<&str> = optional_ports.iter().map(|(name, _)| name.as_str()).collect();
+                let names: Vec<&str> = optional_ports
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect();
                 return Err(fail(
                     Name,
                     format!(
@@ -232,7 +254,12 @@ fn bind_one(
                     ),
                 )
             })?;
-            (device, terminals.iter().map(|t| t.to_string()).collect(), Some(model_type.clone()), Vec::new())
+            (
+                device,
+                terminals.iter().map(|t| t.to_string()).collect(),
+                Some(model_type.clone()),
+                Vec::new(),
+            )
         }
         _ => unreachable!("find_in returns subcircuits and models"),
     };
@@ -247,7 +274,11 @@ fn bind_one(
             Name,
             format!(
                 "{} {}{detail} is encrypted, which ngspice cannot read; ask the vendor for an unencrypted model",
-                if matches!(locked.kind, DefinitionKind::Model { .. }) { "model" } else { "subcircuit" },
+                if matches!(locked.kind, DefinitionKind::Model { .. }) {
+                    "model"
+                } else {
+                    "subcircuit"
+                },
                 locked.name
             ),
         ));
@@ -257,8 +288,17 @@ fn bind_one(
     let (part_pins, mapping): (Vec<PartPin>, Vec<(String, String)>) = match options.pins {
         PartPins::Given(pins) => (pins.to_vec(), binding.pins.clone()),
         PartPins::Ports => (
-            ports.iter().map(|port| PartPin { id: port.clone(), name: None }).collect(),
-            ports.iter().map(|port| (port.clone(), port.clone())).collect(),
+            ports
+                .iter()
+                .map(|port| PartPin {
+                    id: port.clone(),
+                    name: None,
+                })
+                .collect(),
+            ports
+                .iter()
+                .map(|port| (port.clone(), port.clone()))
+                .collect(),
         ),
     };
     let part_pins = part_pins.as_slice();
@@ -289,13 +329,25 @@ fn bind_one(
         if !seen_pins.insert(pin) {
             return Err(fail(Pins, format!("pin {pin:?} is mapped twice")));
         }
-        let index = ports.iter().position(|p| p.eq_ignore_ascii_case(port)).ok_or_else(|| {
-            fail(Pins, format!("{what} has no port {port:?}; its ports are {}", ports.join(" ")))
-        })?;
+        let index = ports
+            .iter()
+            .position(|p| p.eq_ignore_ascii_case(port))
+            .ok_or_else(|| {
+                fail(
+                    Pins,
+                    format!(
+                        "{what} has no port {port:?}; its ports are {}",
+                        ports.join(" ")
+                    ),
+                )
+            })?;
         if let Some(other) = nodes[index].replace(pin.clone()) {
             return Err(fail(
                 Pins,
-                format!("port {} is mapped twice (pins {other:?} and {pin:?})", ports[index]),
+                format!(
+                    "port {} is mapped twice (pins {other:?} and {pin:?})",
+                    ports[index]
+                ),
             ));
         }
     }
@@ -304,7 +356,10 @@ fn bind_one(
             return Err(fail(Unused, format!("the part has no pin {pin:?}")));
         }
         if seen_pins.contains(pin) {
-            return Err(fail(Unused, format!("pin {pin:?} is mapped to a port, so it cannot be unused")));
+            return Err(fail(
+                Unused,
+                format!("pin {pin:?} is mapped to a port, so it cannot be unused"),
+            ));
         }
     }
     let unmapped_ports: Vec<&str> = ports
@@ -314,11 +369,17 @@ fn bind_one(
         .map(|(port, _)| port.as_str())
         .collect();
     if !unmapped_ports.is_empty() {
-        let mut message = format!("no pin is mapped to the ports {} of {what}", unmapped_ports.join(", "));
+        let mut message = format!(
+            "no pin is mapped to the ports {} of {what}",
+            unmapped_ports.join(", ")
+        );
         let partial = ElementDef {
             device,
             suffix: binding.suffix.clone(),
-            nodes: nodes.iter().map(|n| n.clone().unwrap_or_default()).collect(),
+            nodes: nodes
+                .iter()
+                .map(|n| n.clone().unwrap_or_default())
+                .collect(),
             args: Args::Fixed(String::new()),
             models: Vec::new(),
             dialect: Dialect::Ngspice,
@@ -353,7 +414,10 @@ fn bind_one(
 
     // Parameters.
     if model_type.is_some() && !binding.params.is_empty() {
-        return Err(fail(Params, format!("{what} is a .model; parameters are for subcircuits")));
+        return Err(fail(
+            Params,
+            format!("{what} is a .model; parameters are for subcircuits"),
+        ));
     }
     let mut args = found.name.clone();
     let mut seen_params = BTreeSet::new();
@@ -365,15 +429,23 @@ fn bind_one(
                 if known.is_empty() {
                     format!("{what} has no parameters")
                 } else {
-                    format!("{what} has no parameter {name:?}; its parameters are {}", known.join(" "))
+                    format!(
+                        "{what} has no parameter {name:?}; its parameters are {}",
+                        known.join(" ")
+                    )
                 },
             ));
         }
         if !seen_params.insert(name.to_ascii_lowercase()) {
             return Err(fail(Params, format!("parameter {name:?} is given twice")));
         }
-        if value.is_empty() || value.contains(|c: char| c.is_whitespace() || c.is_control() || c == ';' || c == '$') {
-            return Err(fail(Params, format!("the value {value:?} of {name} cannot be written in a deck")));
+        if value.is_empty()
+            || value.contains(|c: char| c.is_whitespace() || c.is_control() || c == ';' || c == '$')
+        {
+            return Err(fail(
+                Params,
+                format!("the value {value:?} of {name} cannot be written in a deck"),
+            ));
         }
         args.push_str(&format!(" {name}={value}"));
     }
@@ -387,18 +459,37 @@ fn bind_one(
         let list: Vec<String> = hints
             .iter()
             .take(3)
-            .map(|(file, hint)| format!("{hint} of {}", file.file_name().unwrap_or_default().to_string_lossy()))
+            .map(|(file, hint)| {
+                format!(
+                    "{hint} of {}",
+                    file.file_name().unwrap_or_default().to_string_lossy()
+                )
+            })
             .collect();
         list.join(", ")
     };
-    let of = |dialect| hints.iter().filter(|(_, hint)| hint.dialect == dialect).collect::<Vec<_>>();
+    let of = |dialect| {
+        hints
+            .iter()
+            .filter(|(_, hint)| hint.dialect == dialect)
+            .collect::<Vec<_>>()
+    };
     let (pspice, ltspice) = (of(Dialect::Pspice), of(Dialect::Ltspice));
     let (dialect, dialect_reason) = match binding.dialect {
         DialectOption::Given(dialect) => (dialect, "given".to_string()),
         DialectOption::Auto => match (pspice.is_empty(), ltspice.is_empty()) {
-            (true, true) => (Dialect::Ngspice, "no PSpice or LTspice constructs found".to_string()),
-            (false, true) => (Dialect::Pspice, format!("detected from {}", describe(&pspice))),
-            (true, false) => (Dialect::Ltspice, format!("detected from {}", describe(&ltspice))),
+            (true, true) => (
+                Dialect::Ngspice,
+                "no PSpice or LTspice constructs found".to_string(),
+            ),
+            (false, true) => (
+                Dialect::Pspice,
+                format!("detected from {}", describe(&pspice)),
+            ),
+            (true, false) => (
+                Dialect::Ltspice,
+                format!("detected from {}", describe(&ltspice)),
+            ),
             (false, false) => {
                 return Err(fail(
                     BindingField::Dialect,
@@ -413,7 +504,9 @@ fn bind_one(
         },
     };
     if options.mode == ModelMode::Include {
-        let includes = libs.iter().flat_map(|(lib, section, _)| lib.includes(section.as_deref()));
+        let includes = libs
+            .iter()
+            .flat_map(|(lib, section, _)| lib.includes(section.as_deref()));
         for include in includes {
             if include.pspice && dialect != Dialect::Pspice {
                 return Err(fail(
@@ -447,7 +540,10 @@ fn bind_one(
             definitions.sort_by_key(|d| d.name.to_ascii_lowercase());
             definitions
                 .into_iter()
-                .map(|d| ModelDef::Inline { name: d.name, text: d.text })
+                .map(|d| ModelDef::Inline {
+                    name: d.name,
+                    text: d.text,
+                })
                 .collect()
         }
     };
@@ -473,14 +569,16 @@ fn bind_one(
 
 /// The element letter and terminals of a device with a `.model` of `model_type` (lowercase).
 pub fn model_device(model_type: &str) -> Option<(char, &'static [&'static str])> {
-    Some(match model_type.split_whitespace().next().unwrap_or_default() {
-        "d" => ('D', &["A", "K"]),
-        "npn" | "pnp" => ('Q', &["C", "B", "E"]),
-        "vdmos" => ('M', &["D", "G", "S"]),
-        "nmos" | "pmos" => ('M', &["D", "G", "S", "B"]),
-        "njf" | "pjf" => ('J', &["D", "G", "S"]),
-        _ => return None,
-    })
+    Some(
+        match model_type.split_whitespace().next().unwrap_or_default() {
+            "d" => ('D', &["A", "K"]),
+            "npn" | "pnp" => ('Q', &["C", "B", "E"]),
+            "vdmos" => ('M', &["D", "G", "S"]),
+            "nmos" | "pmos" => ('M', &["D", "G", "S", "B"]),
+            "njf" | "pjf" => ('J', &["D", "G", "S"]),
+            _ => return None,
+        },
+    )
 }
 
 /// A library file, the section that is read (`None`: outside the sections) and its path.
@@ -492,7 +590,10 @@ fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Er
     let mut queue = vec![(path.to_path_buf(), None::<String>)];
     let mut seen = BTreeSet::new();
     while let Some((file, section)) = queue.pop() {
-        let key = (file.clone(), section.as_ref().map(|s| s.to_ascii_lowercase()));
+        let key = (
+            file.clone(),
+            section.as_ref().map(|s| s.to_ascii_lowercase()),
+        );
         if !seen.insert(key) || seen.len() > 32 {
             continue;
         }
@@ -500,7 +601,10 @@ fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Er
         if let Some(section) = &section
             && !lib.sections.iter().any(|s| s.eq_ignore_ascii_case(section))
         {
-            return Err(Error::new(format!("{} has no section {section:?}", file.display())));
+            return Err(Error::new(format!(
+                "{} has no section {section:?}",
+                file.display()
+            )));
         }
         let dir = file.parent().map(PathBuf::from).unwrap_or_default();
         // Relative paths are relative to the including file, as in ngspice.
@@ -519,7 +623,10 @@ fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Er
 fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Definition> {
     let find_any = |name: &str| {
         libs.iter()
-            .find_map(|(lib, section, _)| lib.definitions(section.as_deref()).find(|d| d.name.eq_ignore_ascii_case(name)))
+            .find_map(|(lib, section, _)| {
+                lib.definitions(section.as_deref())
+                    .find(|d| d.name.eq_ignore_ascii_case(name))
+            })
             .cloned()
     };
     let mut out: Vec<Definition> = Vec::new();
@@ -543,10 +650,14 @@ fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Definition> {
 fn referenced_names(text: &str) -> impl Iterator<Item = &str> {
     text.lines()
         .filter(|line| !line.trim_start().starts_with('*'))
-        .flat_map(|line| line.split(|c: char| c.is_whitespace() || "(),={}'\"*/<>&|?:!^;".contains(c)))
+        .flat_map(|line| {
+            line.split(|c: char| c.is_whitespace() || "(),={}'\"*/<>&|?:!^;".contains(c))
+        })
         .filter(|word| !word.is_empty())
         .skip(2)
-        .flat_map(|word| std::iter::once(word).chain(word.split(['+', '-']).filter(|w| !w.is_empty())))
+        .flat_map(|word| {
+            std::iter::once(word).chain(word.split(['+', '-']).filter(|w| !w.is_empty()))
+        })
 }
 
 /// The error for a name that is not in the library, with candidates.
@@ -554,7 +665,12 @@ fn not_found(name: &str, path: &Path, libs: &[LibFile]) -> Error {
     let definitions: Vec<&Definition> = libs
         .iter()
         .flat_map(|(lib, section, _)| lib.definitions(section.as_deref()))
-        .filter(|d| matches!(d.kind, DefinitionKind::Subckt { .. } | DefinitionKind::Model { .. }))
+        .filter(|d| {
+            matches!(
+                d.kind,
+                DefinitionKind::Subckt { .. } | DefinitionKind::Model { .. }
+            )
+        })
         .collect();
     let mut message = format!("no .subckt or .model named {name:?} in {}", path.display());
     let wanted = normalize(name);
@@ -563,7 +679,9 @@ fn not_found(name: &str, path: &Path, libs: &[LibFile]) -> Error {
         .map(|d| d.name.as_str())
         .filter(|candidate| {
             let candidate = normalize(candidate);
-            candidate.contains(&wanted) || wanted.contains(&candidate) || edit_distance(&candidate, &wanted) <= 2
+            candidate.contains(&wanted)
+                || wanted.contains(&candidate)
+                || edit_distance(&candidate, &wanted) <= 2
         })
         .take(8)
         .collect();
@@ -582,18 +700,29 @@ fn not_found(name: &str, path: &Path, libs: &[LibFile]) -> Error {
         .collect();
     let top: Vec<&str> = definitions
         .iter()
-        .filter(|d| matches!(d.kind, DefinitionKind::Subckt { .. }) && !used.contains(&d.name.to_ascii_lowercase()))
+        .filter(|d| {
+            matches!(d.kind, DefinitionKind::Subckt { .. })
+                && !used.contains(&d.name.to_ascii_lowercase())
+        })
         .map(|d| d.name.as_str())
         .take(10)
         .collect();
     if !top.is_empty() {
-        message.push_str(&format!("; subcircuits not used by others: {}", top.join(", ")));
+        message.push_str(&format!(
+            "; subcircuits not used by others: {}",
+            top.join(", ")
+        ));
     }
     let encrypted: usize = libs.iter().map(|(lib, _, _)| lib.encrypted_blocks).sum();
     if encrypted > 0 {
-        message.push_str(&format!("; the library has {encrypted} encrypted blocks, which may hide it"));
+        message.push_str(&format!(
+            "; the library has {encrypted} encrypted blocks, which may hide it"
+        ));
     }
-    let sections: Vec<&str> = libs.iter().flat_map(|(lib, _, _)| lib.sections.iter().map(String::as_str)).collect();
+    let sections: Vec<&str> = libs
+        .iter()
+        .flat_map(|(lib, _, _)| lib.sections.iter().map(String::as_str))
+        .collect();
     if !sections.is_empty() {
         message.push_str(&format!(
             "; definitions in `.lib` sections ({}) are found only through `.lib file section`",
@@ -627,7 +756,11 @@ fn pin_table(pins: &[PartPin], elements: &[ElementDef]) -> String {
                 })
             })
             .collect();
-        let ports = if ports.is_empty() { "-".to_string() } else { ports.join(", ") };
+        let ports = if ports.is_empty() {
+            "-".to_string()
+        } else {
+            ports.join(", ")
+        };
         text.push_str(&format!("\n  {:<16} => {ports}", describe_pin(pin)));
     }
     text
@@ -647,9 +780,13 @@ fn suggestions(pins: &[&PartPin], ports: &[&str]) -> String {
     }
     let mut lines = Vec::new();
     for pin in pins {
-        let Some(key) = pin.name.as_deref().map(normalize) else { continue };
-        if let (Some([_]), Some([port])) = (by_name.get(&key).map(Vec::as_slice), ports_by_name.get(&key).map(Vec::as_slice))
-            && !key.is_empty()
+        let Some(key) = pin.name.as_deref().map(normalize) else {
+            continue;
+        };
+        if let (Some([_]), Some([port])) = (
+            by_name.get(&key).map(Vec::as_slice),
+            ports_by_name.get(&key).map(Vec::as_slice),
+        ) && !key.is_empty()
         {
             lines.push(format!("\n  {:?} => {:?},", pin.id, port));
         }
@@ -657,7 +794,10 @@ fn suggestions(pins: &[&PartPin], ports: &[&str]) -> String {
     if lines.is_empty() {
         return String::new();
     }
-    format!("\nsuggested from the names (not applied; check them against the datasheet):{}", lines.concat())
+    format!(
+        "\nsuggested from the names (not applied; check them against the datasheet):{}",
+        lines.concat()
+    )
 }
 
 /// A name for matching pins and ports: uppercase, without `~{}/#` and a trailing `_N` / `_B` / `N` / `B`
@@ -686,7 +826,9 @@ fn edit_distance(a: &str, b: &str) -> usize {
         row[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
             let current = row[j + 1];
-            row[j + 1] = (previous + usize::from(ca != *cb)).min(row[j] + 1).min(current + 1);
+            row[j + 1] = (previous + usize::from(ca != *cb))
+                .min(row[j] + 1)
+                .min(current + 1);
             previous = current;
         }
     }
@@ -698,7 +840,10 @@ mod tests {
     use super::*;
 
     fn resolver() -> Resolver {
-        Resolver::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"), |_| None)
+        Resolver::new(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
+            |_| None,
+        )
     }
 
     /// The pins of a TPS3899-like symbol: neither the order nor all names match VSUP01's ports
@@ -715,7 +860,9 @@ mod tests {
     }
 
     fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
-        p.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        p.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     fn strings(s: &[&str]) -> Vec<String> {
@@ -740,7 +887,11 @@ mod tests {
         }
     }
 
-    fn run(bindings: &[ModelBinding], pins: &[PartPin], mode: ModelMode) -> Result<Bound, BindingError> {
+    fn run(
+        bindings: &[ModelBinding],
+        pins: &[PartPin],
+        mode: ModelMode,
+    ) -> Result<Bound, BindingError> {
         let options = BindOptions {
             pins: PartPins::Given(pins),
             strict: true,
@@ -759,7 +910,8 @@ mod tests {
     fn test_subckt() {
         let mut binding = vsup(VSUP_PINS);
         binding.params = pairs(&[("vth", "0.6")]);
-        let (elements, unused) = run(&[binding.clone()], &symbol_pins(), ModelMode::Include).unwrap();
+        let (elements, unused) =
+            run(&[binding.clone()], &symbol_pins(), ModelMode::Include).unwrap();
         let element = &elements[0];
         assert_eq!(element.device, 'X');
         // In the order of the ports, not of the pin numbers.
@@ -767,9 +919,17 @@ mod tests {
         assert_eq!(element.args, Args::Fixed("VSUP01 vth=0.6".into()));
         assert_eq!(element.dialect, Dialect::Pspice);
         let info = element.info.as_ref().unwrap();
-        assert_eq!(info.dialect_reason, "detected from `.LIB file` (line 7) of vsup01.lib, `IF(` (line 15) of vsup01.lib, `&` (line 15) of vsup01.lib");
+        assert_eq!(
+            info.dialect_reason,
+            "detected from `.LIB file` (line 7) of vsup01.lib, `IF(` (line 15) of vsup01.lib, `&` (line 15) of vsup01.lib"
+        );
         assert_eq!(info.params, pairs(&[("VTH", "0.5"), ("VDDMIN", "0.8")]));
-        assert_eq!(element.models, vec![ModelDef::Include(resolver().manifest_dir.join("models/vsup01.lib"))]);
+        assert_eq!(
+            element.models,
+            vec![ModelDef::Include(
+                resolver().manifest_dir.join("models/vsup01.lib")
+            )]
+        );
         assert!(unused.is_empty());
 
         // Inline: the definitions it uses, also from the file included with `.LIB`.
@@ -782,7 +942,16 @@ mod tests {
                 other => panic!("{other:?}"),
             })
             .collect();
-        assert_eq!(names, ["D_VSUP_ESD", "VSUP01", "VSUP_DRIVE", "VSUP_OUTSTAGE", "VSUP_RON"]);
+        assert_eq!(
+            names,
+            [
+                "D_VSUP_ESD",
+                "VSUP01",
+                "VSUP_DRIVE",
+                "VSUP_OUTSTAGE",
+                "VSUP_RON"
+            ]
+        );
     }
 
     #[test]
@@ -806,9 +975,16 @@ mod tests {
             internal_connections: &[],
             mode: ModelMode::Include,
         };
-        let (elements, unused) = bind(std::slice::from_ref(&binding), &options, &mut resolver()).unwrap();
-        assert_eq!((elements[0].device, &elements[0].nodes), ('D', &strings(&["2", "1"])));
-        assert_eq!(elements[0].info.as_ref().unwrap().model_type.as_deref(), Some("d"));
+        let (elements, unused) =
+            bind(std::slice::from_ref(&binding), &options, &mut resolver()).unwrap();
+        assert_eq!(
+            (elements[0].device, &elements[0].nodes),
+            ('D', &strings(&["2", "1"]))
+        );
+        assert_eq!(
+            elements[0].info.as_ref().unwrap().model_type.as_deref(),
+            Some("d")
+        );
         assert_eq!(elements[0].args, Args::Fixed("clamp".into()));
         // KiCad's `Sim.Pins`: the pins that are not mapped are unused.
         assert_eq!(unused, ["3"]);
@@ -817,7 +993,10 @@ mod tests {
         assert!(e.error.message.starts_with("pins not mapped to the model: 3; map them in `pins`, or declare them with `unused: [\"3\"]`"), "{}", e.error);
         let mut declared = binding.clone();
         declared.unused = strings(&["3"]);
-        assert_eq!(run(&[declared], &pins, ModelMode::Include).unwrap().1, ["3"]);
+        assert_eq!(
+            run(&[declared], &pins, ModelMode::Include).unwrap().1,
+            ["3"]
+        );
         // ... or be connected to a mapped pin inside the part.
         let options = BindOptions {
             pins: PartPins::Given(&pins),
@@ -825,7 +1004,12 @@ mod tests {
             internal_connections: &[strings(&["1", "3"])],
             mode: ModelMode::Include,
         };
-        assert!(bind(std::slice::from_ref(&binding), &options, &mut resolver()).unwrap().1.is_empty());
+        assert!(
+            bind(std::slice::from_ref(&binding), &options, &mut resolver())
+                .unwrap()
+                .1
+                .is_empty()
+        );
         // Positional without any mapping.
         let mut positional = binding;
         positional.pins.clear();
@@ -835,7 +1019,10 @@ mod tests {
             internal_connections: &[],
             mode: ModelMode::Include,
         };
-        assert_eq!(bind(&[positional], &options, &mut resolver()).unwrap().0[0].nodes, ["1", "2"]);
+        assert_eq!(
+            bind(&[positional], &options, &mut resolver()).unwrap().0[0].nodes,
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -857,8 +1044,15 @@ suggested from the names (not applied; check them against the datasheet):
         );
         // Without any mapping, every port is suggested.
         let (_, _, message) = error(&[vsup(&[])]);
-        assert!(message.contains("\"4\" => \"VDD\",\n  \"5\" => \"SENSE\",\n  \"6\" => \"RESET_B\","), "{message}");
-        assert!(normalize("~{RESET}") == "RESET" && normalize("VIN") == "VIN" && normalize("IN+") == "IN+");
+        assert!(
+            message.contains("\"4\" => \"VDD\",\n  \"5\" => \"SENSE\",\n  \"6\" => \"RESET_B\","),
+            "{message}"
+        );
+        assert!(
+            normalize("~{RESET}") == "RESET"
+                && normalize("VIN") == "VIN"
+                && normalize("IN+") == "IN+"
+        );
     }
 
     #[test]
@@ -868,9 +1062,15 @@ suggested from the names (not applied; check them against the datasheet):
         pins[5] = ("6", "RESET_N");
         let (_, field, message) = error(&[vsup(&pins)]);
         assert_eq!(field, Pins);
-        assert_eq!(message, "subcircuit VSUP01 has no port \"RESET_N\"; its ports are CTR CTS GND RESET_B SENSE VDD");
+        assert_eq!(
+            message,
+            "subcircuit VSUP01 has no port \"RESET_N\"; its ports are CTR CTS GND RESET_B SENSE VDD"
+        );
         pins[5] = ("6", "vdd");
-        assert_eq!(error(&[vsup(&pins)]).2, "port VDD is mapped twice (pins \"4\" and \"6\")");
+        assert_eq!(
+            error(&[vsup(&pins)]).2,
+            "port VDD is mapped twice (pins \"4\" and \"6\")"
+        );
         pins[5] = ("7", "RESET_B");
         assert_eq!(error(&[vsup(&pins)]).2, "the part has no pin \"7\"");
         pins[5] = ("5", "RESET_B");
@@ -878,7 +1078,14 @@ suggested from the names (not applied; check them against the datasheet):
 
         let mut binding = vsup(VSUP_PINS);
         binding.unused = strings(&["6"]);
-        assert_eq!(error(&[binding]), (0, Unused, "pin \"6\" is mapped to a port, so it cannot be unused".into()));
+        assert_eq!(
+            error(&[binding]),
+            (
+                0,
+                Unused,
+                "pin \"6\" is mapped to a port, so it cannot be unused".into()
+            )
+        );
 
         let mut binding = vsup(VSUP_PINS);
         binding.params = pairs(&[("TD", "1m")]);
@@ -887,14 +1094,19 @@ suggested from the names (not applied; check them against the datasheet):
             "subcircuit VSUP01 has no parameter \"TD\"; its parameters are VTH=0.5 VDDMIN=0.8"
         );
         binding.params = pairs(&[("VTH", "1 2")]);
-        assert_eq!(error(&[binding]).2, "the value \"1 2\" of VTH cannot be written in a deck");
+        assert_eq!(
+            error(&[binding]).2,
+            "the value \"1 2\" of VTH cannot be written in a deck"
+        );
 
         let mut binding = vsup(VSUP_PINS);
         binding.name = "VSUP1".into();
         let (_, field, message) = error(&[binding]);
         assert_eq!(field, Name);
         assert!(
-            message.ends_with("vsup01.lib; similar names: VSUP01; subcircuits not used by others: VSUP01"),
+            message.ends_with(
+                "vsup01.lib; similar names: VSUP01; subcircuits not used by others: VSUP01"
+            ),
             "{message}"
         );
         let mut binding = vsup(VSUP_PINS);
@@ -940,14 +1152,23 @@ suggested from the names (not applied; check them against the datasheet):
         );
         let mut given = binding("vsup_mixed");
         given.dialect = DialectOption::Given(crate::spice_lib::Dialect::Ltspice);
-        assert_eq!(run(&[given], pins, ModelMode::Include).unwrap().0[0].dialect, crate::spice_lib::Dialect::Ltspice);
+        assert_eq!(
+            run(&[given], pins, ModelMode::Include).unwrap().0[0].dialect,
+            crate::spice_lib::Dialect::Ltspice
+        );
 
         // `.LIB file` is read only in the PSpice mode.
         let mut ngspice = vsup(VSUP_PINS);
         ngspice.dialect = DialectOption::Given(crate::spice_lib::Dialect::Ngspice);
         let e = run(&[ngspice.clone()], &symbol_pins(), ModelMode::Include).unwrap_err();
         assert_eq!(e.field, Dialect);
-        assert!(e.error.message.starts_with("the library includes \"vsup01_aux.lib\" with `.LIB`"), "{}", e.error);
+        assert!(
+            e.error
+                .message
+                .starts_with("the library includes \"vsup01_aux.lib\" with `.LIB`"),
+            "{}",
+            e.error
+        );
         assert!(run(&[ngspice], &symbol_pins(), ModelMode::Inline).is_ok());
     }
 
@@ -974,17 +1195,39 @@ suggested from the names (not applied; check them against the datasheet):
                 ])
             }
         };
-        let (elements, unused) = run(&[unit("A", 1), unit("B", 5)], &pins, ModelMode::Include).unwrap();
+        let (elements, unused) =
+            run(&[unit("A", 1), unit("B", 5)], &pins, ModelMode::Include).unwrap();
         assert!(unused.is_empty());
         assert_eq!(elements[0].nodes, strings(&["1", "2", "9", "4", "3", "10"]));
-        assert_eq!((elements[1].suffix.as_str(), elements[1].nodes[3].as_str()), ("B", "8"));
+        assert_eq!(
+            (elements[1].suffix.as_str(), elements[1].nodes[3].as_str()),
+            ("B", "8")
+        );
         let e = run(&[unit("A", 1), unit("a", 5)], &pins, ModelMode::Include).unwrap_err();
-        assert_eq!((e.element, e.field, e.error.message.as_str()), (1, BindingField::Suffix, "suffix \"a\" is used twice"));
+        assert_eq!(
+            (e.element, e.field, e.error.message.as_str()),
+            (1, BindingField::Suffix, "suffix \"a\" is used twice")
+        );
         let e = run(&[unit("", 1), unit("", 5)], &pins, ModelMode::Include).unwrap_err();
-        assert_eq!(e.error.message, "give each model a distinct `suffix` (e.g. \"A\", \"B\")");
+        assert_eq!(
+            e.error.message,
+            "give each model a distinct `suffix` (e.g. \"A\", \"B\")"
+        );
         // A pin left out of both is reported with the ports of every element.
         let e = run(&[unit("A", 1)], &pins, ModelMode::Include).unwrap_err();
-        assert!(e.error.message.starts_with("pins not mapped to the model: 5, 6, 7, 8;"), "{}", e.error);
-        assert!(e.error.message.contains("\n  9                => GND (A)\n"), "{}", e.error);
+        assert!(
+            e.error
+                .message
+                .starts_with("pins not mapped to the model: 5, 6, 7, 8;"),
+            "{}",
+            e.error
+        );
+        assert!(
+            e.error
+                .message
+                .contains("\n  9                => GND (A)\n"),
+            "{}",
+            e.error
+        );
     }
 }

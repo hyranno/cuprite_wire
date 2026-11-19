@@ -416,12 +416,19 @@ fn test_simulate_pspice_model() {
         "{text}"
     );
     let sim = pspice.run().unwrap();
-    assert!((sim.value("out").unwrap() - 5.0).abs() < 1e-6, "{}", sim.log());
+    assert!(
+        (sim.value("out").unwrap() - 5.0).abs() < 1e-6,
+        "{}",
+        sim.log()
+    );
 
     let ngspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW));
     assert_eq!(ngspice.netlist().ngbehavior(), None);
     assert!(!ngspice.to_string().contains("requires"));
-    assert!(ngspice.run().is_err(), "the default mode does not read the PSpice syntax");
+    assert!(
+        ngspice.run().is_err(),
+        "the default mode does not read the PSpice syntax"
+    );
 }
 
 /// A deck that ngspice rejects is reported with its log.
@@ -488,7 +495,15 @@ fn test_golden_kicad_pair() {
 
     let netlist = circuit.build(&()).to_netlist().unwrap();
     let mut kicad = Vec::new();
-    netlist.to_kicad().unwrap().with_source("kicad_pair").write(&mut kicad).unwrap();
+    netlist
+        .to_kicad()
+        .unwrap()
+        .with_source("kicad_pair")
+        .write(&mut kicad)
+        .unwrap();
     test_parts::check_golden("kicad_pair.net", &String::from_utf8(kicad).unwrap());
-    check_golden("kicad_pair.cir", &netlist.to_spice().unwrap().with_title("kicad_pair"));
+    check_golden(
+        "kicad_pair.cir",
+        &netlist.to_spice().unwrap().with_title("kicad_pair"),
+    );
 }

@@ -112,7 +112,10 @@ impl Symbol {
             );
             groups.entry(key).or_default().push(pin.number.clone());
         }
-        let mut groups: Vec<_> = groups.into_values().filter(|group| group.len() > 1).collect();
+        let mut groups: Vec<_> = groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .collect();
         groups.sort_by(|a, b| natural_cmp(&a[0], &b[0]));
         groups
     }
@@ -152,7 +155,9 @@ impl SymbolLib {
                 .arg(0)
                 .ok_or_else(|| Error::new(format!("{}: extends without a name", parent.pos())))?;
             if chain.len() > 16 {
-                return Err(Error::new(format!("symbol {name:?}: extends chain is too long")));
+                return Err(Error::new(format!(
+                    "symbol {name:?}: extends chain is too long"
+                )));
             }
             chain.push(self.raw(parent_name)?);
         }
@@ -213,7 +218,10 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
             .and_then(|rest| rest.split_once('_'))
             .and_then(|(unit, style)| Some((unit.parse::<u32>().ok()?, style.parse::<u32>().ok()?)))
             .ok_or_else(|| {
-                Error::new(format!("{}: unexpected unit symbol name {unit_name:?}", unit_symbol.pos()))
+                Error::new(format!(
+                    "{}: unexpected unit symbol name {unit_name:?}",
+                    unit_symbol.pos()
+                ))
             })?;
         if style > 1 {
             continue;
@@ -223,7 +231,8 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
             match pins.iter().find(|other| other.number == pin.number) {
                 None => pins.push(pin),
                 // The same number in several units (e.g. a shared supply pin): one pin.
-                Some(other) if other.electrical_type == pin.electrical_type && other.name == pin.name => {}
+                Some(other)
+                    if other.electrical_type == pin.electrical_type && other.name == pin.name => {}
                 Some(other) => {
                     return Err(Error::new(format!(
                         "pin {:?} is defined twice with different names or types ({:?} {} / {:?} {})",
@@ -344,7 +353,10 @@ mod tests {
         assert_eq!(symbol.pins[2].name.as_deref(), Some("+"));
         assert_eq!(symbol.pins[5].electrical_type, ElectricalType::PowerIn);
         assert!(symbol.pins[4].hidden);
-        assert_eq!(symbol.stacked_pins(), vec![vec!["4".to_string(), "5".to_string()]]);
+        assert_eq!(
+            symbol.stacked_pins(),
+            vec![vec!["4".to_string(), "5".to_string()]]
+        );
         assert!(symbol.in_bom);
     }
 
@@ -368,7 +380,12 @@ mod tests {
                  (symbol "X_2_1" (pin output line (at 0 0 0) (name "A") (number "1")))))"#,
         )
         .unwrap();
-        assert!(lib.symbol("X").unwrap_err().to_string().contains("defined twice"));
+        assert!(
+            lib.symbol("X")
+                .unwrap_err()
+                .to_string()
+                .contains("defined twice")
+        );
     }
 
     #[test]

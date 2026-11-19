@@ -224,7 +224,9 @@ impl Netlist {
             .collect();
         let nets: Vec<usize> = nodes.keys().copied().collect();
         let collisions: HashMap<usize, usize> =
-            case_insensitive_duplicates(nodes.values().map(String::as_str)).into_iter().collect();
+            case_insensitive_duplicates(nodes.values().map(String::as_str))
+                .into_iter()
+                .collect();
         for (i, (&net, node)) in nodes.iter().enumerate() {
             let name = &self.nets[net].name;
             let trace = &self.nets[net].trace;

@@ -31,7 +31,13 @@ impl LowPass {
     #[track_caller]
     pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> LowPassPorts {
         let [input, vref, vcc, gnd, output] = instantiate(circuit, name, self);
-        LowPassPorts { input, vref, vcc, gnd, output }
+        LowPassPorts {
+            input,
+            vref,
+            vcc,
+            gnd,
+            output,
+        }
     }
 }
 
@@ -43,9 +49,11 @@ impl SubcircuitGenerator for LowPass {
         let [input, vref, vcc, gnd, output] = add_interface(&mut c);
         let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
         let r2 = c.instantiate_part_named("r2", Box::new(Resistor0603::new("10k")));
-        let c_feedback = c.instantiate_part_named("c_feedback", Box::new(Capacitor0603::new("22n")));
+        let c_feedback =
+            c.instantiate_part_named("c_feedback", Box::new(Capacitor0603::new("22n")));
         let c_ground = c.instantiate_part_named("c_ground", Box::new(Capacitor0603::new("10n")));
-        let decoupling = c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
+        let decoupling =
+            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
         let amp = c.instantiate_part_named("amp", Box::new(RrioOpAmp::new()));
         c.connect(input, r1["1"]);
         c.connect(r1["2"], r2["1"]);

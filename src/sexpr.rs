@@ -127,7 +127,11 @@ mod tests {
     fn test_strings_are_quoted_and_escaped() {
         let expr = SExpr::node(
             "value",
-            [SExpr::string(r#"c="1" \ x"#), SExpr::string("10"), SExpr::string("")],
+            [
+                SExpr::string(r#"c="1" \ x"#),
+                SExpr::string("10"),
+                SExpr::string(""),
+            ],
         );
         assert_eq!(expr.to_string(), r#"(value "c=\"1\" \\ x" "10" "")"#);
     }
@@ -141,9 +145,16 @@ mod tests {
     fn test_shallow_lists_are_inline() {
         let expr = SExpr::node(
             "node",
-            [SExpr::kv("ref", "R1"), SExpr::kv("pin", "2"), SExpr::kv("pintype", "passive")],
+            [
+                SExpr::kv("ref", "R1"),
+                SExpr::kv("pin", "2"),
+                SExpr::kv("pintype", "passive"),
+            ],
         );
-        assert_eq!(expr.to_string(), r#"(node (ref "R1") (pin "2") (pintype "passive"))"#);
+        assert_eq!(
+            expr.to_string(),
+            r#"(node (ref "R1") (pin "2") (pintype "passive"))"#
+        );
     }
 
     #[test]
@@ -158,7 +169,13 @@ mod tests {
                         "comp",
                         [
                             SExpr::kv("ref", "R1"),
-                            SExpr::node("fields", [SExpr::node("field", [SExpr::kv("name", "A"), SExpr::string("x")])]),
+                            SExpr::node(
+                                "fields",
+                                [SExpr::node(
+                                    "field",
+                                    [SExpr::kv("name", "A"), SExpr::string("x")],
+                                )],
+                            ),
                         ],
                     )],
                 ),

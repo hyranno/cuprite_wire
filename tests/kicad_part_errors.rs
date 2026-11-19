@@ -3,7 +3,10 @@
 
 #[test]
 fn test_compile_errors() {
-    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/kicad_lib/tests/fixtures");
+    let fixtures = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/crates/kicad_lib/tests/fixtures"
+    );
     // SAFETY: this is the only test in this binary, so no other thread reads the environment.
     // The cargo process run by trybuild inherits it, so the test cases use the test libraries.
     unsafe {

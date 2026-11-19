@@ -37,7 +37,10 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    pub fn new(manifest_dir: impl Into<PathBuf>, env: impl Fn(&str) -> Option<String> + 'static) -> Self {
+    pub fn new(
+        manifest_dir: impl Into<PathBuf>,
+        env: impl Fn(&str) -> Option<String> + 'static,
+    ) -> Self {
         Resolver {
             manifest_dir: manifest_dir.into(),
             symbol_dir: None,
@@ -59,7 +62,9 @@ impl Resolver {
     fn dir(&mut self, overridden: Option<PathBuf>, env: &str, default: &str) -> PathBuf {
         match overridden {
             Some(dir) => self.manifest_dir.join(dir),
-            None => self.var(env).map_or_else(|| PathBuf::from(default), PathBuf::from),
+            None => self
+                .var(env)
+                .map_or_else(|| PathBuf::from(default), PathBuf::from),
         }
     }
 
@@ -68,14 +73,21 @@ impl Resolver {
     }
 
     pub fn footprint_dir(&mut self) -> PathBuf {
-        self.dir(self.footprint_dir.clone(), FOOTPRINT_DIR_ENV, DEFAULT_FOOTPRINT_DIR)
+        self.dir(
+            self.footprint_dir.clone(),
+            FOOTPRINT_DIR_ENV,
+            DEFAULT_FOOTPRINT_DIR,
+        )
     }
 
     pub fn symbol_lib(&mut self, library: &str) -> Result<Arc<SymbolLib>, Error> {
         let path = self.symbol_dir().join(format!("{library}.kicad_sym"));
         if !path.is_file() {
             self.track(&path);
-            return Err(Error::new(format!("symbol library {library:?} not found ({})", path.display())));
+            return Err(Error::new(format!(
+                "symbol library {library:?} not found ({})",
+                path.display()
+            )));
         }
         self.load(&path, utf8, SymbolLib::parse)
     }
@@ -87,7 +99,10 @@ impl Resolver {
             .join(format!("{name}.kicad_mod"));
         if !path.is_file() {
             self.track(&path);
-            return Err(Error::new(format!("footprint {library}:{name} not found ({})", path.display())));
+            return Err(Error::new(format!(
+                "footprint {library}:{name} not found ({})",
+                path.display()
+            )));
         }
         self.load(&path, utf8, Footprint::parse)
     }
@@ -109,8 +124,11 @@ impl Resolver {
             let replacement = if is_symbol_dir_var(name) {
                 self.symbol_dir().to_string_lossy().into_owned()
             } else {
-                self.var(name)
-                    .ok_or_else(|| Error::new(format!("environment variable {name} in {value:?} is not set")))?
+                self.var(name).ok_or_else(|| {
+                    Error::new(format!(
+                        "environment variable {name} in {value:?} is not set"
+                    ))
+                })?
             };
             expanded.push_str(&replacement);
             rest = &rest[start + end + 1..];
@@ -180,7 +198,10 @@ fn cached<T: Send + Sync + 'static>(
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Entry>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
     let metadata = std::fs::metadata(path).map_err(|e| Error::new(e.to_string()))?;
-    let stamp = (metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH), metadata.len());
+    let stamp = (
+        metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        metadata.len(),
+    );
     if let Some((modified, len, value)) = cache.lock().unwrap().get(path)
         && (*modified, *len) == stamp
         && let Ok(value) = value.clone().downcast::<T>()
@@ -202,18 +223,28 @@ mod tests {
 
     #[test]
     fn test_sim_library_path() {
-        let mut resolver = Resolver::new("/crate", |name| (name == "MODELS").then(|| "/models".to_string()));
+        let mut resolver = Resolver::new("/crate", |name| {
+            (name == "MODELS").then(|| "/models".to_string())
+        });
         assert_eq!(
-            resolver.sim_library_path("${KICAD7_SYMBOL_DIR}/Simulation_SPICE.sp").unwrap(),
+            resolver
+                .sim_library_path("${KICAD7_SYMBOL_DIR}/Simulation_SPICE.sp")
+                .unwrap(),
             PathBuf::from("/usr/share/kicad/symbols/Simulation_SPICE.sp")
         );
         assert_eq!(
             resolver.sim_library_path("${MODELS}/d.lib").unwrap(),
             PathBuf::from("/models/d.lib")
         );
-        assert_eq!(resolver.sim_library_path("m/d.lib").unwrap(), PathBuf::from("/crate/m/d.lib"));
+        assert_eq!(
+            resolver.sim_library_path("m/d.lib").unwrap(),
+            PathBuf::from("/crate/m/d.lib")
+        );
         resolver.sim_library_dir = Some("spice".into());
-        assert_eq!(resolver.sim_library_path("d.lib").unwrap(), PathBuf::from("/crate/spice/d.lib"));
+        assert_eq!(
+            resolver.sim_library_path("d.lib").unwrap(),
+            PathBuf::from("/crate/spice/d.lib")
+        );
         assert!(resolver.sim_library_path("${NONE}/d.lib").is_err());
         assert_eq!(resolver.env_vars, ["KICAD9_SYMBOL_DIR", "MODELS", "NONE"]);
     }

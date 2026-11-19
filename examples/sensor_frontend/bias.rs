@@ -41,7 +41,8 @@ impl SubcircuitGenerator for MidSupply {
         let upper = c.instantiate_part_named("r_upper", Box::new(Resistor0603::new("100k")));
         let lower = c.instantiate_part_named("r_lower", Box::new(Resistor0603::new("100k")));
         let filter = c.instantiate_part_named("c_filter", Box::new(Capacitor0603::new("1u")));
-        let decoupling = c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
+        let decoupling =
+            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
         let amp = c.instantiate_part_named("buffer", Box::new(RrioOpAmp::new()));
         // Divider, filtered (corner 3.2 Hz with 50k and 1u).
         c.connect(vcc, upper["1"]);
@@ -79,7 +80,11 @@ mod tests {
     #[test]
     fn erc() {
         let [vcc, gnd, vref] = interface();
-        let ports = [(vcc, PinType::PowerOut), (gnd, PinType::PowerOut), (vref, PinType::Input)];
+        let ports = [
+            (vcc, PinType::PowerOut),
+            (gnd, PinType::PowerOut),
+            (vref, PinType::Input),
+        ];
         check_subcircuit(&MidSupply, &(), &ports, &ErcSettings::default())
             .unwrap()
             .assert_clean();
@@ -100,11 +105,16 @@ mod tests {
             bench.circuit.connect(ports.gnd, bench.gnd);
             bench.probe(ports.vref, "VREF");
             // A 1 mA load, as if other stages were biased from the reference.
-            let load = bench.circuit.instantiate_part_named("load", Box::new(Resistor0603::new("2.5k")));
+            let load = bench
+                .circuit
+                .instantiate_part_named("load", Box::new(Resistor0603::new("2.5k")));
             bench.circuit.connect(load["1"], ports.vref);
             bench.circuit.connect(load["2"], bench.gnd);
             // The divider's filter settles with a time constant of 50 ms.
-            let sim = bench.simulate(["tran 100u 600m", r#"meas tran vref FIND v("/VREF") AT=600m"#]);
+            let sim = bench.simulate([
+                "tran 100u 600m",
+                r#"meas tran vref FIND v("/VREF") AT=600m"#,
+            ]);
             assert_near("vref", value(&sim, "vref"), supply / 2.0, 1e-3);
         }
     }

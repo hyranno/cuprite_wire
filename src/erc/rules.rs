@@ -26,11 +26,23 @@ impl NetPin {
 /// A problem found on one net. Pins are indices into the pins given to [`check_net`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum NetFinding {
-    PinToPin { pin: usize, other: usize, severity: Severity },
-    PinNotConnected { pin: usize },
-    PinNotDriven { pin: usize },
-    PowerPinNotDriven { pin: usize },
-    NoConnectConnected { pins: Vec<usize> },
+    PinToPin {
+        pin: usize,
+        other: usize,
+        severity: Severity,
+    },
+    PinNotConnected {
+        pin: usize,
+    },
+    PinNotDriven {
+        pin: usize,
+    },
+    PowerPinNotDriven {
+        pin: usize,
+    },
+    NoConnectConnected {
+        pins: Vec<usize>,
+    },
 }
 
 /// Pin types driving a net without `power_in` pins.
@@ -137,14 +149,20 @@ fn pin_to_pin(pins: &[NetPin], pin_map: &PinMap) -> Vec<NetFinding> {
 
     let mut findings = Vec::new();
     for pin in order {
-        let (involved, rest): (Vec<_>, Vec<_>) = conflicts.into_iter().partition(|&(i, j, _)| i == pin || j == pin);
+        let (involved, rest): (Vec<_>, Vec<_>) = conflicts
+            .into_iter()
+            .partition(|&(i, j, _)| i == pin || j == pin);
         conflicts = rest;
         let partner = involved
             .into_iter()
             .map(|(i, j, severity)| (if i == pin { j } else { i }, severity))
             .min_by_key(|&(other, severity)| (std::cmp::Reverse(severity), other));
         if let Some((other, severity)) = partner {
-            findings.push(NetFinding::PinToPin { pin, other, severity });
+            findings.push(NetFinding::PinToPin {
+                pin,
+                other,
+                severity,
+            });
         }
     }
     findings
@@ -168,7 +186,10 @@ mod tests {
     }
 
     fn virtual_pin(pin_type: PinType) -> NetPin {
-        NetPin { pin_type, stack: None }
+        NetPin {
+            pin_type,
+            stack: None,
+        }
     }
 
     fn check(pins: &[NetPin]) -> Vec<NetFinding> {
@@ -195,7 +216,8 @@ mod tests {
         let pin_map = PinMap::default();
         for a in PinType::ALL {
             for b in PinType::ALL {
-                let expected = [Severity::Ignore, Severity::Warning, Severity::Error][kicad[a.index()][b.index()]];
+                let expected = [Severity::Ignore, Severity::Warning, Severity::Error]
+                    [kicad[a.index()][b.index()]];
                 assert_eq!(pin_map.get(a, b), expected, "{a} - {b}");
                 // Every cell is checked against a pin pair on a net.
                 let conflicts: Vec<_> = check(&pins(&[a, b]))
@@ -205,7 +227,11 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                let expected_conflicts = if expected == Severity::Ignore { vec![] } else { vec![expected] };
+                let expected_conflicts = if expected == Severity::Ignore {
+                    vec![]
+                } else {
+                    vec![expected]
+                };
                 assert_eq!(conflicts, expected_conflicts, "{a} - {b}");
             }
         }
@@ -218,16 +244,32 @@ mod tests {
         assert_eq!(
             check(&pins(&[Output, Unspecified, Output])),
             vec![
-                NetFinding::PinToPin { pin: 1, other: 0, severity: Severity::Warning },
-                NetFinding::PinToPin { pin: 0, other: 2, severity: Severity::Error },
+                NetFinding::PinToPin {
+                    pin: 1,
+                    other: 0,
+                    severity: Severity::Warning
+                },
+                NetFinding::PinToPin {
+                    pin: 0,
+                    other: 2,
+                    severity: Severity::Error
+                },
             ]
         );
         // The most severe conflict of a pin is reported.
         assert_eq!(
             check(&pins(&[TriState, PowerOut, Output])),
             vec![
-                NetFinding::PinToPin { pin: 0, other: 1, severity: Severity::Error },
-                NetFinding::PinToPin { pin: 2, other: 1, severity: Severity::Error },
+                NetFinding::PinToPin {
+                    pin: 0,
+                    other: 1,
+                    severity: Severity::Error
+                },
+                NetFinding::PinToPin {
+                    pin: 2,
+                    other: 1,
+                    severity: Severity::Error
+                },
             ]
         );
     }
@@ -235,22 +277,44 @@ mod tests {
     #[test]
     fn test_stacked_pins_do_not_conflict() {
         let stacked = [
-            NetPin { pin_type: Output, stack: Some((0, 0)) },
-            NetPin { pin_type: Output, stack: Some((0, 0)) },
-            NetPin { pin_type: Input, stack: Some((1, 0)) },
+            NetPin {
+                pin_type: Output,
+                stack: Some((0, 0)),
+            },
+            NetPin {
+                pin_type: Output,
+                stack: Some((0, 0)),
+            },
+            NetPin {
+                pin_type: Input,
+                stack: Some((1, 0)),
+            },
         ];
         assert_eq!(check(&stacked), vec![]);
         // Pins of one part that are not connected inside it conflict, and count as two pins.
         let separate = [
-            NetPin { pin_type: Output, stack: Some((0, 0)) },
-            NetPin { pin_type: Output, stack: Some((0, 1)) },
+            NetPin {
+                pin_type: Output,
+                stack: Some((0, 0)),
+            },
+            NetPin {
+                pin_type: Output,
+                stack: Some((0, 1)),
+            },
         ];
         assert_eq!(
             check(&separate),
-            vec![NetFinding::PinToPin { pin: 0, other: 1, severity: Severity::Error }]
+            vec![NetFinding::PinToPin {
+                pin: 0,
+                other: 1,
+                severity: Severity::Error
+            }]
         );
         // Stacked pins alone are not connected to anything else.
-        assert_eq!(check(&stacked[..2]), vec![NetFinding::PinNotConnected { pin: 0 }]);
+        assert_eq!(
+            check(&stacked[..2]),
+            vec![NetFinding::PinNotConnected { pin: 0 }]
+        );
     }
 
     #[test]
@@ -278,11 +342,17 @@ mod tests {
 
     #[test]
     fn test_unconnected_pins() {
-        assert_eq!(check(&pins(&[Passive])), vec![NetFinding::PinNotConnected { pin: 0 }]);
+        assert_eq!(
+            check(&pins(&[Passive])),
+            vec![NetFinding::PinNotConnected { pin: 0 }]
+        );
         // KiCad reports both for a lone input pin.
         assert_eq!(
             check(&pins(&[Input])),
-            vec![NetFinding::PinNotDriven { pin: 0 }, NetFinding::PinNotConnected { pin: 0 }]
+            vec![
+                NetFinding::PinNotDriven { pin: 0 },
+                NetFinding::PinNotConnected { pin: 0 }
+            ]
         );
         assert_eq!(check(&pins(&[NoConnect])), vec![]);
         assert_eq!(check(&pins(&[Free])), vec![]);

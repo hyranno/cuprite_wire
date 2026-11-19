@@ -65,7 +65,8 @@ fn follower_interface() -> HashSet<NodeIndex> {
 /// A [`Follower`] with labeled supplies (`VCC` / `GND`) and its input driven from outside.
 fn follower_circuit(power_flags: bool) -> CircuitBuilder {
     let mut circuit = CircuitBuilder::new();
-    let nodes = circuit.instantiate_subcircuit_named("f", Follower, &follower_interface(), |_: &()| ());
+    let nodes =
+        circuit.instantiate_subcircuit_named("f", Follower, &follower_interface(), |_: &()| ());
     let [input, output, vcc, gnd] = [0, 1, 2, 3].map(|i| nodes[&NodeIndex::new(i)]);
     circuit.virtual_pin(input, PinType::Output, "signal");
     circuit.label(output, NetLabel::global("OUT"));
@@ -89,8 +90,12 @@ fn test_power_pins_need_a_power_flag() {
     assert_eq!(
         summary(&report),
         vec![
-            error("net \"GND\": U1.vee (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)"),
-            error("net \"VCC\": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)"),
+            error(
+                "net \"GND\": U1.vee (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)"
+            ),
+            error(
+                "net \"VCC\": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)"
+            ),
             error("net \"VCC\": U1.vcc (power_in) is not connected to anything"),
         ]
     );
@@ -132,7 +137,9 @@ fn test_conflicting_outputs() {
 
     // The pin map can allow it.
     let mut settings = ErcSettings::default();
-    settings.pin_map.set(PinType::Output, PinType::Output, Severity::Ignore);
+    settings
+        .pin_map
+        .set(PinType::Output, PinType::Output, Severity::Ignore);
     erc_with(&circuit, &(), &settings).assert_clean();
 }
 
@@ -150,7 +157,9 @@ fn test_no_connect_marks() {
     assert_eq!(
         summary(&report),
         vec![
-            warning("net \"Net-(R1-Pad2)\" is marked no-connect but connects R1.2 (passive), R2.1 (passive)"),
+            warning(
+                "net \"Net-(R1-Pad2)\" is marked no-connect but connects R1.2 (passive), R2.1 (passive)"
+            ),
             error("net \"unconnected-(R2-Pad2)\": R2.2 (passive) is not connected to anything"),
             warning("no-connect mark is not on any pin"),
         ]
@@ -191,7 +200,8 @@ fn test_similar_net_names() {
 
 #[test]
 fn test_severities() {
-    let settings = ErcSettings::default().with_severity(ErcRule::PinNotConnected, Severity::Warning);
+    let settings =
+        ErcSettings::default().with_severity(ErcRule::PinNotConnected, Severity::Warning);
     let report = erc_with(&rc_filter(), &(), &settings);
     assert!(!report.has_errors());
     assert_eq!(report.warnings().count(), 2);
@@ -211,14 +221,18 @@ fn test_check_subcircuit() {
         (node(2), PinType::PowerOut),
         (node(3), PinType::PowerOut),
     ];
-    check_subcircuit(&Follower, &(), &ports, &settings).unwrap().assert_clean();
+    check_subcircuit(&Follower, &(), &ports, &settings)
+        .unwrap()
+        .assert_clean();
 
     // Without a driver for the input.
     let report = check_subcircuit(&Follower, &(), &ports[1..], &settings).unwrap();
     assert_eq!(
         summary(&report),
         vec![
-            error("net \"unconnected-(U1-+-Pad3)\": input pin U1.in_p (input) is not driven by any output pin"),
+            error(
+                "net \"unconnected-(U1-+-Pad3)\": input pin U1.in_p (input) is not driven by any output pin"
+            ),
             error("net \"unconnected-(U1-+-Pad3)\": U1.in_p (input) is not connected to anything"),
         ]
     );

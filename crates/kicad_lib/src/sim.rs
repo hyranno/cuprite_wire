@@ -61,14 +61,19 @@ pub struct ElementDef {
 pub enum Args {
     Fixed(String),
     /// `prefix` followed by the value given when the part is created.
-    Value { prefix: String },
+    Value {
+        prefix: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelDef {
     /// An absolute path to include.
     Include(PathBuf),
-    Inline { name: String, text: String },
+    Inline {
+        name: String,
+        text: String,
+    },
 }
 
 /// How library models are referred to.
@@ -119,7 +124,9 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
             let letter = device.chars().next().unwrap();
             let source = matches!(letter, 'V' | 'I');
             if library.is_some() {
-                return Err(Error::new(format!("Sim.Library for Sim.Device {device} is not supported")));
+                return Err(Error::new(format!(
+                    "Sim.Library for Sim.Device {device} is not supported"
+                )));
             }
             if source && sim_type.as_deref().is_some_and(|t| t != "DC") {
                 return Err(unsupported_type());
@@ -127,11 +134,17 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
             if !source && sim_type.is_some() {
                 return Err(unsupported_type());
             }
-            let key = if source { "dc" } else { &device.to_ascii_lowercase() };
+            let key = if source {
+                "dc"
+            } else {
+                &device.to_ascii_lowercase()
+            };
             let prefix = if source { "DC " } else { "" };
             let args = match params.as_slice() {
                 [] => value_args(input.value, prefix)?,
-                [(name, value)] if name.eq_ignore_ascii_case(key) => Args::Fixed(format!("{prefix}{value}")),
+                [(name, value)] if name.eq_ignore_ascii_case(key) => {
+                    Args::Fixed(format!("{prefix}{value}"))
+                }
                 _ => {
                     return Err(Error::new(format!(
                         "Sim.Params {:?} of Sim.Device {device} is not supported (only {key}=...)",
@@ -146,12 +159,22 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
             let (letter, model) = match (library, model_name) {
                 (Some(library), Some(name)) => {
                     if !params.is_empty() {
-                        return Err(Error::new("Sim.Params together with Sim.Library is not supported"));
+                        return Err(Error::new(
+                            "Sim.Params together with Sim.Library is not supported",
+                        ));
                     }
                     let def = library_model(input, library, name, Vec::new(), resolver)?;
-                    let SpiceDef::Elements { elements, .. } = &def else { unreachable!() };
-                    let Some(model_type) = elements[0].info.as_ref().and_then(|info| info.model_type.as_ref()) else {
-                        return Err(Error::new(format!("{name:?} in {library:?} is a subcircuit, not a .model")));
+                    let SpiceDef::Elements { elements, .. } = &def else {
+                        unreachable!()
+                    };
+                    let Some(model_type) = elements[0]
+                        .info
+                        .as_ref()
+                        .and_then(|info| info.model_type.as_ref())
+                    else {
+                        return Err(Error::new(format!(
+                            "{name:?} in {library:?} is a subcircuit, not a .model"
+                        )));
                     };
                     if device_letter(&device, model_type).is_none() {
                         return Err(Error::new(format!(
@@ -161,7 +184,8 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
                     return Ok(def);
                 }
                 (None, None) => {
-                    let model_type = builtin_model_type(&device, sim_type.as_deref()).ok_or_else(unsupported_type)?;
+                    let model_type = builtin_model_type(&device, sim_type.as_deref())
+                        .ok_or_else(unsupported_type)?;
                     let letter = device_letter(&device, &model_type.to_ascii_lowercase()).unwrap();
                     let name = input.builtin_model_name.to_string();
                     let mut text = format!(".model {name} {model_type}");
@@ -169,10 +193,17 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
                         text.push_str(&format!(" {key}={value}"));
                     }
                     text.push('\n');
-                    let models = vec![ModelDef::Inline { name: name.clone(), text }];
+                    let models = vec![ModelDef::Inline {
+                        name: name.clone(),
+                        text,
+                    }];
                     (letter, (name, model_type.to_ascii_lowercase(), models))
                 }
-                _ => return Err(Error::new("Sim.Library and Sim.Name must be given together")),
+                _ => {
+                    return Err(Error::new(
+                        "Sim.Library and Sim.Name must be given together",
+                    ));
+                }
             };
             let (name, model_type, models) = model;
             let model_pins: &[&str] = match letter {
@@ -191,12 +222,18 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
                 return Err(unsupported_type());
             }
             let (Some(library), Some(name)) = (library, model_name) else {
-                return Err(Error::new("Sim.Device SUBCKT needs Sim.Library and Sim.Name"));
+                return Err(Error::new(
+                    "Sim.Device SUBCKT needs Sim.Library and Sim.Name",
+                ));
             };
             let def = library_model(input, library, name, params, resolver)?;
-            let SpiceDef::Elements { elements, .. } = &def else { unreachable!() };
+            let SpiceDef::Elements { elements, .. } = &def else {
+                unreachable!()
+            };
             if elements[0].device != 'X' {
-                return Err(Error::new(format!("{name:?} in {library:?} is a .model, not a subcircuit")));
+                return Err(Error::new(format!(
+                    "{name:?} in {library:?} is a .model, not a subcircuit"
+                )));
             }
             Ok(def)
         }
@@ -206,7 +243,12 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
 
 /// No `Sim.*` fields: KiCad infers R, C and L from the reference prefix and the value.
 fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
-    let letter = match input.ref_prefix.chars().next().map(|c| c.to_ascii_uppercase()) {
+    let letter = match input
+        .ref_prefix
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_uppercase())
+    {
         Some(c @ ('R' | 'C' | 'L')) => c,
         _ => return Ok(SpiceDef::Unsupported),
     };
@@ -214,7 +256,12 @@ fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
         return Ok(SpiceDef::Unsupported);
     }
     let args = value_args(input.value, "")?;
-    let nodes = input.symbol.pins.iter().map(|pin| pin.number.clone()).collect();
+    let nodes = input
+        .symbol
+        .pins
+        .iter()
+        .map(|pin| pin.number.clone())
+        .collect();
     Ok(element(letter, (nodes, Vec::new()), args, Vec::new()))
 }
 
@@ -223,7 +270,9 @@ fn value_args(value: &Value, prefix: &str) -> Result<Args, Error> {
         Value::Param => Ok(Args::Value {
             prefix: prefix.to_string(),
         }),
-        Value::Fixed(value) if value.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') => {
+        Value::Fixed(value)
+            if value.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') =>
+        {
             Ok(Args::Fixed(format!("{prefix}{value}")))
         }
         Value::Fixed(value) => Err(Error::new(format!(
@@ -232,7 +281,12 @@ fn value_args(value: &Value, prefix: &str) -> Result<Args, Error> {
     }
 }
 
-fn element(device: char, (nodes, unused_pins): (Vec<String>, Vec<String>), args: Args, models: Vec<ModelDef>) -> SpiceDef {
+fn element(
+    device: char,
+    (nodes, unused_pins): (Vec<String>, Vec<String>),
+    args: Args,
+    models: Vec<ModelDef>,
+) -> SpiceDef {
     SpiceDef::Elements {
         elements: vec![ElementDef {
             device,
@@ -280,7 +334,10 @@ fn library_model(
         mode: input.model_mode,
     };
     let (elements, unused_pins) = bind(&[binding], &options, resolver).map_err(|e| e.error)?;
-    Ok(SpiceDef::Elements { elements, unused_pins })
+    Ok(SpiceDef::Elements {
+        elements,
+        unused_pins,
+    })
 }
 
 /// Parses `Sim.Pins` (`1=K 2=A`).
@@ -343,7 +400,9 @@ fn map_pins(symbol: &Symbol, model_pins: &[&str]) -> Result<(Vec<String>, Vec<St
         Some(mapping) => {
             for (number, model_pin) in parse_sim_pins(mapping)? {
                 if !symbol.pins.iter().any(|pin| pin.number == number) {
-                    return Err(Error::new(format!("Sim.Pins refers to pin {number:?}, which the symbol does not have")));
+                    return Err(Error::new(format!(
+                        "Sim.Pins refers to pin {number:?}, which the symbol does not have"
+                    )));
                 }
                 let index = model_pins
                     .iter()
@@ -355,7 +414,9 @@ fn map_pins(symbol: &Symbol, model_pins: &[&str]) -> Result<(Vec<String>, Vec<St
                         ))
                     })?;
                 if nodes[index].replace(number).is_some() {
-                    return Err(Error::new(format!("Sim.Pins maps model pin {model_pin:?} twice")));
+                    return Err(Error::new(format!(
+                        "Sim.Pins maps model pin {model_pin:?} twice"
+                    )));
                 }
             }
         }
@@ -367,12 +428,17 @@ fn map_pins(symbol: &Symbol, model_pins: &[&str]) -> Result<(Vec<String>, Vec<St
         .map(|(pin, _)| *pin)
         .collect();
     if !missing.is_empty() {
-        return Err(Error::new(format!("Sim.Pins does not map model pins {}", missing.join(" "))));
+        return Err(Error::new(format!(
+            "Sim.Pins does not map model pins {}",
+            missing.join(" ")
+        )));
     }
     let nodes: Vec<String> = nodes.into_iter().map(Option::unwrap).collect();
     let used: BTreeSet<&String> = nodes.iter().collect();
     if used.len() != nodes.len() {
-        return Err(Error::new("Sim.Pins maps a symbol pin to several model pins"));
+        return Err(Error::new(
+            "Sim.Pins maps a symbol pin to several model pins",
+        ));
     }
     let unused = symbol
         .pins
@@ -403,7 +469,9 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
             chars.next();
         }
         if chars.next() != Some('=') || name.is_empty() {
-            return Err(Error::new(format!("invalid Sim.Params {text:?} (expected name=value)")));
+            return Err(Error::new(format!(
+                "invalid Sim.Params {text:?} (expected name=value)"
+            )));
         }
         let mut value = String::new();
         if chars.peek() == Some(&'"') {
@@ -412,11 +480,17 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
                 match chars.next() {
                     Some('"') => break,
                     Some(c) => value.push(c),
-                    None => return Err(Error::new(format!("unterminated quote in Sim.Params {text:?}"))),
+                    None => {
+                        return Err(Error::new(format!(
+                            "unterminated quote in Sim.Params {text:?}"
+                        )));
+                    }
                 }
             }
             if value.chars().any(char::is_whitespace) {
-                return Err(Error::new(format!("Sim.Params value {value:?} with spaces is not supported")));
+                return Err(Error::new(format!(
+                    "Sim.Params value {value:?} with spaces is not supported"
+                )));
             }
         } else {
             while let Some(&c) = chars.peek() {
@@ -428,7 +502,9 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
             }
         }
         if value.is_empty() || value.contains(['\\', '\'', '{', '}', ';', '$']) {
-            return Err(Error::new(format!("Sim.Params value {value:?} of {name} is not supported")));
+            return Err(Error::new(format!(
+                "Sim.Params value {value:?} of {name} is not supported"
+            )));
         }
         params.push((name, value));
     }
@@ -458,7 +534,12 @@ mod tests {
             .collect()
     }
 
-    fn convert(symbol: &Symbol, prefix: &str, value: Value, resolver: &mut Resolver) -> Result<SpiceDef, Error> {
+    fn convert(
+        symbol: &Symbol,
+        prefix: &str,
+        value: Value,
+        resolver: &mut Resolver,
+    ) -> Result<SpiceDef, Error> {
         spice_def(
             &SimInput {
                 symbol,
@@ -472,7 +553,10 @@ mod tests {
     }
 
     fn resolver() -> Resolver {
-        Resolver::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"), |_| None)
+        Resolver::new(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
+            |_| None,
+        )
     }
 
     fn strings(s: &[&str]) -> Vec<String> {
@@ -482,7 +566,10 @@ mod tests {
     /// The element of a part with a single element, and the unused pins.
     fn single(def: SpiceDef) -> (ElementDef, Vec<String>) {
         match def {
-            SpiceDef::Elements { mut elements, unused_pins } if elements.len() == 1 => (elements.remove(0), unused_pins),
+            SpiceDef::Elements {
+                mut elements,
+                unused_pins,
+            } if elements.len() == 1 => (elements.remove(0), unused_pins),
             other => panic!("{other:?}"),
         }
     }
@@ -507,18 +594,29 @@ mod tests {
             )
         );
         assert!(convert(&r, "R", Value::Fixed("R".into()), &mut resolver()).is_err());
-        assert_eq!(convert(&r, "U", Value::Param, &mut resolver()).unwrap(), SpiceDef::Unsupported);
+        assert_eq!(
+            convert(&r, "U", Value::Param, &mut resolver()).unwrap(),
+            SpiceDef::Unsupported
+        );
         let excluded = symbol("(exclude_from_sim yes)", &[("1", "~")]);
-        assert_eq!(convert(&excluded, "R", Value::Param, &mut resolver()).unwrap(), SpiceDef::Excluded);
+        assert_eq!(
+            convert(&excluded, "R", Value::Param, &mut resolver()).unwrap(),
+            SpiceDef::Excluded
+        );
     }
 
     #[test]
     fn test_builtin_diode() {
         let d = symbol(
-            &props(&[("Sim.Device", "D"), ("Sim.Pins", "1=K 2=A"), ("Sim.Params", "rs=50m cjo=10p")]),
+            &props(&[
+                ("Sim.Device", "D"),
+                ("Sim.Pins", "1=K 2=A"),
+                ("Sim.Params", "rs=50m cjo=10p"),
+            ]),
             &[("1", "K"), ("2", "A")],
         );
-        let (element, _) = single(convert(&d, "D", Value::Fixed("1N4148".into()), &mut resolver()).unwrap());
+        let (element, _) =
+            single(convert(&d, "D", Value::Fixed("1N4148".into()), &mut resolver()).unwrap());
         assert_eq!(element.device, 'D');
         assert_eq!(element.nodes, strings(&["2", "1"]));
         assert_eq!(element.args, Args::Fixed("__S".into()));
@@ -534,16 +632,26 @@ mod tests {
     #[test]
     fn test_source_and_errors() {
         let v = symbol(
-            &props(&[("Sim.Device", "V"), ("Sim.Type", "DC"), ("Sim.Pins", "1=+ 2=-")]),
+            &props(&[
+                ("Sim.Device", "V"),
+                ("Sim.Type", "DC"),
+                ("Sim.Pins", "1=+ 2=-"),
+            ]),
             &[("1", "~"), ("2", "~")],
         );
-        let (element, _) = single(convert(&v, "V", Value::Fixed("5".into()), &mut resolver()).unwrap());
+        let (element, _) =
+            single(convert(&v, "V", Value::Fixed("5".into()), &mut resolver()).unwrap());
         assert_eq!(element.args, Args::Fixed("DC 5".into()));
         let error = |fields: &[(&str, &str)]| {
             let s = symbol(&props(fields), &[("1", "~"), ("2", "~"), ("3", "~")]);
-            convert(&s, "Q", Value::Param, &mut resolver()).unwrap_err().to_string()
+            convert(&s, "Q", Value::Param, &mut resolver())
+                .unwrap_err()
+                .to_string()
         };
-        assert_eq!(error(&[("Sim.Device", "SW")]), "Sim.Device SW is not supported");
+        assert_eq!(
+            error(&[("Sim.Device", "SW")]),
+            "Sim.Device SW is not supported"
+        );
         assert_eq!(
             error(&[("Sim.Device", "NPN"), ("Sim.Type", "VBIC")]),
             "Sim.Type \"VBIC\" of Sim.Device NPN is not supported"
@@ -572,15 +680,26 @@ mod tests {
                 ("Sim.Pins", "1=out 2=in- 3=in+ 5=vcc 4=vee"),
                 ("Sim.Params", "GAIN=100"),
             ]),
-            &[("1", "~"), ("2", "-"), ("3", "+"), ("4", "V-"), ("5", "V+"), ("6", "NC")],
+            &[
+                ("1", "~"),
+                ("2", "-"),
+                ("3", "+"),
+                ("4", "V-"),
+                ("5", "V+"),
+                ("6", "NC"),
+            ],
         );
         let mut r = resolver();
-        let (element, unused_pins) = single(convert(&amp, "U", Value::Fixed("AMP".into()), &mut r).unwrap());
+        let (element, unused_pins) =
+            single(convert(&amp, "U", Value::Fixed("AMP".into()), &mut r).unwrap());
         assert_eq!(element.device, 'X');
         assert_eq!(element.nodes, strings(&["3", "2", "5", "4", "1"]));
         assert_eq!(element.args, Args::Fixed("amp GAIN=100".into()));
         assert_eq!(element.dialect, Dialect::Ngspice);
-        assert_eq!(element.info.as_ref().unwrap().ports, strings(&["in+", "in-", "vcc", "vee", "out"]));
+        assert_eq!(
+            element.info.as_ref().unwrap().ports,
+            strings(&["in+", "in-", "vcc", "vee", "out"])
+        );
         assert_eq!(unused_pins, strings(&["6"]));
         let lib = r.manifest_dir.join("models/amp.lib");
         assert_eq!(element.models, vec![ModelDef::Include(lib.clone())]);
@@ -618,7 +737,10 @@ mod tests {
     fn test_parse_params() {
         assert_eq!(
             parse_params(" a=1  b=\"2k\" ").unwrap(),
-            vec![("a".to_string(), "1".to_string()), ("b".to_string(), "2k".to_string())]
+            vec![
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2k".to_string())
+            ]
         );
         assert!(parse_params("type=\\").is_err());
         assert!(parse_params("a").is_err());

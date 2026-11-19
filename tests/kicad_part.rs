@@ -79,21 +79,40 @@ fn test_resistor() {
             flags: PartFlags::default(),
         })
     );
-    assert_eq!(r.spice(), Some(SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], "10k"))));
+    assert_eq!(
+        r.spice(),
+        Some(SpicePartInfo::element(SpiceElement::new(
+            'R',
+            ["1", "2"],
+            "10k"
+        )))
+    );
 }
 
 #[test]
 fn test_dual_amp() {
     let amp = DualAmp::new();
-    assert_eq!(DualAmp::PINS, ["out_a", "2", "3", "4", "5", "6", "out_b", "8", "ep"]);
+    assert_eq!(
+        DualAmp::PINS,
+        ["out_a", "2", "3", "4", "5", "6", "out_b", "8", "ep"]
+    );
     assert_eq!(DualAmp::OUT_A, "out_a");
     assert_eq!(amp.value(), "DUAL_AMP");
     assert_eq!(amp.get_ref_base_name(), "U");
     assert_eq!(amp.internal_connections(), vec![strings(&["4", "ep"])]);
     let info = amp.kicad().unwrap();
-    assert_eq!(info.pins["out_a"], KicadPinInfo::new("1", None, PinType::Output));
-    assert_eq!(info.pins["4"], KicadPinInfo::new("4", Some("V-"), PinType::PowerIn));
-    assert_eq!(info.pins["ep"], KicadPinInfo::new("9", None, PinType::Passive));
+    assert_eq!(
+        info.pins["out_a"],
+        KicadPinInfo::new("1", None, PinType::Output)
+    );
+    assert_eq!(
+        info.pins["4"],
+        KicadPinInfo::new("4", Some("V-"), PinType::PowerIn)
+    );
+    assert_eq!(
+        info.pins["ep"],
+        KicadPinInfo::new("9", None, PinType::Passive)
+    );
     assert_eq!(info.fields, vec![("MPN".to_string(), "DA-1".to_string())]);
     assert!(info.check_pins(&amp.pin_ids()).is_empty());
     assert_eq!(amp.spice(), None);
@@ -113,7 +132,11 @@ fn test_regulator() {
 fn test_inline_subcircuit() {
     let amp = Amp::default();
     assert_eq!(amp.kicad().unwrap().footprint, None);
-    let Some(SpicePartInfo::Elements { elements, unused_pins }) = amp.spice() else {
+    let Some(SpicePartInfo::Elements {
+        elements,
+        unused_pins,
+    }) = amp.spice()
+    else {
         panic!("{:?}", amp.spice())
     };
     assert_eq!(unused_pins, strings(&["6"]));
@@ -148,9 +171,17 @@ fn test_export() {
     let mut out = Vec::new();
     netlist.to_kicad().unwrap().write(&mut out).unwrap();
     let text = String::from_utf8(out).unwrap();
-    assert!(text.contains("(libsource (lib \"test\") (part \"DUAL_AMP\")"), "{text}");
+    assert!(
+        text.contains("(libsource (lib \"test\") (part \"DUAL_AMP\")"),
+        "{text}"
+    );
     // V- (pad 4) and the exposed pad (9) are on GND through the internal connection.
-    assert!(text.contains("(node (ref \"U1\") (pin \"4\") (pinfunction \"V-\") (pintype \"power_in\"))"), "{text}");
+    assert!(
+        text.contains(
+            "(node (ref \"U1\") (pin \"4\") (pinfunction \"V-\") (pintype \"power_in\"))"
+        ),
+        "{text}"
+    );
     // The amplifier has no SPICE model.
     assert!(netlist.to_spice().is_err());
 }

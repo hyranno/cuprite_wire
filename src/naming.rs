@@ -137,13 +137,17 @@ pub(crate) fn short_type_name<T: ?Sized>() -> String {
 
 /// Finds names equal to an earlier one when ASCII case is ignored. Returns, for each such name,
 /// its index and the index of the first name it is equal to.
-pub(crate) fn case_insensitive_duplicates<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<(usize, usize)> {
+pub(crate) fn case_insensitive_duplicates<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+) -> Vec<(usize, usize)> {
     let mut first_by_lowercase = HashMap::new();
     names
         .into_iter()
         .enumerate()
         .filter_map(|(i, name)| {
-            let first = *first_by_lowercase.entry(name.to_ascii_lowercase()).or_insert(i);
+            let first = *first_by_lowercase
+                .entry(name.to_ascii_lowercase())
+                .or_insert(i);
             (first != i).then_some((i, first))
         })
         .collect()
@@ -210,7 +214,10 @@ mod tests {
         let path = HierPath(vec!["a".into(), "b".into()]);
         assert_eq!(path.uuids(), path.clone().uuids());
         assert_eq!(path.uuids()[0], HierPath(vec!["a".into()]).uuids()[0]);
-        assert_ne!(path.uuids()[1], HierPath(vec!["c".into(), "b".into()]).uuids()[1]);
+        assert_ne!(
+            path.uuids()[1],
+            HierPath(vec!["c".into(), "b".into()]).uuids()[1]
+        );
         assert_eq!(HierPath::default().tstamps(), "/");
         let [a, b] = path.uuids()[..] else { panic!() };
         assert_eq!(path.tstamps(), format!("/{a}/{b}/"));
@@ -220,11 +227,31 @@ mod tests {
 
     #[test]
     fn test_natural_cmp() {
-        let mut names = vec!["R10", "R2", "R1", "C1", "R02", "/a/OUT", "Net-(R1-Pad2)", "GND", "R"];
+        let mut names = vec![
+            "R10",
+            "R2",
+            "R1",
+            "C1",
+            "R02",
+            "/a/OUT",
+            "Net-(R1-Pad2)",
+            "GND",
+            "R",
+        ];
         names.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(
             names,
-            vec!["/a/OUT", "C1", "GND", "Net-(R1-Pad2)", "R", "R1", "R02", "R2", "R10"]
+            vec![
+                "/a/OUT",
+                "C1",
+                "GND",
+                "Net-(R1-Pad2)",
+                "R",
+                "R1",
+                "R02",
+                "R2",
+                "R10"
+            ]
         );
     }
 
@@ -244,7 +271,10 @@ mod tests {
         };
         assert_eq!(label(NetLabel::global("+3V3"), &["a"]).net_name(), "+3V3");
         assert_eq!(label(NetLabel::local("OUT"), &[]).net_name(), "/OUT");
-        assert_eq!(label(NetLabel::local("I/O"), &["amp"]).net_name(), "/amp/I{slash}O");
+        assert_eq!(
+            label(NetLabel::local("I/O"), &["amp"]).net_name(),
+            "/amp/I{slash}O"
+        );
         assert_eq!(unescape_name("/amp/I{slash}O"), "/amp/I/O");
     }
 

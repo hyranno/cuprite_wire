@@ -16,17 +16,26 @@ pub fn interface<const N: usize>() -> [NodeIndex; N] {
 /// Creates the interface nodes inside a subcircuit; call it before adding any other node.
 pub fn add_interface<const N: usize>(circuit: &mut CircuitBuilder) -> [NodeIndex; N] {
     let nodes = std::array::from_fn(|_| circuit.add_node());
-    debug_assert_eq!(nodes, interface::<N>(), "interface nodes must be created first");
+    debug_assert_eq!(
+        nodes,
+        interface::<N>(),
+        "interface nodes must be created first"
+    );
     nodes
 }
 
 /// Instantiates a subcircuit and returns the nodes of its `N` interface nodes in this circuit.
 #[track_caller]
-pub fn instantiate<G, const N: usize>(circuit: &mut CircuitBuilder, name: &str, generator: G) -> [NodeIndex; N]
+pub fn instantiate<G, const N: usize>(
+    circuit: &mut CircuitBuilder,
+    name: &str,
+    generator: G,
+) -> [NodeIndex; N]
 where
     G: SubcircuitGenerator<Options = ()> + 'static,
 {
     let nodes = interface::<N>();
-    let mapping = circuit.instantiate_subcircuit_named(name, generator, &HashSet::from(nodes), |o: &()| *o);
+    let mapping =
+        circuit.instantiate_subcircuit_named(name, generator, &HashSet::from(nodes), |o: &()| *o);
     nodes.map(|node| mapping[&node])
 }
