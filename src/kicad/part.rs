@@ -4,6 +4,8 @@ use std::{
     str::FromStr,
 };
 
+pub use crate::parts::PinType;
+
 /// A KiCad library identifier, `Library:Name` (e.g. `Resistor_SMD:R_0603_1608Metric`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LibId {
@@ -77,43 +79,6 @@ impl FromStr for LibId {
 impl fmt::Display for LibId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.library, self.name)
-    }
-}
-
-/// Electrical type of a pin (`pintype` in the netlist).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum PinType {
-    Input,
-    Output,
-    Bidirectional,
-    TriState,
-    #[default]
-    Passive,
-    Free,
-    Unspecified,
-    PowerIn,
-    PowerOut,
-    OpenCollector,
-    OpenEmitter,
-    NoConnect,
-}
-
-impl PinType {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PinType::Input => "input",
-            PinType::Output => "output",
-            PinType::Bidirectional => "bidirectional",
-            PinType::TriState => "tri_state",
-            PinType::Passive => "passive",
-            PinType::Free => "free",
-            PinType::Unspecified => "unspecified",
-            PinType::PowerIn => "power_in",
-            PinType::PowerOut => "power_out",
-            PinType::OpenCollector => "open_collector",
-            PinType::OpenEmitter => "open_emitter",
-            PinType::NoConnect => "no_connect",
-        }
     }
 }
 
