@@ -45,7 +45,7 @@ impl<K> Diagnostic<K> {
         self
     }
 
-    fn fmt_with_severity(&self, f: &mut fmt::Formatter<'_>, severity: &str) -> fmt::Result
+    pub(crate) fn fmt_with_severity(&self, f: &mut fmt::Formatter<'_>, severity: &str) -> fmt::Result
     where
         K: fmt::Display,
     {

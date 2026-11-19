@@ -10,9 +10,10 @@ use petgraph::{
 };
 
 use crate::{
+    erc::{ErcMark, NodeMark},
     error::{CircuitError, CircuitErrorKind},
     naming::{AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_explicit_name},
-    parts::{Part, PartInstance, PinRef},
+    parts::{Part, PartInstance, PinRef, PinType},
     subcircuit::{SubcircuitGenerator, SubcircuitInstance},
     trace::{Loc, Trace},
 };
@@ -25,6 +26,8 @@ pub struct NodeInfo {
     /// Labels attached to the node (including those attached inside subcircuits
     /// when this node is an interface node).
     pub(crate) labels: Vec<NodeLabel>,
+    /// ERC marks attached to the node (including those attached inside subcircuits).
+    pub(crate) marks: Vec<NodeMark>,
 }
 
 impl NodeInfo {
@@ -32,6 +35,7 @@ impl NodeInfo {
         NodeInfo {
             trace,
             labels: Vec::new(),
+            marks: Vec::new(),
         }
     }
 
@@ -41,6 +45,10 @@ impl NodeInfo {
 
     pub fn labels(&self) -> &[NodeLabel] {
         &self.labels
+    }
+
+    pub fn marks(&self) -> &[NodeMark] {
+        &self.marks
     }
 }
 
@@ -209,6 +217,39 @@ impl<B> CircuitBuilder<B> {
         });
     }
 
+    /// Marks the net containing `node` as intentionally unconnected (KiCad's no-connect flag).
+    /// ERC reports the mark if the net has more than one pin, or no pin.
+    #[track_caller]
+    pub fn no_connect(&mut self, node: NodeIndex) {
+        self.mark(node, ErcMark::NoConnect);
+    }
+
+    /// Marks the net containing `node` as driven by a power source outside the circuit
+    /// (KiCad's `PWR_FLAG`): a virtual `power_out` pin named `PWR_FLAG`.
+    #[track_caller]
+    pub fn power_flag(&mut self, node: NodeIndex) {
+        self.virtual_pin(node, PinType::PowerOut, "PWR_FLAG");
+    }
+
+    /// Adds a pin outside the circuit to the net containing `node`, seen only by ERC
+    /// (e.g. what an off-board connection or the circuit around a subcircuit provides).
+    #[track_caller]
+    pub fn virtual_pin(&mut self, node: NodeIndex, pin_type: PinType, name: &str) {
+        self.mark(
+            node,
+            ErcMark::VirtualPin {
+                pin_type,
+                name: name.to_string(),
+            },
+        );
+    }
+
+    #[track_caller]
+    fn mark(&mut self, node: NodeIndex, mark: ErcMark) {
+        let trace = Trace::new(Location::caller());
+        self.nets[node].marks.push(NodeMark { mark, trace });
+    }
+
     /// Instantiates a subcircuit with an automatic name (`<base name>#<n>`).
     ///
     /// `interface_nodes` are node indices inside the generated subcircuit;
@@ -365,15 +406,21 @@ impl ExpandedCircuit {
         for node in other.nets.node_indices() {
             let inner = &other.nets[node];
             let labels = inner.labels.iter().map(outer_label);
+            let marks = inner.marks.iter().map(|mark| NodeMark {
+                mark: mark.mark.clone(),
+                trace: mark.trace.prepended(location),
+            });
             let merged_node = match instance.node_mapping.get(&node) {
-                // The interface node keeps its own trace and collects the labels from both sides.
+                // The interface node keeps its own trace and collects the labels and marks from both sides.
                 Some(&merged_node) => {
                     self.nets[merged_node].labels.extend(labels);
+                    self.nets[merged_node].marks.extend(marks);
                     merged_node
                 }
                 None => self.nets.add_node(NodeInfo {
                     trace: inner.trace.prepended(location),
                     labels: labels.collect(),
+                    marks: marks.collect(),
                 }),
             };
             index_map.insert(node, merged_node);
