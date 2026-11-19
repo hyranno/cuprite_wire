@@ -22,11 +22,11 @@ exclude = [".claude/", ".devcontainer/", ".github/", ".gitattributes", ".gitigno
 [dependencies]
 cuprite_wire_macros = { version = "0.1.0", path = "crates/macros" }
 dyn-clone = "1.0.20"
-itertools = "0.15.0"
 petgraph = "0.8.3"
 uuid = { version = "1.29.2", features = ["v5"] }
 
 [dev-dependencies]
+itertools = "0.15.0"
 trybuild = "1.0.125"
 
 [features]
