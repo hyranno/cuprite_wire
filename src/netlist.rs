@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     circuit::BuiltCircuit,
+    erc::NodeMark,
     error::{CircuitError, CircuitErrorKind, CircuitErrors, CircuitWarning, CircuitWarningKind, warn},
     kicad::KicadPartInfo,
     naming::{HierPath, NetLabel, NodeLabel, escape_name, natural_cmp},
@@ -23,6 +24,8 @@ use crate::{
 pub struct Netlist {
     pub components: Vec<Component>,
     pub nets: Vec<Net>,
+    /// ERC marks on nets without part pins (such nets are not in [`Netlist::nets`]).
+    pub pinless_marks: Vec<NodeMark>,
     pub warnings: Vec<CircuitWarning>,
 }
 
@@ -44,6 +47,8 @@ pub struct Net {
     pub nodes: Vec<NetNode>,
     /// The location of the label giving the name, or of the first node for unnamed nets.
     pub trace: Trace,
+    /// ERC marks attached to the net. The exporters ignore them.
+    pub marks: Vec<NodeMark>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +81,7 @@ impl BuiltCircuit {
         let pins_by_node = self.pins_by_node(&component_of_part);
 
         let mut nets = Vec::new();
+        let mut pinless_marks = Vec::new();
         for group in self.connected_nodes() {
             let mut nodes: Vec<NetNode> = group
                 .iter()
@@ -85,7 +91,12 @@ impl BuiltCircuit {
                 .iter()
                 .flat_map(|&node| &self.nets[node].labels)
                 .collect();
+            let marks: Vec<NodeMark> = group
+                .iter()
+                .flat_map(|&node| self.nets[node].marks.iter().cloned())
+                .collect();
             if nodes.is_empty() {
+                pinless_marks.extend(marks);
                 if let Some(first) = labels.first() {
                     let names = distinct_names(&labels);
                     warnings.push(CircuitWarning::new(
@@ -122,12 +133,14 @@ impl BuiltCircuit {
                         name,
                         nodes,
                         trace: label.trace.clone(),
+                        marks,
                     }
                 }
                 None => Net {
                     name: unnamed_net_name(&nodes, &components, &kicad_infos),
                     trace: self.nets[group[0]].trace.clone(),
                     nodes,
+                    marks,
                 },
             };
             nets.push(net);
@@ -155,6 +168,7 @@ impl BuiltCircuit {
             Netlist {
                 components,
                 nets,
+                pinless_marks,
                 warnings,
             },
         )

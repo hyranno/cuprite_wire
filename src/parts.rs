@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::{self, Debug},
+};
 
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
@@ -28,6 +31,13 @@ pub trait Part: Debug + DynClone {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         None
+    }
+    /// Electrical types of the pins for ERC, keyed by pin ID. Defaults to those of the KiCad
+    /// information. ERC treats pins without a type as [`PinType::Passive`].
+    fn pin_types(&self) -> BTreeMap<String, PinType> {
+        self.kicad()
+            .map(|info| info.pins.into_iter().map(|(id, pin)| (id, pin.pin_type)).collect())
+            .unwrap_or_default()
     }
 }
 dyn_clone::clone_trait_object!(Part);
@@ -64,4 +74,69 @@ pub struct PinRef {
     pub node_index: NodeIndex,
     pub part_ref_name: String,
     pub pin_id: String,
+}
+
+/// Electrical type of a pin, used by ERC and written as `pintype` in the KiCad netlist.
+/// The types and their names are those of KiCad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PinType {
+    Input,
+    Output,
+    Bidirectional,
+    TriState,
+    #[default]
+    Passive,
+    Free,
+    Unspecified,
+    PowerIn,
+    PowerOut,
+    OpenCollector,
+    OpenEmitter,
+    NoConnect,
+}
+
+impl PinType {
+    /// All types, in the order of KiCad's pin conflict matrix (`erc.pin_map` in `.kicad_pro`).
+    pub const ALL: [PinType; 12] = [
+        PinType::Input,
+        PinType::Output,
+        PinType::Bidirectional,
+        PinType::TriState,
+        PinType::Passive,
+        PinType::Free,
+        PinType::Unspecified,
+        PinType::PowerIn,
+        PinType::PowerOut,
+        PinType::OpenCollector,
+        PinType::OpenEmitter,
+        PinType::NoConnect,
+    ];
+
+    /// The index of the type in [`PinType::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PinType::Input => "input",
+            PinType::Output => "output",
+            PinType::Bidirectional => "bidirectional",
+            PinType::TriState => "tri_state",
+            PinType::Passive => "passive",
+            PinType::Free => "free",
+            PinType::Unspecified => "unspecified",
+            PinType::PowerIn => "power_in",
+            PinType::PowerOut => "power_out",
+            PinType::OpenCollector => "open_collector",
+            PinType::OpenEmitter => "open_emitter",
+            PinType::NoConnect => "no_connect",
+        }
+    }
+}
+
+impl fmt::Display for PinType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }

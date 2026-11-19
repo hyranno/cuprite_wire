@@ -168,6 +168,7 @@ error: R3: no footprint is assigned
 | `DuplicatePad` | `to_kicad` | two pins on the same pad |
 
 Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in `Netlist::warnings`.
+Checks based on the electrical types of pins (ERC) are a separate step, `Netlist::erc`; see `doc/erc.md`.
 
 ## 6. Verifying the output
 

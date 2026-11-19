@@ -3,14 +3,14 @@
 //! See `doc/spice_netlist_format.md` for the format.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, hash_map::Entry},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt, io,
     path::PathBuf,
 };
 
 use crate::{
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
-    naming::unescape_name,
+    naming::{case_insensitive_duplicates, unescape_name},
     netlist::{Component, Netlist},
     spice::{ModelSource, SpiceDeck, SpiceDialect, SpicePartInfo, SpiceProblem},
     trace::Trace,
@@ -222,8 +222,10 @@ impl Netlist {
         let nodes: BTreeMap<usize, String> = used
             .map(|net| (net, spice_node_name(&self.nets[net].name)))
             .collect();
-        let mut by_lowercase: HashMap<String, usize> = HashMap::new();
-        for (&net, node) in &nodes {
+        let nets: Vec<usize> = nodes.keys().copied().collect();
+        let collisions: HashMap<usize, usize> =
+            case_insensitive_duplicates(nodes.values().map(String::as_str)).into_iter().collect();
+        for (i, (&net, node)) in nodes.iter().enumerate() {
             let name = &self.nets[net].name;
             let trace = &self.nets[net].trace;
             if let Some(reason) = check_node_name(node) {
@@ -235,24 +237,19 @@ impl Netlist {
                     trace.clone(),
                 ));
             }
-            match by_lowercase.entry(node.to_ascii_lowercase()) {
-                Entry::Vacant(entry) => {
-                    entry.insert(net);
-                }
-                Entry::Occupied(entry) => {
-                    let other = &self.nets[*entry.get()];
-                    errors.push(
-                        CircuitError::new(
-                            CircuitErrorKind::SpiceNodeCollision {
-                                name: name.clone(),
-                                other: other.name.clone(),
-                                node: node.clone(),
-                            },
-                            trace.clone(),
-                        )
-                        .with_note("the other net is named here", other.trace.clone()),
-                    );
-                }
+            if let Some(&first) = collisions.get(&i) {
+                let other = &self.nets[nets[first]];
+                errors.push(
+                    CircuitError::new(
+                        CircuitErrorKind::SpiceNodeCollision {
+                            name: name.clone(),
+                            other: other.name.clone(),
+                            node: node.clone(),
+                        },
+                        trace.clone(),
+                    )
+                    .with_note("the other net is named here", other.trace.clone()),
+                );
             }
         }
         if !nodes.values().any(|node| node == GROUND) {
@@ -319,26 +316,19 @@ fn check_element_names<'a>(
     names: impl Iterator<Item = (&'a str, &'a Trace)>,
     errors: &mut Vec<CircuitError>,
 ) {
-    let mut seen: HashMap<String, (&str, &Trace)> = HashMap::new();
-    for (name, trace) in names {
-        match seen.entry(name.to_ascii_lowercase()) {
-            Entry::Vacant(entry) => {
-                entry.insert((name, trace));
-            }
-            Entry::Occupied(entry) => {
-                let (other, other_trace) = *entry.get();
-                errors.push(
-                    CircuitError::new(
-                        CircuitErrorKind::SpiceElementCollision {
-                            name: name.to_string(),
-                            other: other.to_string(),
-                        },
-                        trace.clone(),
-                    )
-                    .with_note("the other part is instantiated here", other_trace.clone()),
-                );
-            }
-        }
+    let names: Vec<_> = names.collect();
+    for (i, first) in case_insensitive_duplicates(names.iter().map(|&(name, _)| name)) {
+        let ((name, trace), (other, other_trace)) = (names[i], names[first]);
+        errors.push(
+            CircuitError::new(
+                CircuitErrorKind::SpiceElementCollision {
+                    name: name.to_string(),
+                    other: other.to_string(),
+                },
+                trace.clone(),
+            )
+            .with_note("the other part is instantiated here", other_trace.clone()),
+        );
     }
 }
 
