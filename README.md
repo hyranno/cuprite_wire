@@ -84,6 +84,10 @@ The devcontainer in `.devcontainer/` has all of them.
 
 Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`.
 
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
