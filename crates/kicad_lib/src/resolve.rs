@@ -20,6 +20,9 @@ pub const FOOTPRINT_DIR_ENV: &str = "KICAD9_FOOTPRINT_DIR";
 pub const DEFAULT_SYMBOL_DIR: &str = "/usr/share/kicad/symbols";
 pub const DEFAULT_FOOTPRINT_DIR: &str = "/usr/share/kicad/footprints";
 
+/// Looks up an environment variable (replaced in tests).
+type EnvLookup = dyn Fn(&str) -> Option<String>;
+
 /// Where libraries are looked up, and what has been read.
 pub struct Resolver {
     /// Base of relative paths (the crate using the macro).
@@ -29,7 +32,7 @@ pub struct Resolver {
     pub footprint_dir: Option<PathBuf>,
     /// Base of relative `Sim.Library` paths (relative to `manifest_dir`).
     pub sim_library_dir: Option<PathBuf>,
-    env: Box<dyn Fn(&str) -> Option<String>>,
+    env: Box<EnvLookup>,
     /// Files read, for rebuild tracking.
     pub files: Vec<PathBuf>,
     /// Environment variables consulted, for rebuild tracking.
