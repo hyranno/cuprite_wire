@@ -1,0 +1,19 @@
+* Rail-to-rail op-amp model of the sensor_frontend example.
+* Written for cuprite_wire and released under its license (MIT).
+*
+* Single pole: open-loop gain 100k, pole at 10 Hz (gain-bandwidth 1 MHz).
+* The output swings to within 10 mV of the supply rails, with 50 ohm output
+* resistance; the supply draws 100 uA. The internal node is clamped near the
+* rails so that the output recovers quickly from clipping.
+.subckt rrio_opamp inp inn vcc vee out
+Rin inp inn 10Meg
+G1 0 n1 inp inn 1m
+R1 n1 0 100Meg
+C1 n1 0 159p
+D1 n1 vcc dclamp
+D2 vee n1 dclamp
+Bout n2 0 V = min(max(V(n1), V(vee) + 0.01), V(vcc) - 0.01)
+Rout n2 out 50
+Iq vcc vee 100u
+.model dclamp D(IS=1e-14)
+.ends rrio_opamp
