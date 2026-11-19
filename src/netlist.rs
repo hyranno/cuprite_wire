@@ -544,13 +544,13 @@ mod tests {
     #[test]
     fn test_errors_are_collected() {
         let mut circuit = CircuitBuilder::<()>::new();
-        #[rustfmt::skip]
-        let line1 = line!(); let a = circuit.instantiate_part(Box::new(CustomPart { pin_ids: vec!["1", "1", "2"], ..CustomPart::valid() }));
-        #[rustfmt::skip]
-        let line2 = line!(); circuit.instantiate_part(Box::new(CustomPart { internal_connections: vec![vec!["1", "3"]], ..CustomPart::valid() }));
+        let line1 = line!() + 1;
+        let a = circuit.instantiate_part(Box::new(CustomPart { pin_ids: vec!["1", "1", "2"], ..CustomPart::valid() }));
+        let line2 = line!() + 1;
+        circuit.instantiate_part(Box::new(CustomPart { internal_connections: vec![vec!["1", "3"]], ..CustomPart::valid() }));
         // Collides with the name of the unnamed net of a["2"].
-        #[rustfmt::skip]
-        let line3 = line!(); circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
+        let line3 = line!() + 1;
+        circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
         let errors = circuit.build(&()).to_netlist().unwrap_err().0;
 
         let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();

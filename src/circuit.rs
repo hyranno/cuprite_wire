@@ -894,7 +894,8 @@ mod tests {
 
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
-            let (_, line) = (circuit.instantiate_part(Box::new(TestPart)), line!());
+            let line = line!() + 1;
+            circuit.instantiate_part(Box::new(TestPart));
             *TRACED_PART_LINE.lock().unwrap() = line;
             circuit
         }
@@ -903,10 +904,12 @@ mod tests {
     #[test]
     fn test_traces_follow_subcircuit_instantiations() {
         let mut circuit = CircuitBuilder::new();
-        let (_, part_line) = (TestPart::instantiate(&mut circuit), line!());
-        #[rustfmt::skip]
-        let (_, subcircuit_line) = (circuit.instantiate_subcircuit(TracedSubcircuitGenerator, &HashSet::new(), |o: &()| *o), line!());
-        let (node, node_line) = (circuit.add_node(), line!());
+        let part_line = line!() + 1;
+        let _ = TestPart::instantiate(&mut circuit);
+        let subcircuit_line = line!() + 1;
+        circuit.instantiate_subcircuit(TracedSubcircuitGenerator, &HashSet::new(), |o: &()| *o);
+        let node_line = line!() + 1;
+        let node = circuit.add_node();
         let circuit = circuit.build(&());
 
         let lines = |trace: &Trace| trace.0.iter().map(|loc| loc.line()).collect::<Vec<_>>();
@@ -1078,15 +1081,18 @@ mod tests {
     impl SubcircuitGenerator for BadNamesGenerator {
         type Options = ();
 
-        #[rustfmt::skip]
         fn construct_subcircuit(&self, _options: &Self::Options) -> CircuitBuilder<Self::Options> {
             let mut circuit = CircuitBuilder::new();
             let none = HashSet::new();
-            let first = line!(); circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
-            let second = line!(); circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
-            let hash = line!(); circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let first = line!() + 1;
+            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let second = line!() + 1;
+            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, &none, |o: &()| *o);
+            let hash = line!() + 1;
+            circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1, &none, |o: &()| *o);
             let node = circuit.add_node();
-            let label = line!(); circuit.label(node, NetLabel::local(""));
+            let label = line!() + 1;
+            circuit.label(node, NetLabel::local(""));
             *BAD_NAME_LINES.lock().unwrap() = vec![first, second, hash, label];
             circuit
         }
@@ -1095,8 +1101,8 @@ mod tests {
     #[test]
     fn test_invalid_names_are_reported_with_traces() {
         let mut circuit = CircuitBuilder::new();
-        #[rustfmt::skip]
-        let outer = line!(); circuit.instantiate_subcircuit(BadNamesGenerator, &HashSet::new(), |o: &()| *o);
+        let outer = line!() + 1;
+        circuit.instantiate_subcircuit(BadNamesGenerator, &HashSet::new(), |o: &()| *o);
         let circuit = circuit.build(&());
         let [first, second, hash, label] = BAD_NAME_LINES.lock().unwrap()[..] else {
             panic!()
