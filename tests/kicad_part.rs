@@ -130,7 +130,7 @@ fn test_regulator() {
 
 #[test]
 fn test_inline_subcircuit() {
-    let amp = Amp::default();
+    let amp = Amp;
     assert_eq!(amp.kicad().unwrap().footprint, None);
     let Some(SpicePartInfo::Elements {
         elements,
