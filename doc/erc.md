@@ -102,3 +102,5 @@ check_subcircuit(&Follower, &(), &ports, &ErcSettings::default())?.assert_clean(
 Each port becomes a virtual pin named `port <node index>`, traced to the call of
 `check_subcircuit`. Interface nodes not given are checked as if nothing were connected to them.
 `check_subcircuit` fails only if the subcircuit cannot be converted to a netlist.
+`examples/sensor_frontend/` checks each of its subcircuits this way, and the whole board before
+writing its netlist.
