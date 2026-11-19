@@ -1,9 +1,12 @@
 [package]
 name = "cuprite_wire_macros"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Procedural macros generating cuprite_wire parts from KiCad libraries"
+keywords = ["kicad", "spice", "circuit-design", "proc-macro"]
+categories = ["simulation", "science"]
 
 [lib]
 proc-macro = true
@@ -11,7 +14,7 @@ proc-macro = true
 doctest = false
 
 [dependencies]
-cuprite_wire_kicad_lib = { path = "../kicad_lib" }
+cuprite_wire_kicad_lib.workspace = true
 proc-macro2 = "1.0.107"
 quote = "1.0.47"
 syn = { version = "3.0.10", features = ["full"] }

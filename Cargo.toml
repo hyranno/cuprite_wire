@@ -2,23 +2,38 @@
 members = ["crates/kicad_lib", "crates/macros"]
 
 [workspace.package]
+# The crates are released together, with the same version (see .github/workflows/release.yml).
+version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/hyranno/cuprite_wire"
+
+[workspace.dependencies]
+# Keep the versions equal to workspace.package.version.
+cuprite_wire_kicad_lib = { version = "0.1.0", path = "crates/kicad_lib" }
+cuprite_wire_macros = { version = "0.1.0", path = "crates/macros" }
 
 [package]
 name = "cuprite_wire"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+description = "Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to the KiCad PCB editor (pcbnew) as a netlist"
+readme = "README.md"
+keywords = ["kicad", "spice", "circuit-design", "netlist", "eda"]
+categories = ["simulation", "science"]
+# Development environment and repository tooling; not needed to build or use the crate.
+exclude = [".claude/", ".devcontainer/", ".github/", ".gitattributes", ".gitignore", "tools/"]
 
 [dependencies]
-cuprite_wire_macros = { path = "crates/macros" }
+cuprite_wire_macros.workspace = true
 dyn-clone = "1.0.20"
-itertools = "0.15.0"
 petgraph = "0.8.3"
 uuid = { version = "1.29.2", features = ["v5"] }
 
 [dev-dependencies]
+itertools = "0.15.0"
 trybuild = "1.0.125"
 
 [features]
