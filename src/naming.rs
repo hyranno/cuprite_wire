@@ -1,6 +1,6 @@
 //! Instance names, hierarchical paths and net labels.
 
-use std::{cmp::Ordering, fmt};
+use std::{cmp::Ordering, collections::HashMap, fmt};
 
 use uuid::Uuid;
 
@@ -133,6 +133,20 @@ pub(crate) fn short_type_name<T: ?Sized>() -> String {
         .next()
         .unwrap_or(without_generics)
         .to_string()
+}
+
+/// Finds names equal to an earlier one when ASCII case is ignored. Returns, for each such name,
+/// its index and the index of the first name it is equal to.
+pub(crate) fn case_insensitive_duplicates<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<(usize, usize)> {
+    let mut first_by_lowercase = HashMap::new();
+    names
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, name)| {
+            let first = *first_by_lowercase.entry(name.to_ascii_lowercase()).or_insert(i);
+            (first != i).then_some((i, first))
+        })
+        .collect()
 }
 
 /// A name given to a net.
