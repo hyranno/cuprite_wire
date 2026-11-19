@@ -127,11 +127,15 @@ fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Opt
     let mut error = |kind| errors.push(CircuitError::new(kind, component.trace.clone()));
 
     let Some(info) = component.part.kicad() else {
-        error(CircuitErrorKind::KicadUnsupported { ref_name: ref_name() });
+        error(CircuitErrorKind::KicadUnsupported {
+            ref_name: ref_name(),
+        });
         return None;
     };
     if info.footprint.is_none() {
-        error(CircuitErrorKind::FootprintMissing { ref_name: ref_name() });
+        error(CircuitErrorKind::FootprintMissing {
+            ref_name: ref_name(),
+        });
     }
     for problem in info.check_pins(&component.part.pin_ids()) {
         error(match problem {
@@ -173,7 +177,10 @@ impl KicadNetlist {
             [
                 SExpr::kv("version", "E"),
                 SExpr::node("design", design),
-                SExpr::node("components", self.components.iter().map(KicadComponent::to_sexpr)),
+                SExpr::node(
+                    "components",
+                    self.components.iter().map(KicadComponent::to_sexpr),
+                ),
                 SExpr::node("nets", self.nets.iter().map(KicadNet::to_sexpr)),
             ],
         )
@@ -192,7 +199,11 @@ impl fmt::Display for KicadNetlist {
 
 impl KicadComponent {
     fn to_sexpr(&self) -> SExpr {
-        let value = if self.value.is_empty() { "~" } else { &self.value };
+        let value = if self.value.is_empty() {
+            "~"
+        } else {
+            &self.value
+        };
         let mut items = vec![
             SExpr::kv("ref", &self.ref_name),
             SExpr::kv("value", value),
@@ -213,7 +224,10 @@ impl KicadComponent {
         if let Some(lib_source) = &self.lib_source {
             items.push(SExpr::node(
                 "libsource",
-                [SExpr::kv("lib", lib_source.library()), SExpr::kv("part", lib_source.name())],
+                [
+                    SExpr::kv("lib", lib_source.library()),
+                    SExpr::kv("part", lib_source.name()),
+                ],
             ));
         }
         let flags = [
@@ -226,7 +240,10 @@ impl KicadComponent {
         }
         items.push(SExpr::node(
             "sheetpath",
-            [SExpr::kv("names", &self.sheet_names), SExpr::kv("tstamps", &self.sheet_tstamps)],
+            [
+                SExpr::kv("names", &self.sheet_names),
+                SExpr::kv("tstamps", &self.sheet_tstamps),
+            ],
         ));
         items.push(SExpr::kv("tstamps", self.uuid.to_string()));
         SExpr::node("comp", items)
@@ -241,7 +258,10 @@ impl KicadNet {
             SExpr::kv("class", "Default"),
         ];
         items.extend(self.nodes.iter().map(|node| {
-            let mut node_items = vec![SExpr::kv("ref", &node.ref_name), SExpr::kv("pin", &node.pad)];
+            let mut node_items = vec![
+                SExpr::kv("ref", &node.ref_name),
+                SExpr::kv("pin", &node.pad),
+            ];
             if let Some(pin_function) = &node.pin_function {
                 node_items.push(SExpr::kv("pinfunction", pin_function));
             }
@@ -263,9 +283,11 @@ mod tests {
         circuit::CircuitBuilder,
         kicad::{KicadPinInfo, PinType},
         naming::NetLabel,
-        subcircuit::SubcircuitGenerator,
         spice::IndependentSource,
-        test_parts::{self, Capacitor, CustomPart, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
+        subcircuit::SubcircuitGenerator,
+        test_parts::{
+            self, Capacitor, CustomPart, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter,
+        },
     };
 
     fn check_golden(name: &str, netlist: &KicadNetlist) {
@@ -289,14 +311,20 @@ mod tests {
     #[test]
     fn test_first_line_is_recognized_by_pcbnew() {
         let text = export(&rc_filter()).to_string();
-        assert!(text.lines().next().unwrap().starts_with("(export (version \"E\")"));
+        assert!(
+            text.lines()
+                .next()
+                .unwrap()
+                .starts_with("(export (version \"E\")")
+        );
     }
 
     #[test]
     fn test_golden_hierarchy() {
         let mut circuit = CircuitBuilder::new();
         let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-        let first = circuit.instantiate_subcircuit_named("stage1", RcStage, &interface, |o: &()| *o);
+        let first =
+            circuit.instantiate_subcircuit_named("stage1", RcStage, &interface, |o: &()| *o);
         let second = circuit.instantiate_subcircuit(RcStage, &interface, |o: &()| *o);
         circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
         circuit.label(first[&NodeIndex::new(0)], NetLabel::local("IN"));
@@ -306,8 +334,14 @@ mod tests {
                 pin_ids: vec!["1"],
                 kicad: Some(KicadPartInfo {
                     footprint: Some("TestPoint:TestPoint_Pad_D1.0mm".parse().unwrap()),
-                    pins: BTreeMap::from([("1".into(), KicadPinInfo::new("1", Some("1"), PinType::Passive))]),
-                    fields: vec![("Note".into(), "probe \"here\"".into()), ("Empty".into(), String::new())],
+                    pins: BTreeMap::from([(
+                        "1".into(),
+                        KicadPinInfo::new("1", Some("1"), PinType::Passive),
+                    )]),
+                    fields: vec![
+                        ("Note".into(), "probe \"here\"".into()),
+                        ("Empty".into(), String::new()),
+                    ],
                     flags: PartFlags {
                         dnp: true,
                         exclude_from_bom: true,
@@ -360,7 +394,8 @@ mod tests {
             let input = circuit.add_node();
             let output = circuit.add_node();
             let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-            let inner = circuit.instantiate_subcircuit_named("inner", Inner, &interface, |o: &()| *o);
+            let inner =
+                circuit.instantiate_subcircuit_named("inner", Inner, &interface, |o: &()| *o);
             let r_o = circuit.instantiate_part_named("o", Box::new(Resistor("3k")));
             circuit.connect(input, inner[&NodeIndex::new(0)]);
             circuit.connect(inner[&NodeIndex::new(1)], r_o["1"]);
@@ -513,7 +548,11 @@ mod tests {
 
     /// Instantiates a part and records the line of the caller.
     #[track_caller]
-    fn add(circuit: &mut CircuitBuilder, part: impl crate::parts::Part + 'static, lines: &mut Vec<u32>) {
+    fn add(
+        circuit: &mut CircuitBuilder,
+        part: impl crate::parts::Part + 'static,
+        lines: &mut Vec<u32>,
+    ) {
         lines.push(std::panic::Location::caller().line());
         circuit.instantiate_part(Box::new(part));
     }
@@ -531,10 +570,38 @@ mod tests {
         duplicate_pad.pins.get_mut("2").unwrap().pad = "1".into();
 
         add(&mut circuit, *IndependentSource::voltage(5.0), &mut lines);
-        add(&mut circuit, CustomPart { kicad: Some(no_footprint), ..valid() }, &mut lines);
-        add(&mut circuit, CustomPart { pin_ids: vec!["1", "2", "3"], ..valid() }, &mut lines);
-        add(&mut circuit, CustomPart { pin_ids: vec!["1"], ..valid() }, &mut lines);
-        add(&mut circuit, CustomPart { kicad: Some(duplicate_pad), ..valid() }, &mut lines);
+        add(
+            &mut circuit,
+            CustomPart {
+                kicad: Some(no_footprint),
+                ..valid()
+            },
+            &mut lines,
+        );
+        add(
+            &mut circuit,
+            CustomPart {
+                pin_ids: vec!["1", "2", "3"],
+                ..valid()
+            },
+            &mut lines,
+        );
+        add(
+            &mut circuit,
+            CustomPart {
+                pin_ids: vec!["1"],
+                ..valid()
+            },
+            &mut lines,
+        );
+        add(
+            &mut circuit,
+            CustomPart {
+                kicad: Some(duplicate_pad),
+                ..valid()
+            },
+            &mut lines,
+        );
 
         // Parts without KiCad information do not prevent creating the netlist.
         let netlist = circuit.build(&()).to_netlist().unwrap();
@@ -543,17 +610,37 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                CircuitErrorKind::KicadUnsupported { ref_name: "V1".into() },
-                CircuitErrorKind::FootprintMissing { ref_name: "X1".into() },
-                CircuitErrorKind::PinInfoMissing { ref_name: "X2".into(), pin_id: "3".into() },
-                CircuitErrorKind::UnknownPinId { ref_name: "X3".into(), pin_id: "2".into() },
-                CircuitErrorKind::DuplicatePad { ref_name: "X4".into(), pad: "1".into() },
+                CircuitErrorKind::KicadUnsupported {
+                    ref_name: "V1".into()
+                },
+                CircuitErrorKind::FootprintMissing {
+                    ref_name: "X1".into()
+                },
+                CircuitErrorKind::PinInfoMissing {
+                    ref_name: "X2".into(),
+                    pin_id: "3".into()
+                },
+                CircuitErrorKind::UnknownPinId {
+                    ref_name: "X3".into(),
+                    pin_id: "2".into()
+                },
+                CircuitErrorKind::DuplicatePad {
+                    ref_name: "X4".into(),
+                    pad: "1".into()
+                },
             ]
         );
-        let error_lines: Vec<_> = errors.iter().map(|e| e.trace.innermost().unwrap().line()).collect();
+        let error_lines: Vec<_> = errors
+            .iter()
+            .map(|e| e.trace.innermost().unwrap().line())
+            .collect();
         // Components are sorted by reference: V1, X1, X2, X3, X4.
         assert_eq!(error_lines, lines);
         let message = CircuitErrors(errors).to_string();
-        assert!(message.contains(&format!("error: V1: the part cannot be exported to KiCad\n  at {}:{}:", file!(), lines[0])));
+        assert!(message.contains(&format!(
+            "error: V1: the part cannot be exported to KiCad\n  at {}:{}:",
+            file!(),
+            lines[0]
+        )));
     }
 }

@@ -84,7 +84,9 @@ impl Sexpr {
 
     /// Child lists with the given head.
     pub fn children<'a>(&'a self, head: &'a str) -> impl Iterator<Item = &'a Sexpr> + 'a {
-        self.args().iter().filter(move |item| item.head() == Some(head))
+        self.args()
+            .iter()
+            .filter(move |item| item.head() == Some(head))
     }
 
     /// The first child list with the given head.
@@ -246,7 +248,10 @@ mod tests {
         let error = |text| parse(text).unwrap_err().to_string();
         assert_eq!(error("(a\n (b)"), "1:1: unclosed list");
         assert_eq!(error("(a \"b)"), "1:4: unterminated string");
-        assert_eq!(error("(a))"), "1:4: unexpected text after the top-level expression");
+        assert_eq!(
+            error("(a))"),
+            "1:4: unexpected text after the top-level expression"
+        );
         assert_eq!(error(")"), "1:1: unexpected ')'");
         assert_eq!(error("  "), "1:3: unexpected end of file");
     }

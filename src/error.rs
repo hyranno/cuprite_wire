@@ -45,7 +45,11 @@ impl<K> Diagnostic<K> {
         self
     }
 
-    pub(crate) fn fmt_with_severity(&self, f: &mut fmt::Formatter<'_>, severity: &str) -> fmt::Result
+    pub(crate) fn fmt_with_severity(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        severity: &str,
+    ) -> fmt::Result
     where
         K: fmt::Display,
     {
@@ -95,7 +99,11 @@ pub enum CircuitErrorKind {
     /// The name of a net cannot be used as a SPICE node name.
     InvalidSpiceNodeName { name: String, reason: String },
     /// Two nets get the same SPICE node name (SPICE names are case-insensitive).
-    SpiceNodeCollision { name: String, other: String, node: String },
+    SpiceNodeCollision {
+        name: String,
+        other: String,
+        node: String,
+    },
     /// Two elements get the same name, ignoring case.
     SpiceElementCollision { name: String, other: String },
     /// Parts define a SPICE model with the same name differently.
@@ -111,7 +119,10 @@ impl fmt::Display for CircuitErrorKind {
                 write!(f, "invalid name {name:?}: {reason}")
             }
             CircuitErrorKind::DuplicateInstanceName { name } => {
-                write!(f, "instance name {name:?} is used more than once in the same circuit")
+                write!(
+                    f,
+                    "instance name {name:?} is used more than once in the same circuit"
+                )
             }
             CircuitErrorKind::DuplicatePinId { ref_name, pin_id } => {
                 write!(f, "{ref_name}: pin ID {pin_id:?} is listed more than once")
@@ -132,10 +143,16 @@ impl fmt::Display for CircuitErrorKind {
                 write!(f, "{ref_name}: no footprint is assigned")
             }
             CircuitErrorKind::PinInfoMissing { ref_name, pin_id } => {
-                write!(f, "{ref_name}: no KiCad pin information for pin ID {pin_id:?}")
+                write!(
+                    f,
+                    "{ref_name}: no KiCad pin information for pin ID {pin_id:?}"
+                )
             }
             CircuitErrorKind::DuplicatePad { ref_name, pad } => {
-                write!(f, "{ref_name}: pad {pad:?} is assigned to more than one pin")
+                write!(
+                    f,
+                    "{ref_name}: pad {pad:?} is assigned to more than one pin"
+                )
             }
             CircuitErrorKind::SpiceUnsupported { ref_name } => {
                 write!(f, "{ref_name}: the part cannot be exported to SPICE")
@@ -155,10 +172,16 @@ impl fmt::Display for CircuitErrorKind {
                 "nets {name:?} and {other:?} would be merged into SPICE node {node:?} (SPICE names are case-insensitive)"
             ),
             CircuitErrorKind::SpiceElementCollision { name, other } => {
-                write!(f, "SPICE element names {name:?} and {other:?} differ only in case")
+                write!(
+                    f,
+                    "SPICE element names {name:?} and {other:?} differ only in case"
+                )
             }
             CircuitErrorKind::SpiceModelConflict { name } => {
-                write!(f, "SPICE model {name:?} is defined differently by more than one part")
+                write!(
+                    f,
+                    "SPICE model {name:?} is defined differently by more than one part"
+                )
             }
             CircuitErrorKind::GroundMissing => {
                 write!(f, "no ground net for SPICE: name a net \"GND\" or \"0\"")

@@ -14,7 +14,9 @@ use crate::{
 /// Compares `actual` with `tests/golden/<name>`.
 /// Run the tests with `UPDATE_GOLDEN=1` to (re)generate the files.
 pub fn check_golden(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, actual).unwrap();
@@ -67,8 +69,14 @@ fn two_pin_kicad_info(footprint: &str, symbol: &str) -> KicadPartInfo {
     KicadPartInfo {
         footprint: Some(lib_id(footprint)),
         pins: BTreeMap::from([
-            ("1".to_string(), KicadPinInfo::new("1", None, PinType::Passive)),
-            ("2".to_string(), KicadPinInfo::new("2", None, PinType::Passive)),
+            (
+                "1".to_string(),
+                KicadPinInfo::new("1", None, PinType::Passive),
+            ),
+            (
+                "2".to_string(),
+                KicadPinInfo::new("2", None, PinType::Passive),
+            ),
         ]),
         lib_source: Some(lib_id(symbol)),
         ..Default::default()
@@ -89,10 +97,17 @@ impl Part for Resistor {
         self.0.into()
     }
     fn kicad(&self) -> Option<KicadPartInfo> {
-        Some(two_pin_kicad_info("Resistor_SMD:R_0603_1608Metric", "Device:R"))
+        Some(two_pin_kicad_info(
+            "Resistor_SMD:R_0603_1608Metric",
+            "Device:R",
+        ))
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        Some(SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], self.0)))
+        Some(SpicePartInfo::element(SpiceElement::new(
+            'R',
+            ["1", "2"],
+            self.0,
+        )))
     }
 }
 
@@ -110,10 +125,17 @@ impl Part for Capacitor {
         self.0.into()
     }
     fn kicad(&self) -> Option<KicadPartInfo> {
-        Some(two_pin_kicad_info("Capacitor_SMD:C_0603_1608Metric", "Device:C"))
+        Some(two_pin_kicad_info(
+            "Capacitor_SMD:C_0603_1608Metric",
+            "Device:C",
+        ))
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        Some(SpicePartInfo::element(SpiceElement::new('C', ["1", "2"], self.0)))
+        Some(SpicePartInfo::element(SpiceElement::new(
+            'C',
+            ["1", "2"],
+            self.0,
+        )))
     }
 }
 
@@ -126,7 +148,9 @@ impl Part for OpAmp {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
-        ["out", "vss", "in_p", "in_n", "vdd"].map(String::from).to_vec()
+        ["out", "vss", "in_p", "in_n", "vdd"]
+            .map(String::from)
+            .to_vec()
     }
     fn value(&self) -> String {
         "OpAmp".into()
@@ -143,7 +167,9 @@ impl Part for OpAmp {
             footprint: Some(lib_id("Package_TO_SOT_SMD:SOT-23-5")),
             pins: pins
                 .into_iter()
-                .map(|(id, pad, name, pin_type)| (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type)))
+                .map(|(id, pad, name, pin_type)| {
+                    (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type))
+                })
                 .collect(),
             ..Default::default()
         })
@@ -172,7 +198,9 @@ impl Part for MultiGndIc {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
-        ["vcc", "gnd_a", "gnd_b", "gnd_c", "io"].map(String::from).to_vec()
+        ["vcc", "gnd_a", "gnd_b", "gnd_c", "io"]
+            .map(String::from)
+            .to_vec()
     }
     fn value(&self) -> String {
         "MultiGnd".into()
@@ -192,7 +220,9 @@ impl Part for MultiGndIc {
             footprint: Some(lib_id("Package_SO:SOIC-16_3.9x9.9mm_P1.27mm")),
             pins: pins
                 .into_iter()
-                .map(|(id, pad, name, pin_type)| (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type)))
+                .map(|(id, pad, name, pin_type)| {
+                    (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type))
+                })
                 .collect(),
             ..Default::default()
         })
@@ -217,7 +247,11 @@ impl CustomPart {
             pin_ids: vec!["1", "2"],
             internal_connections: vec![],
             kicad: Some(two_pin_kicad_info("Custom:Footprint", "Custom:Symbol")),
-            spice: Some(SpicePartInfo::element(SpiceElement::new('X', ["1", "2"], "custom"))),
+            spice: Some(SpicePartInfo::element(SpiceElement::new(
+                'X',
+                ["1", "2"],
+                "custom",
+            ))),
         }
     }
 }

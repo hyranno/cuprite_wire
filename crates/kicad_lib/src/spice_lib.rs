@@ -164,24 +164,44 @@ impl SpiceLib {
             }
             lib.collect_hints(statement);
             let tokens = tokenize(&statement.text);
-            let keyword = tokens.first().map(|t| t.to_ascii_lowercase()).unwrap_or_default();
-            if let Some(OpenSubckt { top: Some((_, lines, _, _)), .. }) = open.first_mut() {
+            let keyword = tokens
+                .first()
+                .map(|t| t.to_ascii_lowercase())
+                .unwrap_or_default();
+            if let Some(OpenSubckt {
+                top: Some((_, lines, _, _)),
+                ..
+            }) = open.first_mut()
+            {
                 lines.extend(statement.own_lines());
             }
             match keyword.as_str() {
                 ".subckt" => {
-                    let name = tokens.get(1).cloned().ok_or_else(|| at("`.subckt` without a name".into()))?;
-                    let top = open
-                        .is_empty()
-                        .then(|| (subckt_header(&tokens[2..]), statement.own_lines().to_vec(), false, statement.line));
+                    let name = tokens
+                        .get(1)
+                        .cloned()
+                        .ok_or_else(|| at("`.subckt` without a name".into()))?;
+                    let top = open.is_empty().then(|| {
+                        (
+                            subckt_header(&tokens[2..]),
+                            statement.own_lines().to_vec(),
+                            false,
+                            statement.line,
+                        )
+                    });
                     open.push(OpenSubckt { name, top });
                 }
                 ".ends" => {
-                    let subckt = open.pop().ok_or_else(|| at("`.ends` without `.subckt`".into()))?;
+                    let subckt = open
+                        .pop()
+                        .ok_or_else(|| at("`.ends` without `.subckt`".into()))?;
                     if let Some(name) = tokens.get(1)
                         && !name.eq_ignore_ascii_case(&subckt.name)
                     {
-                        return Err(at(format!("`.ends {name}` closes `.subckt {}`", subckt.name)));
+                        return Err(at(format!(
+                            "`.ends {name}` closes `.subckt {}`",
+                            subckt.name
+                        )));
                     }
                     if let Some((kind, lines, encrypted, line)) = subckt.top {
                         lib.definitions.push(Definition {
@@ -196,12 +216,20 @@ impl SpiceLib {
                 }
                 _ if !open.is_empty() => {}
                 ".model" => {
-                    let name = tokens.get(1).cloned().ok_or_else(|| at("`.model` without a name".into()))?;
+                    let name = tokens
+                        .get(1)
+                        .cloned()
+                        .ok_or_else(|| at("`.model` without a name".into()))?;
                     let model_type = tokens
                         .get(2)
                         .map(|t| t.split('(').next().unwrap_or_default().to_ascii_lowercase())
                         .unwrap_or_default();
-                    lib.push(statement, section.clone(), name, DefinitionKind::Model { model_type });
+                    lib.push(
+                        statement,
+                        section.clone(),
+                        name,
+                        DefinitionKind::Model { model_type },
+                    );
                 }
                 ".param" => {
                     for token in &tokens[1..] {
@@ -227,7 +255,9 @@ impl SpiceLib {
                     lib.push(statement, section.clone(), name, DefinitionKind::Func);
                 }
                 ".include" | ".inc" => {
-                    let path = tokens.get(1).ok_or_else(|| at(format!("`{keyword}` without a file")))?;
+                    let path = tokens
+                        .get(1)
+                        .ok_or_else(|| at(format!("`{keyword}` without a file")))?;
                     lib.includes.push(Include {
                         path: unquote(path).to_string(),
                         section: None,
@@ -257,17 +287,28 @@ impl SpiceLib {
                     }),
                     _ => return Err(at("expected `.lib file [section]` or `.lib section`".into())),
                 },
-                ".endl" if section.take().is_none() => return Err(at("`.endl` outside a section".into())),
+                ".endl" if section.take().is_none() => {
+                    return Err(at("`.endl` outside a section".into()));
+                }
                 _ => {}
             }
         }
         if let Some(subckt) = open.first() {
-            return Err(Error::new(format!("`.subckt {}` is not closed with `.ends`", subckt.name)));
+            return Err(Error::new(format!(
+                "`.subckt {}` is not closed with `.ends`",
+                subckt.name
+            )));
         }
         Ok(lib)
     }
 
-    fn push(&mut self, statement: &Statement, section: Option<String>, name: String, kind: DefinitionKind) {
+    fn push(
+        &mut self,
+        statement: &Statement,
+        section: Option<String>,
+        name: String,
+        kind: DefinitionKind,
+    ) {
         self.definitions.push(Definition {
             name,
             kind,
@@ -280,7 +321,11 @@ impl SpiceLib {
 
     fn hint(&mut self, dialect: Dialect, what: &'static str, line: usize) {
         if !self.hints.iter().any(|hint| hint.what == what) {
-            self.hints.push(DialectHint { dialect, what, line });
+            self.hints.push(DialectHint {
+                dialect,
+                what,
+                line,
+            });
         }
     }
 
@@ -314,19 +359,25 @@ impl SpiceLib {
     /// The `.subckt` or `.model` named `name` in `section` (`None`: outside any section).
     pub fn find_in(&self, name: &str, section: Option<&str>) -> Option<&Definition> {
         self.definitions(section).find(|d| {
-            matches!(d.kind, DefinitionKind::Subckt { .. } | DefinitionKind::Model { .. })
-                && d.name.eq_ignore_ascii_case(name)
+            matches!(
+                d.kind,
+                DefinitionKind::Subckt { .. } | DefinitionKind::Model { .. }
+            ) && d.name.eq_ignore_ascii_case(name)
         })
     }
 
     /// The definitions in `section` (`None`: outside any section).
     pub fn definitions(&self, section: Option<&str>) -> impl Iterator<Item = &Definition> {
-        self.definitions.iter().filter(move |d| same_section(d.section.as_deref(), section))
+        self.definitions
+            .iter()
+            .filter(move |d| same_section(d.section.as_deref(), section))
     }
 
     /// The includes in `section` (`None`: outside any section).
     pub fn includes(&self, section: Option<&str>) -> impl Iterator<Item = &Include> {
-        self.includes.iter().filter(move |i| same_section(i.within.as_deref(), section))
+        self.includes
+            .iter()
+            .filter(move |i| same_section(i.within.as_deref(), section))
     }
 }
 
@@ -402,7 +453,9 @@ fn strip_comment(line: &str) -> &str {
     for (i, b) in bytes.iter().enumerate() {
         if *b == b'$'
             && (i == 0 || bytes[i - 1].is_ascii_whitespace())
-            && bytes.get(i + 1).is_none_or(|next| next.is_ascii_whitespace())
+            && bytes
+                .get(i + 1)
+                .is_none_or(|next| next.is_ascii_whitespace())
         {
             end = end.min(i);
             break;
@@ -483,7 +536,11 @@ fn subckt_header(tokens: &[String]) -> DefinitionKind {
     for token in tokens {
         let lower = token.to_ascii_lowercase();
         let mut token = token.as_str();
-        for (keyword, next) in [("optional:", Part::Optional), ("params:", Part::Params), ("text:", Part::Params)] {
+        for (keyword, next) in [
+            ("optional:", Part::Optional),
+            ("params:", Part::Params),
+            ("text:", Part::Params),
+        ] {
             if lower.starts_with(keyword) {
                 part = next;
                 token = &token[keyword.len()..];
@@ -529,7 +586,9 @@ fn calls(text: &str, function: &str) -> bool {
 fn single(text: &str, op: char) -> bool {
     let chars: Vec<char> = text.chars().collect();
     (0..chars.len()).any(|i| {
-        chars[i] == op && (i == 0 || chars[i - 1] != op) && chars.get(i + 1).is_none_or(|&c| c != op)
+        chars[i] == op
+            && (i == 0 || chars[i - 1] != op)
+            && chars.get(i + 1).is_none_or(|&c| c != op)
     })
 }
 
@@ -550,8 +609,9 @@ pub fn decode(bytes: Vec<u8>) -> String {
 
 fn windows_1252(byte: u8) -> char {
     const HIGH: [char; 32] = [
-        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž', '\u{8f}', '\u{90}', '‘',
-        '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}', 'ž', 'Ÿ',
+        '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8d}', 'Ž',
+        '\u{8f}', '\u{90}', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9d}',
+        'ž', 'Ÿ',
     ];
     match byte {
         0x80..=0x9f => HIGH[usize::from(byte - 0x80)],
@@ -596,7 +656,9 @@ R1 a b 1k
     }
 
     fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
-        p.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        p.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
@@ -613,13 +675,30 @@ R1 a b 1k
         assert!(amp.text.ends_with(".ends amp\n"));
         assert!(amp.text.contains(".ends inner"));
         let diode = lib.find("d1n4148").unwrap();
-        assert_eq!(diode.kind, DefinitionKind::Model { model_type: "d".into() });
-        assert_eq!(diode.text, ".MODEL D1N4148 D(IS=2.52n RS=0.568\n+ N=1.752) ; fitted\n");
+        assert_eq!(
+            diode.kind,
+            DefinitionKind::Model {
+                model_type: "d".into()
+            }
+        );
+        assert_eq!(
+            diode.text,
+            ".MODEL D1N4148 D(IS=2.52n RS=0.568\n+ N=1.752) ; fitted\n"
+        );
         let (ports, _, params) = subckt(lib.find("varistor").unwrap());
         assert_eq!(ports, ["A", "B"]);
         assert_eq!(params, pairs(&[("threshold", "1k")]));
-        assert!(lib.find("Dlimit").is_none(), "models inside a subcircuit are local");
-        assert_eq!(lib.includes.iter().map(|i| i.path.as_str()).collect::<Vec<_>>(), ["other.lib"]);
+        assert!(
+            lib.find("Dlimit").is_none(),
+            "models inside a subcircuit are local"
+        );
+        assert_eq!(
+            lib.includes
+                .iter()
+                .map(|i| i.path.as_str())
+                .collect::<Vec<_>>(),
+            ["other.lib"]
+        );
         assert!(lib.hints.is_empty());
     }
 
@@ -633,7 +712,10 @@ R1 a b 1k
         let (ports, optional, params) = subckt(lib.find("sup").unwrap());
         assert_eq!(ports, ["CTR", "CTS", "GND", "RESET_B", "SENSE", "VDD"]);
         assert_eq!(optional, pairs(&[("DPWR", "$G_DPWR"), ("DGND", "$G_DGND")]));
-        assert_eq!(params, pairs(&[("VTH", "{0.5 * 2}"), ("TD", "1m"), ("NAME", "\"x y\"")]));
+        assert_eq!(
+            params,
+            pairs(&[("VTH", "{0.5 * 2}"), ("TD", "1m"), ("NAME", "\"x y\"")])
+        );
     }
 
     #[test]
@@ -643,7 +725,11 @@ R1 a b 1k
              .subckt s a b $ ngspice comment\n.ends\n",
         )
         .unwrap();
-        let kinds: Vec<_> = lib.definitions.iter().map(|d| (d.name.as_str(), d.text.as_str())).collect();
+        let kinds: Vec<_> = lib
+            .definitions
+            .iter()
+            .map(|d| (d.name.as_str(), d.text.as_str()))
+            .collect();
         assert_eq!(
             kinds,
             [
@@ -654,7 +740,10 @@ R1 a b 1k
             ]
         );
         assert_eq!(subckt(lib.find("s").unwrap()).0, ["a", "b"]);
-        assert!(lib.find("VREF").is_none(), "find looks for models and subcircuits only");
+        assert!(
+            lib.find("VREF").is_none(),
+            "find looks for models and subcircuits only"
+        );
     }
 
     #[test]
@@ -698,7 +787,11 @@ R1 a b 1k
              E2 c 0 VALUE = { LIMIT(V(a), 0, 1) && 1 }\nB1 d 0 V=uplim(V(a), 1, 0.1)\n* IF(x) | y\n.ends\n",
         )
         .unwrap();
-        let hints: Vec<_> = lib.hints.iter().map(|h| (h.dialect, h.what, h.line)).collect();
+        let hints: Vec<_> = lib
+            .hints
+            .iter()
+            .map(|h| (h.dialect, h.what, h.line))
+            .collect();
         assert_eq!(
             hints,
             [
@@ -729,15 +822,24 @@ R1 a b 1k
     #[test]
     fn test_errors() {
         let error = |text: &str| SpiceLib::parse(text).unwrap_err().to_string();
-        assert_eq!(error(".subckt a x\n.ends b\n"), "line 2: `.ends b` closes `.subckt a`");
-        assert_eq!(error(".subckt a x\n"), "`.subckt a` is not closed with `.ends`");
+        assert_eq!(
+            error(".subckt a x\n.ends b\n"),
+            "line 2: `.ends b` closes `.subckt a`"
+        );
+        assert_eq!(
+            error(".subckt a x\n"),
+            "`.subckt a` is not closed with `.ends`"
+        );
         assert_eq!(error(".ends\n"), "line 1: `.ends` without `.subckt`");
         assert_eq!(error(".endl\n"), "line 1: `.endl` outside a section");
     }
 
     #[test]
     fn test_vendor_style_fixture() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/models/vsup01.lib");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/models/vsup01.lib"
+        );
         let text = decode(std::fs::read(path).unwrap());
         assert!(text.contains("0 \u{b5}s"), "Windows-1252 is decoded");
         let lib = SpiceLib::parse(&text).unwrap();
@@ -752,9 +854,19 @@ R1 a b 1k
         assert_eq!(lib.includes[0].path, "vsup01_aux.lib");
         assert!(lib.includes[0].pspice);
         let hints: Vec<_> = lib.hints.iter().map(|h| (h.dialect, h.what)).collect();
-        assert_eq!(hints, [(Dialect::Pspice, ".LIB file"), (Dialect::Pspice, "IF("), (Dialect::Pspice, "&")]);
+        assert_eq!(
+            hints,
+            [
+                (Dialect::Pspice, ".LIB file"),
+                (Dialect::Pspice, "IF("),
+                (Dialect::Pspice, "&")
+            ]
+        );
 
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/models/vsup_unsupported.lib");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/models/vsup_unsupported.lib"
+        );
         let lib = SpiceLib::parse(&decode(std::fs::read(path).unwrap())).unwrap();
         assert_eq!(subckt(lib.find("VSUP_DIGITAL").unwrap()).1.len(), 2);
         assert!(lib.find("VSUP_LOCKED").unwrap().encrypted);

@@ -21,7 +21,11 @@ pub struct LibIdError {
 
 impl fmt::Display for LibIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid library identifier {:?}: {}", self.lib_id, self.reason)
+        write!(
+            f,
+            "invalid library identifier {:?}: {}",
+            self.lib_id, self.reason
+        )
     }
 }
 
@@ -156,7 +160,9 @@ impl KicadPartInfo {
                 });
             }
             if !pads.insert(&pin.pad) {
-                problems.push(PinInfoProblem::DuplicatePad { pad: pin.pad.clone() });
+                problems.push(PinInfoProblem::DuplicatePad {
+                    pad: pin.pad.clone(),
+                });
             }
         }
         problems
@@ -208,7 +214,10 @@ mod tests {
     #[test]
     fn test_invalid_lib_ids() {
         for invalid in ["R_0603", ":R_0603", "Resistor_SMD:", "A:B:C", "A:B\n"] {
-            assert!(invalid.parse::<LibId>().is_err(), "{invalid:?} should be rejected");
+            assert!(
+                invalid.parse::<LibId>().is_err(),
+                "{invalid:?} should be rejected"
+            );
         }
     }
 }

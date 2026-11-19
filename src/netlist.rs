@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::{
     circuit::BuiltCircuit,
     erc::NodeMark,
-    error::{CircuitError, CircuitErrorKind, CircuitErrors, CircuitWarning, CircuitWarningKind, warn},
+    error::{
+        CircuitError, CircuitErrorKind, CircuitErrors, CircuitWarning, CircuitWarningKind, warn,
+    },
     kicad::KicadPartInfo,
     naming::{HierPath, NetLabel, NodeLabel, escape_name, natural_cmp},
     parts::Part,
@@ -124,8 +126,10 @@ impl BuiltCircuit {
                             label.trace.clone(),
                         );
                         for other in labels.iter().filter(|other| other.net_name() != name) {
-                            warning = warning
-                                .with_note(format!("also named {:?} here", other.net_name()), other.trace.clone());
+                            warning = warning.with_note(
+                                format!("also named {:?} here", other.net_name()),
+                                other.trace.clone(),
+                            );
                         }
                         warnings.push(warning);
                     }
@@ -319,20 +323,30 @@ fn unnamed_net_name(
         let pin = info.pins.get(&node.pin_id)?;
         let ref_name = escape_name(&components[node.component].ref_name);
         let pad = format!("Pad{}", escape_name(&pin.pad));
-        let name = pin.name.as_deref().filter(|name| !name.is_empty() && *name != pin.pad);
+        let name = pin
+            .name
+            .as_deref()
+            .filter(|name| !name.is_empty() && *name != pin.pad);
         let (with_pad, pin_label) = match name {
-            Some(name) if unconnected || info.is_pin_name_shared(name) => (true, format!("{}-{pad}", escape_name(name))),
+            Some(name) if unconnected || info.is_pin_name_shared(name) => {
+                (true, format!("{}-{pad}", escape_name(name)))
+            }
             Some(name) => (false, escape_name(name)),
             None => (true, pad),
         };
         Some((with_pad, format!("{prefix}-({ref_name}-{pin_label})")))
     };
-    nodes.iter().filter_map(candidate).min().map(|(_, name)| name).unwrap_or_else(|| {
-        // `nodes` is sorted, so the first node is the smallest.
-        let node = &nodes[0];
-        let ref_name = escape_name(&components[node.component].ref_name);
-        format!("{prefix}-({ref_name}-{})", escape_name(&node.pin_id))
-    })
+    nodes
+        .iter()
+        .filter_map(candidate)
+        .min()
+        .map(|(_, name)| name)
+        .unwrap_or_else(|| {
+            // `nodes` is sorted, so the first node is the smallest.
+            let node = &nodes[0];
+            let ref_name = escape_name(&components[node.component].ref_name);
+            format!("{prefix}-({ref_name}-{})", escape_name(&node.pin_id))
+        })
 }
 
 impl Ord for NetNode {
@@ -357,8 +371,8 @@ mod tests {
     use crate::{
         circuit::CircuitBuilder,
         kicad::{KicadPinInfo, PinType},
-        subcircuit::SubcircuitGenerator,
         spice::IndependentSource,
+        subcircuit::SubcircuitGenerator,
         test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor},
     };
 
@@ -370,7 +384,12 @@ mod tests {
                 let nodes = net
                     .nodes
                     .iter()
-                    .map(|node| format!("{}.{}", netlist.components[node.component].ref_name, node.pin_id))
+                    .map(|node| {
+                        format!(
+                            "{}.{}",
+                            netlist.components[node.component].ref_name, node.pin_id
+                        )
+                    })
                     .collect();
                 (net.name.clone(), nodes)
             })
@@ -379,7 +398,12 @@ mod tests {
 
     fn expected(nets: &[(&str, &[&str])]) -> Vec<(String, Vec<String>)> {
         nets.iter()
-            .map(|(name, nodes)| (name.to_string(), nodes.iter().map(|s| s.to_string()).collect()))
+            .map(|(name, nodes)| {
+                (
+                    name.to_string(),
+                    nodes.iter().map(|s| s.to_string()).collect(),
+                )
+            })
             .collect()
     }
 
@@ -397,7 +421,11 @@ mod tests {
         circuit.connect(u["out"], u["in_n"]);
         let netlist = circuit.build(&()).to_netlist().unwrap();
 
-        let refs: Vec<_> = netlist.components.iter().map(|c| c.ref_name.as_str()).collect();
+        let refs: Vec<_> = netlist
+            .components
+            .iter()
+            .map(|c| c.ref_name.as_str())
+            .collect();
         assert_eq!(refs, vec!["C1", "R1", "U1"]);
         assert_eq!(
             summary(&netlist),
@@ -416,12 +444,22 @@ mod tests {
     #[test]
     fn test_unnamed_net_names_follow_kicad() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let r: Vec<_> = (0..10).map(|_| circuit.instantiate_part(Box::new(Resistor("1k")))).collect();
+        let r: Vec<_> = (0..10)
+            .map(|_| circuit.instantiate_part(Box::new(Resistor("1k"))))
+            .collect();
         let named = |names: [&str; 2]| {
-            let pin = |pad: &str, name| (pad.to_string(), KicadPinInfo::new(pad, Some(name), PinType::Passive));
+            let pin = |pad: &str, name| {
+                (
+                    pad.to_string(),
+                    KicadPinInfo::new(pad, Some(name), PinType::Passive),
+                )
+            };
             let pins = BTreeMap::from([pin("1", names[0]), pin("2", names[1])]);
             CustomPart {
-                kicad: Some(KicadPartInfo { pins, ..CustomPart::valid().kicad.unwrap() }),
+                kicad: Some(KicadPartInfo {
+                    pins,
+                    ..CustomPart::valid().kicad.unwrap()
+                }),
                 ..CustomPart::valid()
             }
         };
@@ -432,7 +470,11 @@ mod tests {
         circuit.connect(r[1]["2"], x2["1"]);
         let netlist = circuit.build(&()).to_netlist().unwrap();
         let name_of = |node: &str| {
-            summary(&netlist).into_iter().find(|(_, nodes)| nodes.iter().any(|n| n == node)).unwrap().0
+            summary(&netlist)
+                .into_iter()
+                .find(|(_, nodes)| nodes.iter().any(|n| n == node))
+                .unwrap()
+                .0
         };
         // String order, not natural order (as KiCad does).
         assert_eq!(name_of("R9.1"), "Net-(R10-Pad1)");
@@ -469,7 +511,8 @@ mod tests {
         let mut circuit = CircuitBuilder::<()>::new();
         let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
         let first = circuit.instantiate_subcircuit_named("first", Divider, &interface, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit_named("second", Divider, &interface, |o: &()| *o);
+        let second =
+            circuit.instantiate_subcircuit_named("second", Divider, &interface, |o: &()| *o);
         circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
         // A name in the outer circuit is preferred to one inside the subcircuit.
         circuit.label(first[&NodeIndex::new(0)], NetLabel::local("ZZZ"));
@@ -485,7 +528,11 @@ mod tests {
                 ("GND", &["R2.2", "R4.2"]),
             ])
         );
-        let paths: Vec<_> = netlist.components.iter().map(|c| c.path.to_string()).collect();
+        let paths: Vec<_> = netlist
+            .components
+            .iter()
+            .map(|c| c.path.to_string())
+            .collect();
         assert_eq!(paths, vec!["/first/", "/first/", "/second/", "/second/"]);
 
         let warnings: Vec<_> = netlist.warnings.iter().map(|w| w.kind.clone()).collect();
@@ -514,7 +561,11 @@ mod tests {
         let netlist = circuit.build(&()).to_netlist().unwrap();
         assert_eq!(netlist.nets.len(), 2);
         assert_eq!(
-            netlist.warnings.iter().map(|w| w.kind.clone()).collect::<Vec<_>>(),
+            netlist
+                .warnings
+                .iter()
+                .map(|w| w.kind.clone())
+                .collect::<Vec<_>>(),
             vec![CircuitWarningKind::LabelOnlyNet {
                 names: vec!["VBUS".into()]
             }]
@@ -544,25 +595,42 @@ mod tests {
     #[test]
     fn test_errors_are_collected() {
         let mut circuit = CircuitBuilder::<()>::new();
-        #[rustfmt::skip]
-        let line1 = line!(); let a = circuit.instantiate_part(Box::new(CustomPart { pin_ids: vec!["1", "1", "2"], ..CustomPart::valid() }));
-        #[rustfmt::skip]
-        let line2 = line!(); circuit.instantiate_part(Box::new(CustomPart { internal_connections: vec![vec!["1", "3"]], ..CustomPart::valid() }));
+        let line1 = line!() + 1;
+        let a = circuit.instantiate_part(Box::new(CustomPart {
+            pin_ids: vec!["1", "1", "2"],
+            ..CustomPart::valid()
+        }));
+        let line2 = line!() + 1;
+        circuit.instantiate_part(Box::new(CustomPart {
+            internal_connections: vec![vec!["1", "3"]],
+            ..CustomPart::valid()
+        }));
         // Collides with the name of the unnamed net of a["2"].
-        #[rustfmt::skip]
-        let line3 = line!(); circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
+        let line3 = line!() + 1;
+        circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
         let errors = circuit.build(&()).to_netlist().unwrap_err().0;
 
         let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
         assert_eq!(
             kinds,
             vec![
-                CircuitErrorKind::DuplicatePinId { ref_name: "X1".into(), pin_id: "1".into() },
-                CircuitErrorKind::UnknownPinId { ref_name: "X2".into(), pin_id: "3".into() },
-                CircuitErrorKind::DuplicateNetName { name: "unconnected-(X1-Pad2)".into() },
+                CircuitErrorKind::DuplicatePinId {
+                    ref_name: "X1".into(),
+                    pin_id: "1".into()
+                },
+                CircuitErrorKind::UnknownPinId {
+                    ref_name: "X2".into(),
+                    pin_id: "3".into()
+                },
+                CircuitErrorKind::DuplicateNetName {
+                    name: "unconnected-(X1-Pad2)".into()
+                },
             ]
         );
-        let lines: Vec<_> = errors.iter().map(|e| e.trace.innermost().unwrap().line()).collect();
+        let lines: Vec<_> = errors
+            .iter()
+            .map(|e| e.trace.innermost().unwrap().line())
+            .collect();
         assert_eq!(lines[..2], [line1, line2]);
         assert!(lines[2] == line3 || errors[2].notes[0].trace.innermost().unwrap().line() == line3);
     }

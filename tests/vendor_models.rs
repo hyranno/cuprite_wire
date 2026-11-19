@@ -64,12 +64,26 @@ kicad_part! {
 }
 
 /// Runs the circuit with the deck's `directives` and `commands`, and returns the values printed for `names`.
-fn run(circuit: CircuitBuilder, directives: &[&str], commands: &[String], names: &[&str]) -> Vec<f64> {
-    let mut deck = circuit.build(&()).to_netlist().unwrap().to_spice().unwrap().deck();
+fn run(
+    circuit: CircuitBuilder,
+    directives: &[&str],
+    commands: &[String],
+    names: &[&str],
+) -> Vec<f64> {
+    let mut deck = circuit
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck();
     for directive in directives {
         deck = deck.directive(*directive);
     }
-    let sim = deck.control(commands.iter().cloned()).run().unwrap_or_else(|e| panic!("{e}"));
+    let sim = deck
+        .control(commands.iter().cloned())
+        .run()
+        .unwrap_or_else(|e| panic!("{e}"));
     names
         .iter()
         .map(|name| sim.value(name).unwrap_or_else(|| panic!("{}", sim.log())))
@@ -83,18 +97,22 @@ fn run(circuit: CircuitBuilder, directives: &[&str], commands: &[String], names:
 fn test_tps3899() {
     let mut c = CircuitBuilder::new();
     let u = c.instantiate_part(Box::new(Tps3899::new()));
-    let vdd = c.instantiate_part(IndependentSource::voltage(0.0).with_waveform(Waveform::Pwl(vec![
-        (0.0, 0.0),
-        (66e-6, 3.3),
-        (1e-3, 3.3),
-    ])));
-    let sense = c.instantiate_part(IndependentSource::voltage(0.0).with_waveform(Waveform::Pwl(vec![
-        (0.0, 3.3),
-        (500e-6, 3.3),
-        (501e-6, 0.5),
-        (750e-6, 0.5),
-        (751e-6, 3.3),
-    ])));
+    let vdd = c.instantiate_part(
+        IndependentSource::voltage(0.0).with_waveform(Waveform::Pwl(vec![
+            (0.0, 0.0),
+            (66e-6, 3.3),
+            (1e-3, 3.3),
+        ])),
+    );
+    let sense = c.instantiate_part(IndependentSource::voltage(0.0).with_waveform(Waveform::Pwl(
+        vec![
+            (0.0, 3.3),
+            (500e-6, 3.3),
+            (501e-6, 0.5),
+            (750e-6, 0.5),
+            (751e-6, 3.3),
+        ],
+    )));
     let pullup = c.instantiate_part(Box::new(Resistor0603::new("1k")));
     let ctr = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
     let cts = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
@@ -116,13 +134,18 @@ fn test_tps3899() {
     let reset = run(c, &[], &commands, &["r0", "r1", "r2", "r3"]);
     let high = |v: f64| v > 3.0;
     let low = |v: f64| v < 0.4;
-    assert!(high(reset[0]) && low(reset[1]) && low(reset[2]) && high(reset[3]), "RESET at {times:?}: {reset:?}");
+    assert!(
+        high(reset[0]) && low(reset[1]) && low(reset[2]) && high(reset[3]),
+        "RESET at {times:?}: {reset:?}"
+    );
 }
 
 /// The nodes follow the `.subckt` ports, and the model is marked as PSpice.
 #[test]
 fn test_tps3899_symbol() {
-    let Some(SpicePartInfo::Elements { elements, .. }) = Tps3899Symbol::new().spice() else { panic!() };
+    let Some(SpicePartInfo::Elements { elements, .. }) = Tps3899Symbol::new().spice() else {
+        panic!()
+    };
     assert_eq!(elements[0].nodes, ["1", "2", "3", "6", "5", "4"]);
     assert_eq!(elements[0].models[0].dialect(), SpiceDialect::Pspice);
 }
@@ -154,5 +177,8 @@ fn test_lm358_units() {
         "print a b".to_string(),
     ];
     let out = run(c, &[".options rshunt=1e12"], &commands, &["a", "b"]);
-    assert!((out[0] - 1.0).abs() < 0.01 && (out[1] - 2.0).abs() < 0.01, "{out:?}");
+    assert!(
+        (out[0] - 1.0).abs() < 0.01 && (out[1] - 2.0).abs() < 0.01,
+        "{out:?}"
+    );
 }

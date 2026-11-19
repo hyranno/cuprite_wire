@@ -21,11 +21,17 @@ pub struct LibId {
 impl LibId {
     pub fn parse(text: &str) -> Result<Self, Error> {
         match text.split_once(':') {
-            Some((library, name)) if !library.is_empty() && !name.is_empty() && !name.contains(':') => Ok(LibId {
-                library: library.to_string(),
-                name: name.to_string(),
-            }),
-            _ => Err(Error::new(format!("expected 'Library:Name', found {text:?}"))),
+            Some((library, name))
+                if !library.is_empty() && !name.is_empty() && !name.contains(':') =>
+            {
+                Ok(LibId {
+                    library: library.to_string(),
+                    name: name.to_string(),
+                })
+            }
+            _ => Err(Error::new(format!(
+                "expected 'Library:Name', found {text:?}"
+            ))),
         }
     }
 }
@@ -107,7 +113,10 @@ pub enum OptionKey {
     ExtraPads,
     Spice,
     /// An option of a model: of `spice_part!`, or of the `element`-th model of the `sim` block.
-    Model { element: usize, field: BindingField },
+    Model {
+        element: usize,
+        field: BindingField,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,7 +188,9 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     use OptionKey::*;
     let common = &options.common;
     let symbol_id = LibId::parse(&options.symbol).map_err(at(Symbol))?;
-    let lib = resolver.symbol_lib(&symbol_id.library).map_err(at(Symbol))?;
+    let lib = resolver
+        .symbol_lib(&symbol_id.library)
+        .map_err(at(Symbol))?;
     let symbol = lib.symbol(&symbol_id.name).map_err(at(Symbol))?;
     check_symbol(&symbol).map_err(at(Symbol))?;
 
@@ -200,12 +211,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     // Footprint and pads.
     let footprint_text = match &options.footprint {
         FootprintOption::Given(text) => Some(text.clone()),
-        FootprintOption::FromSymbol => match symbol.property("Footprint").filter(|f| !f.is_empty()) {
+        FootprintOption::FromSymbol => match symbol.property("Footprint").filter(|f| !f.is_empty())
+        {
             Some(text) => Some(text.to_string()),
             None => {
                 return err(
                     Footprint,
-                    format!("symbol {symbol_id} has no footprint; give one with `footprint: \"Library:Name\"`"),
+                    format!(
+                        "symbol {symbol_id} has no footprint; give one with `footprint: \"Library:Name\"`"
+                    ),
                 );
             }
         },
@@ -220,7 +234,9 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         }
         Some(text) => {
             let id = LibId::parse(&text).map_err(at(Footprint))?;
-            let pads = resolver.footprint(&id.library, &id.name).map_err(at(Footprint))?;
+            let pads = resolver
+                .footprint(&id.library, &id.name)
+                .map_err(at(Footprint))?;
             let missing: Vec<&str> = symbol
                 .pins
                 .iter()
@@ -230,10 +246,14 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             if !missing.is_empty() {
                 return err(
                     Footprint,
-                    format!("footprint {id} has no pads for the symbol pins {}", missing.join(", ")),
+                    format!(
+                        "footprint {id} has no pads for the symbol pins {}",
+                        missing.join(", ")
+                    ),
                 );
             }
-            let symbol_numbers: BTreeSet<&str> = symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
+            let symbol_numbers: BTreeSet<&str> =
+                symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
             for pad in &options.extra_pads {
                 if symbol_numbers.contains(pad.as_str()) {
                     return err(ExtraPads, format!("pad {pad:?} is a pin of the symbol"));
@@ -246,7 +266,9 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                 .pad_numbers
                 .iter()
                 .map(String::as_str)
-                .filter(|pad| !symbol_numbers.contains(pad) && !options.extra_pads.iter().any(|p| p == pad))
+                .filter(|pad| {
+                    !symbol_numbers.contains(pad) && !options.extra_pads.iter().any(|p| p == pad)
+                })
                 .collect();
             if !unlisted.is_empty() {
                 return err(
@@ -282,24 +304,50 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         unit: 0,
     }));
     rename_pins(&mut pins, &common.pins, "pin")?;
-    let id_of: BTreeMap<&str, &str> = pins.iter().map(|pin| (pin.pad.as_str(), pin.id.as_str())).collect();
-    let to_ids = |numbers: &[String]| -> Vec<String> { numbers.iter().map(|n| id_of[n.as_str()].to_string()).collect() };
-    let mut internal_connections: Vec<Vec<String>> = symbol.stacked_pins().iter().map(|group| to_ids(group)).collect();
-    internal_connections.extend(check_internal_connections(&common.internal_connections, &pins)?);
+    let id_of: BTreeMap<&str, &str> = pins
+        .iter()
+        .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
+        .collect();
+    let to_ids = |numbers: &[String]| -> Vec<String> {
+        numbers
+            .iter()
+            .map(|n| id_of[n.as_str()].to_string())
+            .collect()
+    };
+    let mut internal_connections: Vec<Vec<String>> = symbol
+        .stacked_pins()
+        .iter()
+        .map(|group| to_ids(group))
+        .collect();
+    internal_connections.extend(check_internal_connections(
+        &common.internal_connections,
+        &pins,
+    )?);
 
     let mut fields = options.fields.clone();
     let spice = match (options.spice, options.sim.is_empty()) {
         (SpiceOption::None | SpiceOption::Excluded, false) => {
-            return err(Spice, "`sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`");
+            return err(
+                Spice,
+                "`sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
+            );
         }
         (SpiceOption::None, true) => SpiceDef::Unsupported,
         (SpiceOption::Excluded, true) => SpiceDef::Excluded,
         (SpiceOption::Auto, false) => {
             // The pins in pad numbers, connected as the part connects them.
-            let pad_of: BTreeMap<&str, &str> = pins.iter().map(|pin| (pin.id.as_str(), pin.pad.as_str())).collect();
+            let pad_of: BTreeMap<&str, &str> = pins
+                .iter()
+                .map(|pin| (pin.id.as_str(), pin.pad.as_str()))
+                .collect();
             let groups: Vec<Vec<String>> = internal_connections
                 .iter()
-                .map(|group| group.iter().map(|id| pad_of[id.as_str()].to_string()).collect())
+                .map(|group| {
+                    group
+                        .iter()
+                        .map(|id| pad_of[id.as_str()].to_string())
+                        .collect()
+                })
                 .collect();
             let part_pins: Vec<PartPin> = pins
                 .iter()
@@ -349,8 +397,16 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                     }
                     let mut unused_pins = to_ids(&unused_pins);
                     // Extra pads are not part of the model.
-                    unused_pins.extend(options.extra_pads.iter().map(|pad| id_of[pad.as_str()].to_string()));
-                    SpiceDef::Elements { elements, unused_pins }
+                    unused_pins.extend(
+                        options
+                            .extra_pads
+                            .iter()
+                            .map(|pad| id_of[pad.as_str()].to_string()),
+                    );
+                    SpiceDef::Elements {
+                        elements,
+                        unused_pins,
+                    }
                 }
                 other => other,
             }
@@ -390,7 +446,11 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
     let Some(info) = &element.info else {
         return Vec::new();
     };
-    let device = match info.model_type.as_deref().map(|t| t.split_whitespace().next().unwrap_or_default()) {
+    let device = match info
+        .model_type
+        .as_deref()
+        .map(|t| t.split_whitespace().next().unwrap_or_default())
+    {
         None => "SUBCKT",
         Some("d") => "D",
         Some("npn") => "NPN",
@@ -410,12 +470,19 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
         .collect();
     let mut fields = vec![
         ("Sim.Device".to_string(), device.to_string()),
-        ("Sim.Library".to_string(), info.path.to_string_lossy().into_owned()),
+        (
+            "Sim.Library".to_string(),
+            info.path.to_string_lossy().into_owned(),
+        ),
         ("Sim.Name".to_string(), info.name.clone()),
         ("Sim.Pins".to_string(), pins.join(" ")),
     ];
     if !binding.params.is_empty() {
-        let params: Vec<String> = binding.params.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        let params: Vec<String> = binding
+            .params
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
         fields.push(("Sim.Params".to_string(), params.join(" ")));
     }
     fields
@@ -423,7 +490,10 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
 
 /// Makes a part from a SPICE model: its pins are the ports of the `.subckt` (or the terminals of the
 /// `.model`). It has no KiCad information.
-pub fn load_spice_part(options: &SpicePartOptions, resolver: &mut Resolver) -> Result<PartDef, PartError> {
+pub fn load_spice_part(
+    options: &SpicePartOptions,
+    resolver: &mut Resolver,
+) -> Result<PartDef, PartError> {
     let common = &options.common;
     let bind_options = BindOptions {
         pins: PartPins::Ports,
@@ -437,7 +507,8 @@ pub fn load_spice_part(options: &SpicePartOptions, resolver: &mut Resolver) -> R
         suffix: String::new(),
         ..options.model.clone()
     };
-    let (mut elements, _) = binding::bind(&[model], &bind_options, resolver).map_err(model_error)?;
+    let (mut elements, _) =
+        binding::bind(&[model], &bind_options, resolver).map_err(model_error)?;
     let info = elements[0].info.clone().expect("a library model");
     let mut pins: Vec<PinDef> = info
         .ports
@@ -475,19 +546,32 @@ pub fn load_spice_part(options: &SpicePartOptions, resolver: &mut Resolver) -> R
 
 fn check_ref_base(ref_base: &str) -> Result<(), PartError> {
     if !ref_base.starts_with(|c: char| c.is_ascii_alphabetic())
-        || !ref_base.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !ref_base
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
-        return err(OptionKey::RefBase, format!("invalid reference prefix {ref_base:?}"));
+        return err(
+            OptionKey::RefBase,
+            format!("invalid reference prefix {ref_base:?}"),
+        );
     }
     Ok(())
 }
 
 /// Applies `pins` (pin ID by pad number or port name; ports are matched case-insensitively) and
 /// checks that the IDs are unique.
-fn rename_pins(pins: &mut [PinDef], renames: &[(String, String)], what: &str) -> Result<(), PartError> {
+fn rename_pins(
+    pins: &mut [PinDef],
+    renames: &[(String, String)],
+    what: &str,
+) -> Result<(), PartError> {
     let mut renamed = BTreeSet::new();
     for (key, id) in renames {
-        let normalized = if what == "port" { key.to_ascii_lowercase() } else { key.clone() };
+        let normalized = if what == "port" {
+            key.to_ascii_lowercase()
+        } else {
+            key.clone()
+        };
         if !renamed.insert(normalized) {
             return err(OptionKey::Pins, format!("{what} {key:?} is renamed twice"));
         }
@@ -495,7 +579,8 @@ fn rename_pins(pins: &mut [PinDef], renames: &[(String, String)], what: &str) ->
             return err(OptionKey::Pins, format!("empty pin ID for {what} {key:?}"));
         }
         let pin = if what == "port" {
-            pins.iter_mut().find(|pin| pin.pad.eq_ignore_ascii_case(key))
+            pins.iter_mut()
+                .find(|pin| pin.pad.eq_ignore_ascii_case(key))
         } else {
             pins.iter_mut().find(|pin| &pin.pad == key)
         };
@@ -506,7 +591,10 @@ fn rename_pins(pins: &mut [PinDef], renames: &[(String, String)], what: &str) ->
                 return err(
                     OptionKey::Pins,
                     if what == "port" {
-                        format!("the model has no port {key:?}; its ports are {}", known.join(" "))
+                        format!(
+                            "the model has no port {key:?}; its ports are {}",
+                            known.join(" ")
+                        )
                     } else {
                         format!("the part has no pin {key:?}")
                     },
@@ -517,19 +605,34 @@ fn rename_pins(pins: &mut [PinDef], renames: &[(String, String)], what: &str) ->
     let mut ids = BTreeSet::new();
     for pin in pins.iter() {
         if !ids.insert(pin.id.as_str()) {
-            return err(OptionKey::Pins, format!("pin ID {:?} is used twice", pin.id));
+            return err(
+                OptionKey::Pins,
+                format!("pin ID {:?} is used twice", pin.id),
+            );
         }
     }
     Ok(())
 }
 
-fn check_internal_connections(groups: &[Vec<String>], pins: &[PinDef]) -> Result<Vec<Vec<String>>, PartError> {
+fn check_internal_connections(
+    groups: &[Vec<String>],
+    pins: &[PinDef],
+) -> Result<Vec<Vec<String>>, PartError> {
     for group in groups {
         if group.len() < 2 {
-            return err(OptionKey::InternalConnections, "a group needs at least two pins");
+            return err(
+                OptionKey::InternalConnections,
+                "a group needs at least two pins",
+            );
         }
-        if let Some(unknown) = group.iter().find(|id| !pins.iter().any(|pin| &pin.id == *id)) {
-            return err(OptionKey::InternalConnections, format!("the part has no pin ID {unknown:?}"));
+        if let Some(unknown) = group
+            .iter()
+            .find(|id| !pins.iter().any(|pin| &pin.id == *id))
+        {
+            return err(
+                OptionKey::InternalConnections,
+                format!("the part has no pin ID {unknown:?}"),
+            );
         }
     }
     Ok(groups.to_vec())
@@ -569,7 +672,10 @@ mod tests {
     };
 
     fn resolver() -> Resolver {
-        let mut resolver = Resolver::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"), |_| None);
+        let mut resolver = Resolver::new(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
+            |_| None,
+        );
         resolver.symbol_dir = Some("symbols".into());
         resolver.footprint_dir = Some("footprints".into());
         resolver
@@ -598,8 +704,14 @@ mod tests {
         let mut r = resolver();
         let part = load_part(&opts, &mut r).unwrap();
         assert_eq!(part.ref_base, "R");
-        assert_eq!(part.kicad.unwrap().footprint.unwrap().to_string(), "test:R_0603");
-        assert_eq!(part.pins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            part.kicad.unwrap().footprint.unwrap().to_string(),
+            "test:R_0603"
+        );
+        assert_eq!(
+            part.pins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["1", "2"]
+        );
         assert_eq!(
             part.spice,
             SpiceDef::Elements {
@@ -641,10 +753,16 @@ mod tests {
         };
         let (key, message) = error(options("test:DUAL_AMP", "test:SOIC-8-EP"));
         assert_eq!(key, OptionKey::Footprint);
-        assert!(message.contains("pads without a symbol pin: 9"), "{message}");
+        assert!(
+            message.contains("pads without a symbol pin: 9"),
+            "{message}"
+        );
         let (key, message) = error(options("test:DUAL_AMP", "test:R_0603"));
         assert_eq!(key, OptionKey::Footprint);
-        assert!(message.contains("no pads for the symbol pins 3, 4"), "{message}");
+        assert!(
+            message.contains("no pads for the symbol pins 3, 4"),
+            "{message}"
+        );
         let (key, message) = error(options("test:GND", "test:R_0603"));
         assert_eq!(key, OptionKey::Symbol);
         assert!(message.contains("power symbols"), "{message}");
@@ -668,18 +786,37 @@ mod tests {
         let mut opts = options("test:REG", "");
         opts.footprint = FootprintOption::FromSymbol;
         let part = load_part(&opts, &mut resolver()).unwrap();
-        assert_eq!(part.kicad.as_ref().unwrap().footprint.as_ref().unwrap().to_string(), "test:SOT-223");
+        assert_eq!(
+            part.kicad
+                .as_ref()
+                .unwrap()
+                .footprint
+                .as_ref()
+                .unwrap()
+                .to_string(),
+            "test:SOT-223"
+        );
         assert_eq!(part.internal_connections, vec![strings(&["2", "4"])]);
         assert_eq!(part.spice, SpiceDef::Excluded);
         assert!(part.kicad.unwrap().exclude_from_bom);
     }
 
     fn vsup_binding() -> ModelBinding {
-        let pins = [("1", "CTR"), ("2", "CTS"), ("3", "GND"), ("4", "VDD"), ("5", "SENSE"), ("6", "RESET_B")];
+        let pins = [
+            ("1", "CTR"),
+            ("2", "CTS"),
+            ("3", "GND"),
+            ("4", "VDD"),
+            ("5", "SENSE"),
+            ("6", "RESET_B"),
+        ];
         ModelBinding {
             library: "models/vsup01.lib".into(),
             name: "VSUP01".into(),
-            pins: pins.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect(),
+            pins: pins
+                .iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect(),
             ..Default::default()
         }
     }
@@ -691,9 +828,18 @@ mod tests {
         opts.sim = vec![vsup_binding()];
         let mut r = resolver();
         let part = load_part(&opts, &mut r).unwrap();
-        let SpiceDef::Elements { elements, unused_pins } = &part.spice else { panic!() };
+        let SpiceDef::Elements {
+            elements,
+            unused_pins,
+        } = &part.spice
+        else {
+            panic!()
+        };
         // In the order of the .subckt ports, with pin IDs.
-        assert_eq!(elements[0].nodes, strings(&["1", "2", "3", "reset_n", "5", "4"]));
+        assert_eq!(
+            elements[0].nodes,
+            strings(&["1", "2", "3", "reset_n", "5", "4"])
+        );
         assert_eq!(elements[0].dialect, crate::spice_lib::Dialect::Pspice);
         assert!(unused_pins.is_empty());
         let fields = &part.kicad.unwrap().fields;
@@ -702,9 +848,15 @@ mod tests {
             fields,
             &vec![
                 ("Sim.Device".to_string(), "SUBCKT".to_string()),
-                ("Sim.Library".to_string(), lib.to_string_lossy().into_owned()),
+                (
+                    "Sim.Library".to_string(),
+                    lib.to_string_lossy().into_owned()
+                ),
                 ("Sim.Name".to_string(), "VSUP01".to_string()),
-                ("Sim.Pins".to_string(), "1=CTR 2=CTS 3=GND 6=RESET_B 5=SENSE 4=VDD".to_string()),
+                (
+                    "Sim.Pins".to_string(),
+                    "1=CTR 2=CTS 3=GND 6=RESET_B 5=SENSE 4=VDD".to_string()
+                ),
             ]
         );
 
@@ -715,12 +867,27 @@ mod tests {
         binding.unused = strings(&["6"]);
         opts.sim = vec![binding];
         let e = load_part(&opts, &mut resolver()).unwrap_err();
-        assert_eq!(e.key, OptionKey::Model { element: 0, field: BindingField::Pins });
-        assert!(e.error.message.starts_with("no pin is mapped to the ports RESET_B"), "{}", e.error);
+        assert_eq!(
+            e.key,
+            OptionKey::Model {
+                element: 0,
+                field: BindingField::Pins
+            }
+        );
+        assert!(
+            e.error
+                .message
+                .starts_with("no pin is mapped to the ports RESET_B"),
+            "{}",
+            e.error
+        );
         let mut opts = options("test:VSUP", "test:SOT-23-6");
         opts.sim = vec![vsup_binding()];
         opts.spice = SpiceOption::None;
-        assert_eq!(load_part(&opts, &mut resolver()).unwrap_err().key, OptionKey::Spice);
+        assert_eq!(
+            load_part(&opts, &mut resolver()).unwrap_err().key,
+            OptionKey::Spice
+        );
     }
 
     #[test]
@@ -743,7 +910,9 @@ mod tests {
         assert_eq!(part.value, Value::Fixed("VSUP01".into()));
         let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]);
-        let SpiceDef::Elements { elements, .. } = &part.spice else { panic!() };
+        let SpiceDef::Elements { elements, .. } = &part.spice else {
+            panic!()
+        };
         assert_eq!(elements[0].nodes, ids);
         assert_eq!(elements[0].args, Args::Fixed("VSUP01 VTH=0.6".into()));
 
@@ -752,7 +921,10 @@ mod tests {
         let e = load_spice_part(&opts, &mut resolver()).unwrap_err();
         assert_eq!(
             (e.key, e.error.message.as_str()),
-            (OptionKey::Pins, "the model has no port \"RESET\"; its ports are CTR CTS GND RESET_B SENSE VDD")
+            (
+                OptionKey::Pins,
+                "the model has no port \"RESET\"; its ports are CTR CTS GND RESET_B SENSE VDD"
+            )
         );
         opts.common.pins.clear();
         opts.model.name = "clamp".into();

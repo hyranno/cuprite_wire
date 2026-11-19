@@ -27,7 +27,10 @@ pub struct Preamp {
 impl Default for Preamp {
     /// A gain of 11 (20.8 dB).
     fn default() -> Self {
-        Self { feedback: "100k", ground: "10k" }
+        Self {
+            feedback: "100k",
+            ground: "10k",
+        }
     }
 }
 
@@ -43,7 +46,13 @@ impl Preamp {
     #[track_caller]
     pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> PreampPorts {
         let [input, vref, vcc, gnd, output] = instantiate(circuit, name, self);
-        PreampPorts { input, vref, vcc, gnd, output }
+        PreampPorts {
+            input,
+            vref,
+            vcc,
+            gnd,
+            output,
+        }
     }
 }
 
@@ -55,9 +64,11 @@ impl SubcircuitGenerator for Preamp {
         let [input, vref, vcc, gnd, output] = add_interface(&mut c);
         let coupling = c.instantiate_part_named("c_in", Box::new(Capacitor0603::new("1u")));
         let bias = c.instantiate_part_named("r_bias", Box::new(Resistor0603::new("100k")));
-        let feedback = c.instantiate_part_named("r_feedback", Box::new(Resistor0603::new(self.feedback)));
+        let feedback =
+            c.instantiate_part_named("r_feedback", Box::new(Resistor0603::new(self.feedback)));
         let ground = c.instantiate_part_named("r_ground", Box::new(Resistor0603::new(self.ground)));
-        let decoupling = c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
+        let decoupling =
+            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
         let amp = c.instantiate_part_named("amp", Box::new(RrioOpAmp::new()));
         // Input coupling, biased at the reference.
         c.connect(input, coupling["1"]);
@@ -139,7 +150,8 @@ mod tests {
     /// feedback were positive, which the AC analysis alone does not show).
     #[test]
     fn small_signal() {
-        let bench = bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.01, 1e3)));
+        let bench =
+            bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.01, 1e3)));
         let sim = bench.simulate([
             "tran 1u 3m 1m",
             r#"meas tran vmax MAX v("/OUT")"#,
@@ -152,7 +164,8 @@ mod tests {
     /// A 0.4 V amplitude input would give 4.4 V; the output clips at the rails.
     #[test]
     fn clips_at_the_rails() {
-        let bench = bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.4, 1e3)));
+        let bench =
+            bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.4, 1e3)));
         let sim = bench.simulate([
             "tran 1u 3m 1m",
             r#"meas tran vmax MAX v("/OUT")"#,

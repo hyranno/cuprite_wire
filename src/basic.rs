@@ -112,7 +112,12 @@ mod tests {
             let info = part.kicad().unwrap();
             assert!(info.check_pins(&part.pin_ids()).is_empty(), "{part:?}");
             let spice = part.spice().unwrap();
-            assert!(spice.check(&part.pin_ids(), &part.internal_connections()).is_empty(), "{part:?}");
+            assert!(
+                spice
+                    .check(&part.pin_ids(), &part.internal_connections())
+                    .is_empty(),
+                "{part:?}"
+            );
             assert!(matches!(spice, SpicePartInfo::Elements { .. }));
         }
         assert_eq!(DiodeSod123::A, "a");
@@ -163,7 +168,11 @@ mod tests {
     #[test]
     fn test_simulate_diodes() {
         for (diode, current, range) in [
-            (Box::new(DiodeSod123::new("D")) as Box<dyn Part>, 1e-3, 0.5..0.8),
+            (
+                Box::new(DiodeSod123::new("D")) as Box<dyn Part>,
+                1e-3,
+                0.5..0.8,
+            ),
             (Box::new(Led0603::new("red")), 10e-3, 1.6..2.2),
         ] {
             let mut circuit = CircuitBuilder::new();
@@ -175,7 +184,10 @@ mod tests {
             circuit.label(d["a"], NetLabel::local("OUT"));
             circuit.label(d["k"], NetLabel::global("GND"));
             let out = out_voltage(&circuit);
-            assert!(range.contains(&out), "forward voltage {out} not in {range:?}");
+            assert!(
+                range.contains(&out),
+                "forward voltage {out} not in {range:?}"
+            );
         }
     }
 

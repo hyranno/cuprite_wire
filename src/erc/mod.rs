@@ -138,7 +138,9 @@ impl ErcRule {
     /// The default severity, KiCad's except for [`ErcRule::LabelOnlyNet`] (an error in KiCad).
     pub fn default_severity(self) -> Severity {
         match self {
-            ErcRule::PinNotConnected | ErcRule::PinNotDriven | ErcRule::PowerPinNotDriven => Severity::Error,
+            ErcRule::PinNotConnected | ErcRule::PinNotDriven | ErcRule::PowerPinNotDriven => {
+                Severity::Error
+            }
             ErcRule::NoConnectConnected
             | ErcRule::NoConnectDangling
             | ErcRule::VirtualPinDangling
@@ -208,14 +210,35 @@ impl fmt::Display for ErcPin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErcViolationKind {
-    PinToPin { net: String, pin: ErcPin, other: ErcPin },
-    PinNotConnected { net: String, pin: ErcPin },
-    PinNotDriven { net: String, pin: ErcPin },
-    PowerPinNotDriven { net: String, pin: ErcPin },
-    NoConnectConnected { net: String, pins: Vec<ErcPin> },
+    PinToPin {
+        net: String,
+        pin: ErcPin,
+        other: ErcPin,
+    },
+    PinNotConnected {
+        net: String,
+        pin: ErcPin,
+    },
+    PinNotDriven {
+        net: String,
+        pin: ErcPin,
+    },
+    PowerPinNotDriven {
+        net: String,
+        pin: ErcPin,
+    },
+    NoConnectConnected {
+        net: String,
+        pins: Vec<ErcPin>,
+    },
     NoConnectDangling,
-    VirtualPinDangling { name: String },
-    SimilarNetNames { name: String, other: String },
+    VirtualPinDangling {
+        name: String,
+    },
+    SimilarNetNames {
+        name: String,
+        other: String,
+    },
     /// A warning of the netlist conversion.
     Netlist(CircuitWarningKind),
 }
@@ -233,7 +256,10 @@ impl fmt::Display for ErcViolationKind {
                 write!(f, "net {net:?}: {pin} is not connected to anything")
             }
             ErcViolationKind::PinNotDriven { net, pin } => {
-                write!(f, "net {net:?}: input pin {pin} is not driven by any output pin")
+                write!(
+                    f,
+                    "net {net:?}: input pin {pin} is not driven by any output pin"
+                )
             }
             ErcViolationKind::PowerPinNotDriven { net, pin } => write!(
                 f,
@@ -241,7 +267,11 @@ impl fmt::Display for ErcViolationKind {
             ),
             ErcViolationKind::NoConnectConnected { net, pins } => {
                 let pins: Vec<_> = pins.iter().map(ToString::to_string).collect();
-                write!(f, "net {net:?} is marked no-connect but connects {}", pins.join(", "))
+                write!(
+                    f,
+                    "net {net:?} is marked no-connect but connects {}",
+                    pins.join(", ")
+                )
             }
             ErcViolationKind::NoConnectDangling => write!(f, "no-connect mark is not on any pin"),
             ErcViolationKind::VirtualPinDangling { name } => {
@@ -285,11 +315,15 @@ pub struct ErcReport {
 
 impl ErcReport {
     pub fn errors(&self) -> impl Iterator<Item = &ErcViolation> {
-        self.violations.iter().filter(|v| v.severity == Severity::Error)
+        self.violations
+            .iter()
+            .filter(|v| v.severity == Severity::Error)
     }
 
     pub fn warnings(&self) -> impl Iterator<Item = &ErcViolation> {
-        self.violations.iter().filter(|v| v.severity == Severity::Warning)
+        self.violations
+            .iter()
+            .filter(|v| v.severity == Severity::Warning)
     }
 
     pub fn has_errors(&self) -> bool {
@@ -385,7 +419,10 @@ impl Netlist {
                     traces.push(mark.trace.clone());
                 }
             }
-            let no_connect = net.marks.iter().find(|mark| mark.mark == ErcMark::NoConnect);
+            let no_connect = net
+                .marks
+                .iter()
+                .find(|mark| mark.mark == ErcMark::NoConnect);
             for finding in check_net(&net_pins, no_connect.is_some(), &settings.pin_map) {
                 report.net_finding(net, finding, &pins, &traces, no_connect);
             }
@@ -393,16 +430,23 @@ impl Netlist {
 
         for mark in &self.pinless_marks {
             let (rule, kind) = match &mark.mark {
-                ErcMark::NoConnect => (ErcRule::NoConnectDangling, ErcViolationKind::NoConnectDangling),
+                ErcMark::NoConnect => (
+                    ErcRule::NoConnectDangling,
+                    ErcViolationKind::NoConnectDangling,
+                ),
                 ErcMark::VirtualPin { name, .. } => (
                     ErcRule::VirtualPinDangling,
                     ErcViolationKind::VirtualPinDangling { name: name.clone() },
                 ),
             };
-            report.push(settings.severity(rule), Diagnostic::new(kind, mark.trace.clone()));
+            report.push(
+                settings.severity(rule),
+                Diagnostic::new(kind, mark.trace.clone()),
+            );
         }
 
-        for (i, first) in case_insensitive_duplicates(self.nets.iter().map(|net| net.name.as_str())) {
+        for (i, first) in case_insensitive_duplicates(self.nets.iter().map(|net| net.name.as_str()))
+        {
             let (net, other) = (&self.nets[i], &self.nets[first]);
             let kind = ErcViolationKind::SimilarNetNames {
                 name: net.name.clone(),
@@ -410,7 +454,8 @@ impl Netlist {
             };
             report.push(
                 settings.severity(ErcRule::SimilarNetNames),
-                Diagnostic::new(kind, net.trace.clone()).with_note("the other net is named here", other.trace.clone()),
+                Diagnostic::new(kind, net.trace.clone())
+                    .with_note("the other net is named here", other.trace.clone()),
             );
         }
 
@@ -441,7 +486,10 @@ struct Reporter<'a> {
 impl Reporter<'_> {
     fn push(&mut self, severity: Severity, diagnostic: Diagnostic<ErcViolationKind>) {
         if severity != Severity::Ignore {
-            self.violations.push(ErcViolation { severity, diagnostic });
+            self.violations.push(ErcViolation {
+                severity,
+                diagnostic,
+            });
         }
     }
 
@@ -455,7 +503,11 @@ impl Reporter<'_> {
     ) {
         let name = net.name.clone();
         let (severity, diagnostic) = match finding {
-            NetFinding::PinToPin { pin, other, severity } => {
+            NetFinding::PinToPin {
+                pin,
+                other,
+                severity,
+            } => {
                 let kind = ErcViolationKind::PinToPin {
                     net: name,
                     pin: pins[pin].clone(),
@@ -464,7 +516,8 @@ impl Reporter<'_> {
                 let note = format!("{} is here", pins[other]);
                 (
                     severity,
-                    Diagnostic::new(kind, traces[pin].clone()).with_note(note, traces[other].clone()),
+                    Diagnostic::new(kind, traces[pin].clone())
+                        .with_note(note, traces[other].clone()),
                 )
             }
             NetFinding::PinNotConnected { pin } => {
@@ -502,12 +555,18 @@ impl Reporter<'_> {
                     net: name,
                     pins: connected.iter().map(|&pin| pins[pin].clone()).collect(),
                 };
-                let trace = no_connect.map(|mark| mark.trace.clone()).unwrap_or_default();
+                let trace = no_connect
+                    .map(|mark| mark.trace.clone())
+                    .unwrap_or_default();
                 let mut diagnostic = Diagnostic::new(kind, trace);
                 for &pin in &connected {
-                    diagnostic = diagnostic.with_note(format!("{} is here", pins[pin]), traces[pin].clone());
+                    diagnostic =
+                        diagnostic.with_note(format!("{} is here", pins[pin]), traces[pin].clone());
                 }
-                (self.settings.severity(ErcRule::NoConnectConnected), diagnostic)
+                (
+                    self.settings.severity(ErcRule::NoConnectConnected),
+                    diagnostic,
+                )
             }
         };
         self.push(severity, diagnostic);

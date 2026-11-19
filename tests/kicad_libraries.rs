@@ -134,7 +134,9 @@ fn circuit() -> CircuitBuilder {
 }
 
 fn check_golden(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         std::fs::write(&path, actual).unwrap();
         return;
@@ -177,10 +179,19 @@ fn test_simulate() {
         .to_spice()
         .unwrap()
         .deck()
-        .control(["op", r#"let amp = v("/AMP")"#, r#"let out = v("/OUT")"#, "print amp out"]);
+        .control([
+            "op",
+            r#"let amp = v("/AMP")"#,
+            r#"let out = v("/OUT")"#,
+            "print amp out",
+        ]);
     let sim = deck.run().unwrap();
     let amp = sim.value("amp").unwrap_or_else(|| panic!("{}", sim.log()));
-    assert!((amp - (0.2 - 0.01) * 11.0).abs() < 0.01, "amp = {amp}\n{}", sim.log());
+    assert!(
+        (amp - (0.2 - 0.01) * 11.0).abs() < 0.01,
+        "amp = {amp}\n{}",
+        sim.log()
+    );
     // The transistor is on, so OUT is pulled low.
     let out = sim.value("out").unwrap();
     assert!(out < 1.0, "out = {out}");

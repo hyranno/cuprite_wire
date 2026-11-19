@@ -17,7 +17,10 @@ use cuprite_wire::{
     spice_part,
 };
 
-const MODELS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/crates/kicad_lib/tests/fixtures/models");
+const MODELS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/crates/kicad_lib/tests/fixtures/models"
+);
 
 spice_part! {
     /// The supervisor model alone, for simulation.
@@ -110,7 +113,10 @@ fn strings(s: &[&str]) -> Vec<String> {
 #[test]
 fn test_spice_part() {
     let part = Supervisor::new();
-    assert_eq!(Supervisor::PINS, ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]);
+    assert_eq!(
+        Supervisor::PINS,
+        ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]
+    );
     assert_eq!(Supervisor::RESET_N, "reset_n");
     assert_eq!(part.get_ref_base_name(), "U");
     assert_eq!(part.value(), "VSUP01");
@@ -124,11 +130,15 @@ fn test_spice_part() {
     );
 
     let clamp = Clamp::new();
-    assert_eq!((clamp.get_ref_base_name(), clamp.pin_ids()), ("D".to_string(), strings(&["A", "K"])));
+    assert_eq!(
+        (clamp.get_ref_base_name(), clamp.pin_ids()),
+        ("D".to_string(), strings(&["A", "K"]))
+    );
     assert_eq!(
         clamp.spice(),
         Some(SpicePartInfo::element(
-            SpiceElement::new('D', ["A", "K"], "clamp").with_model(ModelSource::include(format!("{MODELS}/clamp.lib")))
+            SpiceElement::new('D', ["A", "K"], "clamp")
+                .with_model(ModelSource::include(format!("{MODELS}/clamp.lib")))
         ))
     );
 }
@@ -152,10 +162,15 @@ fn test_sim_block() {
             ("Sim.Device".to_string(), "SUBCKT".to_string()),
             ("Sim.Library".to_string(), format!("{MODELS}/vsup01.lib")),
             ("Sim.Name".to_string(), "VSUP01".to_string()),
-            ("Sim.Pins".to_string(), "1=CTR 2=CTS 3=GND 6=RESET_B 5=SENSE 4=VDD".to_string()),
+            (
+                "Sim.Pins".to_string(),
+                "1=CTR 2=CTS 3=GND 6=RESET_B 5=SENSE 4=VDD".to_string()
+            ),
         ]
     );
-    let Some(SpicePartInfo::Elements { elements, .. }) = VsupNgspice::new().spice() else { panic!() };
+    let Some(SpicePartInfo::Elements { elements, .. }) = VsupNgspice::new().spice() else {
+        panic!()
+    };
     let names: Vec<String> = elements[0]
         .models
         .iter()
@@ -164,7 +179,16 @@ fn test_sim_block() {
             other => panic!("{other:?}"),
         })
         .collect();
-    assert_eq!(names, ["D_VSUP_ESD", "VSUP01", "VSUP_DRIVE", "VSUP_OUTSTAGE", "VSUP_RON"]);
+    assert_eq!(
+        names,
+        [
+            "D_VSUP_ESD",
+            "VSUP01",
+            "VSUP_DRIVE",
+            "VSUP_OUTSTAGE",
+            "VSUP_RON"
+        ]
+    );
 }
 
 #[test]
@@ -244,12 +268,25 @@ fn test_simulate() {
 
     // Swapping SENSE and VDD in the mapping changes the behavior: SENSE then sees 3.3 V, and VDD
     // the sensed voltage, which is below VDDMIN (0.8 V), so RESET stays low.
-    let v = reset_voltage(Box::new(VsupSwapped::new()), ["4", "5", "3", "6", "1", "2"], 0.55).unwrap();
+    let v = reset_voltage(
+        Box::new(VsupSwapped::new()),
+        ["4", "5", "3", "6", "1", "2"],
+        0.55,
+    )
+    .unwrap();
     assert!(v.abs() < 0.01, "RESET {v} V");
 
     // Without the PSpice mode, ngspice does not know `IF`.
-    let error = reset_voltage(Box::new(VsupNgspice::new()), ["4", "5", "3", "6", "1", "2"], 0.55).unwrap_err();
-    assert!(error.contains("no such function 'if'") || error.contains("syntax error"), "{error}");
+    let error = reset_voltage(
+        Box::new(VsupNgspice::new()),
+        ["4", "5", "3", "6", "1", "2"],
+        0.55,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("no such function 'if'") || error.contains("syntax error"),
+        "{error}"
+    );
 }
 
 /// The golden netlists of a circuit with the supervisor, with the crate directory written as
@@ -280,12 +317,21 @@ fn test_golden() {
         .write(&mut out)
         .unwrap();
     check_golden("spice_part.net", &String::from_utf8(out).unwrap());
-    check_golden("spice_part.cir", &netlist.to_spice().unwrap().with_title("spice_part").to_string());
+    check_golden(
+        "spice_part.cir",
+        &netlist
+            .to_spice()
+            .unwrap()
+            .with_title("spice_part")
+            .to_string(),
+    );
 }
 
 fn check_golden(name: &str, actual: &str) {
     let actual = actual.replace(env!("CARGO_MANIFEST_DIR"), "${CARGO_MANIFEST_DIR}");
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
     if std::env::var_os("UPDATE_GOLDEN").is_some() {
         std::fs::write(&path, actual).unwrap();
         return;

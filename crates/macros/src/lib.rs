@@ -65,9 +65,20 @@ pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         Err(error) => return error.to_compile_error().into(),
     };
     resolver.symbol_dir = input.symbol_dir.as_ref().map(|s| PathBuf::from(s.value()));
-    resolver.footprint_dir = input.footprint_dir.as_ref().map(|s| PathBuf::from(s.value()));
+    resolver.footprint_dir = input
+        .footprint_dir
+        .as_ref()
+        .map(|s| PathBuf::from(s.value()));
     let result = load_part(&input.options, &mut resolver);
-    expand(&input.header, &input.spans, OptionKey::Symbol, &input.options.common.pins, result, &resolver).into()
+    expand(
+        &input.header,
+        &input.spans,
+        OptionKey::Symbol,
+        &input.options.common.pins,
+        result,
+        &resolver,
+    )
+    .into()
 }
 
 /// Generates a simulation-only part type from a `.subckt` or `.model` of a SPICE library.
@@ -110,7 +121,15 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         element: 0,
         field: cuprite_wire_kicad_lib::binding::BindingField::Name,
     };
-    expand(&input.header, &input.spans, name, &input.options.common.pins, result, &resolver).into()
+    expand(
+        &input.header,
+        &input.spans,
+        name,
+        &input.options.common.pins,
+        result,
+        &resolver,
+    )
+    .into()
 }
 
 fn resolver(sim_library_dir: Option<&syn::LitStr>) -> syn::Result<Resolver> {
@@ -158,7 +177,12 @@ fn tracking(resolver: &Resolver) -> TokenStream {
     }
 }
 
-fn generate(header: &input::Header, renamed: &[(String, String)], part: &PartDef, tracking: TokenStream) -> TokenStream {
+fn generate(
+    header: &input::Header,
+    renamed: &[(String, String)],
+    part: &PartDef,
+    tracking: TokenStream,
+) -> TokenStream {
     let krate = quote!(::cuprite_wire);
     let attrs = &header.attrs;
     let vis = &header.vis;
@@ -209,7 +233,10 @@ fn generate(header: &input::Header, renamed: &[(String, String)], part: &PartDef
     });
 
     let ref_base = &part.ref_base;
-    let groups = part.internal_connections.iter().map(|group| quote!(vec![#(#group.to_string()),*]));
+    let groups = part
+        .internal_connections
+        .iter()
+        .map(|group| quote!(vec![#(#group.to_string()),*]));
     let kicad_fn = kicad_fn(part, &krate);
     let spice_fn = spice_fn(part, &krate);
 
@@ -297,9 +324,15 @@ fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let body = match &part.spice {
         SpiceDef::Unsupported => return None,
         SpiceDef::Excluded => quote!(#krate::spice::SpicePartInfo::Excluded),
-        SpiceDef::Elements { elements, unused_pins } => {
-            let elements = elements.iter().map(|element| element_tokens(element, krate));
-            let unused = (!unused_pins.is_empty()).then(|| quote!(.with_unused_pins([#(#unused_pins),*])));
+        SpiceDef::Elements {
+            elements,
+            unused_pins,
+        } => {
+            let elements = elements
+                .iter()
+                .map(|element| element_tokens(element, krate));
+            let unused =
+                (!unused_pins.is_empty()).then(|| quote!(.with_unused_pins([#(#unused_pins),*])));
             quote! {
                 #krate::spice::SpicePartInfo::elements([#(#elements),*])
                 #unused
@@ -369,10 +402,16 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 .footprint
                 .as_ref()
                 .map_or("no footprint".to_string(), |id| format!("footprint `{id}`"));
-            lines.push(format!("Generated from the KiCad symbol `{}` with {footprint}.", kicad.symbol));
+            lines.push(format!(
+                "Generated from the KiCad symbol `{}` with {footprint}.",
+                kicad.symbol
+            ));
             if let Some(description) = &kicad.description {
                 lines.push(String::new());
-                lines.push(format!("Symbol description: {}", description.replace('\n', " ")));
+                lines.push(format!(
+                    "Symbol description: {}",
+                    description.replace('\n', " ")
+                ));
             }
             if let Some(datasheet) = &kicad.datasheet {
                 lines.push(String::new());
@@ -380,23 +419,42 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
             }
             lines.push(String::new());
             let port_column = !models.is_empty();
-            lines.push(format!("| Pin ID | Pad | Name | Type | Unit |{}", if port_column { " SPICE port |" } else { "" }));
-            lines.push(format!("|---|---|---|---|---|{}", if port_column { "---|" } else { "" }));
+            lines.push(format!(
+                "| Pin ID | Pad | Name | Type | Unit |{}",
+                if port_column { " SPICE port |" } else { "" }
+            ));
+            lines.push(format!(
+                "|---|---|---|---|---|{}",
+                if port_column { "---|" } else { "" }
+            ));
             for pin in &part.pins {
-                let unit = if pin.unit == 0 { "-".to_string() } else { pin.unit.to_string() };
-                let port = if port_column { format!(" {} |", ports_of(&pin.id)) } else { String::new() };
+                let unit = if pin.unit == 0 {
+                    "-".to_string()
+                } else {
+                    pin.unit.to_string()
+                };
+                let port = if port_column {
+                    format!(" {} |", ports_of(&pin.id))
+                } else {
+                    String::new()
+                };
                 lines.push(format!(
                     "| `{}` | {} | {} | {} | {} |{port}",
                     pin.id,
                     pin.pad,
-                    pin.name.as_deref().map_or("".into(), |n| format!("`{}`", escape(n))),
+                    pin.name
+                        .as_deref()
+                        .map_or("".into(), |n| format!("`{}`", escape(n))),
                     pin.electrical_type.as_str(),
                     unit
                 ));
             }
         }
         None => {
-            lines.push("Generated from a SPICE model, for simulation only (`kicad()` returns `None`).".into());
+            lines.push(
+                "Generated from a SPICE model, for simulation only (`kicad()` returns `None`)."
+                    .into(),
+            );
             lines.push(String::new());
             lines.push("| Pin ID | Port |".into());
             lines.push("|---|---|".into());
@@ -412,12 +470,28 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
             Some(model_type) => format!("`.model` of type `{model_type}`"),
             None => "`.subckt`".to_string(),
         };
-        let suffix = if element.suffix.is_empty() { String::new() } else { format!(" (element {})", element.suffix) };
-        lines.push(format!("SPICE model{suffix}: {kind} `{}` in `{}`.", info.name, info.path.display()));
+        let suffix = if element.suffix.is_empty() {
+            String::new()
+        } else {
+            format!(" (element {})", element.suffix)
+        };
+        lines.push(format!(
+            "SPICE model{suffix}: {kind} `{}` in `{}`.",
+            info.name,
+            info.path.display()
+        ));
         lines.push(String::new());
-        lines.push(format!("Dialect: {} ({}).", info.dialect.as_str(), info.dialect_reason));
+        lines.push(format!(
+            "Dialect: {} ({}).",
+            info.dialect.as_str(),
+            info.dialect_reason
+        ));
         if !info.params.is_empty() {
-            let params: Vec<String> = info.params.iter().map(|(k, v)| format!("`{k}={v}`")).collect();
+            let params: Vec<String> = info
+                .params
+                .iter()
+                .map(|(k, v)| format!("`{k}={v}`"))
+                .collect();
             lines.push(String::new());
             lines.push(format!("Parameters and defaults: {}.", params.join(", ")));
         }
