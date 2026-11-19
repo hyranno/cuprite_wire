@@ -211,4 +211,4 @@ constructor argument, the op-amps' models are inlined). To import their netlists
   `--symbol-dir crates/kicad_lib/tests/fixtures/symbols`) `tests/golden/spice_part.net` are the same
   as KiCad's.
 - `python3 tools/check_netlist_footprints.py` and `tools/check_netlist_import.py` (see
-  `doc/kicad_netlist_usage.md`) also find the footprints of `libs/`.
+  `doc/kicad_netlist_usage.md`) also find the footprints of `libs/` and `examples/*/libs/`.

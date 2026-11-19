@@ -4,7 +4,8 @@ This document explains how to export a circuit described with cuprite_wire as a 
 simulate it with ngspice from Rust. See `doc/spice_netlist_format.md` for the SPICE format and
 `doc/kicad_netlist_usage.md` for describing circuits (parts, labels, subcircuits, errors), which
 works the same way for both formats.
-A complete example is in `examples/spice_rc_filter.rs` (`cargo run --example spice_rc_filter`).
+A complete example is in `examples/spice_rc_filter.rs` (`cargo run --example spice_rc_filter`);
+`examples/sensor_frontend/` tests each subcircuit of a board with a test bench.
 
 ## 1. Pipeline
 

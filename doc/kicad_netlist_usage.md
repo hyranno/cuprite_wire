@@ -3,7 +3,8 @@
 This document explains how to describe a circuit with cuprite_wire and export it as a KiCad 9
 netlist (`.net`) for pcbnew. See `doc/kicad_netlist_format.md` for the file format itself.
 A complete example is in `examples/kicad_rc_filter.rs`
-(`cargo run --example kicad_rc_filter > rc_filter.net`).
+(`cargo run --example kicad_rc_filter > rc_filter.net`); `examples/sensor_frontend/` shows a whole
+board with subcircuits, parts from its own libraries, and tests.
 
 ## 1. Pipeline
 
@@ -177,7 +178,7 @@ Checks based on the electrical types of pins (ERC) are a separate step, `Netlist
   review the diff. Do not add outputs generated from the KiCad demos (see the license notes in
   `doc/kicad_netlist_format.md`).
 - **Footprints and pads**: `python3 tools/check_netlist_footprints.py NETLIST...` checks with KiCad's
-  `pcbnew` Python module that every footprint exists in the installed libraries (or in `libs/`) and
+  `pcbnew` Python module that every footprint exists in the installed libraries (or in `libs/` and `examples/*/libs/`) and
   every `pin` is a pad of it.
 - **Import into pcbnew**: `python3 tools/check_netlist_import.py [--keep DIR] NETLIST...` imports
   each netlist with the real pcbnew GUI and checks the result. pcbnew's netlist reader is not
