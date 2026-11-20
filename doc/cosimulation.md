@@ -1,8 +1,9 @@
 # Co-simulation with Rust Models
 
-This document explains how to simulate a circuit together with a Rust model of a device that
-reads and drives it, such as the control logic of a microcontroller's firmware. It needs the
-`shared-ngspice` feature and the ngspice shared library (`libngspice0`); see
+This document explains how to simulate a circuit together with a model of a device that reads and
+drives it: a Rust model, such as the control logic of a microcontroller's firmware (sections 1-5),
+or a digital model compiled into a shared library, such as an HDL design (section 6).
+Rust models need the `shared-ngspice` feature and the ngspice shared library (`libngspice0`); see
 `doc/spice_netlist_usage.md` for test benches and running ngspice. A complete example is
 `examples/pwm_dac_feedback.rs`
 (`cargo run --example pwm_dac_feedback --features shared-ngspice`).
@@ -160,3 +161,35 @@ time in the process, and a crash of ngspice ends the test process.
 **Speed.** Every edge of an output adds time points. Simulating milliseconds of a fast PWM is
 quick (the example runs 3 ms with a 100 kHz PWM in a fraction of a second), but long stretches of
 firmware time are not: test the interval that matters, with the state the model starts from.
+
+## 6. Digital models in shared libraries (XSPICE `d_cosim`)
+
+`cuprite_wire::spice::xspice::DCosim` puts a digital model compiled into a shared library in the
+circuit, through ngspice's `d_cosim` code model. It needs no feature and runs with the CLI
+(`deck.run()`), so it fits HDL designs and digital models written in C. The library implements
+`Cosim_setup` of `cosim.h` (shipped with ngspice in `/usr/share/ngspice/scripts/src/ngspice/`).
+
+```rust
+use cuprite_wire::spice::{digital::*, xspice::DCosim};
+
+let counter = DCosim::new("/abs/path/libcounter.so")   // the `simulation` parameter
+    .with_sim_args(["8"])                               // `sim_args`, passed to the model
+    .input("clk", InputCharacteristics::cmos(3.3))      // input port 0
+    .output("q0", OutputCharacteristics::cmos(3.3))     // output port 0
+    .output("q1", OutputCharacteristics::cmos(3.3));    // output port 1
+let counter = bench.instantiate_part_named("counter", counter);
+```
+
+- The ports of the model are the inputs and the outputs in the order they are added; a model
+  without inputs gets `NULL`. Bidirectional ports and high impedance are not supported.
+- Each input has the load of its `InputCharacteristics` and an `adc_bridge` at its thresholds
+  (`in_low` = `threshold_low`, `in_high` = `threshold_high`; between them the model sees the unknown
+  state, without hysteresis). Each output has a `dac_bridge` from `low` to `high` with the rise and
+  fall times (unknown is the middle), behind the output resistance.
+- Voltages are relative to the `gnd` pin: the bridges work against the ground, so they are connected
+  through unity-gain sources (`EI_<pin>`, `EO_<pin>`).
+- `with_delay(seconds)` sets the delay of the model's outputs (`delay`, 1 ns by default),
+  `with_lib_args` the arguments of the library's shim (`lib_args`). Paths must be absolute.
+- The model runs at the time points of the analysis and at its input events: a model that changes
+  its outputs by itself (an internal clock) does so at the next time point, so give the analysis a
+  time step fine enough for it.

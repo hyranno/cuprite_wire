@@ -268,13 +268,20 @@ Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Comman
   library (`dlclose`) and loading it again prints the banner again and runs the next deck normally.
 - `remcirc` and `destroy all` free the circuit and the plots after a run.
 
-### 6.2 Node `gnd`
+### 6.2 Node `gnd` and XSPICE bridges
 
 Verified with ngspice 44.2:
 
 - A node named `gnd` is the ground (node 0) everywhere, also as a port of a subcircuit:
   in `.subckt sub gnd`, elements on `gnd` connect to the ground, not to the node the port is
   connected to. Generated subcircuits name their reference port `ref` instead.
+- `dac_bridge` ignores a differential output (`[%vd(out ref)]`): its output is relative to the
+  ground. cuprite_wire puts unity-gain `E` sources around the bridges instead.
+- `d_cosim` takes `NULL` for a missing port vector; an empty vector `[]` is an error
+  (`Array connection must have at least one port`). Its model parameters are `simulation`,
+  `sim_args`, `lib_args`, `delay`, `queue_size` and `irreversible`.
+- A model with `method = Normal` and no inputs is still stepped at every time point, with
+  `vtime` set to the time it may advance to.
 
 ### 6.3 Callbacks for co-simulation
 
