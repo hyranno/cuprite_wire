@@ -21,7 +21,7 @@ let simulation = netlist
     .directive(".options reltol=1e-4")
     .control(["ac dec 20 1 100k".to_string(), format!(r#"meas ac f3db WHEN vdb("{out}")=-3"#)])
     .run()?;                      // runs ngspice (section 5)
-let f3db = simulation.value("f3db");
+let f3db = simulation.value("f3db");   // Option<f64>; `expect_value` panics with the log instead
 ```
 
 - `to_spice()` returns `Err(CircuitErrors)` with **all** errors found, like `to_kicad()`.

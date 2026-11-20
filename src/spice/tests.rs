@@ -275,7 +275,7 @@ fn test_simulate_ac() {
     ]);
     let sim = deck.run().unwrap();
     let expected = 1.0 / (2.0 * std::f64::consts::PI * 10e3 * 100e-9);
-    let f3db = sim.value("f3db").unwrap();
+    let f3db = sim.expect_value("f3db");
     assert!(
         (f3db / expected - 1.0).abs() < 0.01,
         "f3db = {f3db}, expected {expected}"
@@ -337,12 +337,12 @@ fn test_simulate_operating_point() {
     ]);
     let sim = deck.run().unwrap();
     assert!(
-        (sim.value("mid").unwrap() - 7.5).abs() < 1e-6,
+        (sim.expect_value("mid") - 7.5).abs() < 1e-6,
         "{}",
         sim.log()
     );
     assert!(
-        (sim.value("current").unwrap() - 2.5e-3).abs() < 1e-9,
+        (sim.expect_value("current") - 2.5e-3).abs() < 1e-9,
         "{}",
         sim.log()
     );
@@ -372,7 +372,7 @@ fn test_simulate_subcircuit_model() {
         .deck()
         .control(["op", r#"let out = v("/OUT")"#, "print out"]);
     let sim = deck.run().unwrap();
-    let out = sim.value("out").unwrap();
+    let out = sim.expect_value("out");
     assert!((out - 1.0).abs() < 1e-3, "out = {out}");
 }
 
@@ -417,7 +417,7 @@ fn test_simulate_pspice_model() {
     );
     let sim = pspice.run().unwrap();
     assert!(
-        (sim.value("out").unwrap() - 5.0).abs() < 1e-6,
+        (sim.expect_value("out") - 5.0).abs() < 1e-6,
         "{}",
         sim.log()
     );

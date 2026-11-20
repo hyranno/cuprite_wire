@@ -135,7 +135,7 @@ mod tests {
             .deck()
             .control(["op", r#"let out = v("/OUT")"#, "print out"]);
         let sim = deck.run().unwrap();
-        sim.value("out").unwrap_or_else(|| panic!("{}", sim.log()))
+        sim.expect_value("out")
     }
 
     /// Channel B of the dual op-amp as a non-inverting amplifier with a gain of 11.

@@ -117,6 +117,13 @@ impl Simulation {
             value.split_whitespace().next()?.parse().ok()
         })
     }
+
+    /// [`Self::value`] for tests: panics with the log of ngspice if the value is not found.
+    #[track_caller]
+    pub fn expect_value(&self, name: &str) -> f64 {
+        self.value(name)
+            .unwrap_or_else(|| panic!("{name} not found in the output of ngspice:\n{}", self.log))
+    }
 }
 
 impl Drop for Simulation {
@@ -246,6 +253,27 @@ impl From<io::Error> for SimulationError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn simulation(log: &str) -> Simulation {
+        Simulation {
+            dir: std::env::temp_dir().join("cuprite_wire-no-such-run-dir"),
+            log: log.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_value() {
+        let sim = simulation("Note: ...\nf3db                =  1.591549e+03\n");
+        assert_eq!(sim.value("F3DB"), Some(1591.549));
+        assert_eq!(sim.expect_value("f3db"), 1591.549);
+        assert_eq!(sim.value("gain"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "gain not found in the output of ngspice:\nNote: ...")]
+    fn test_expect_value_panics_with_the_log() {
+        simulation("Note: ...\n").expect_value("gain");
+    }
 
     #[test]
     fn test_parse_table() {

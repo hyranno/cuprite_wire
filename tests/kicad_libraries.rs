@@ -186,14 +186,14 @@ fn test_simulate() {
             "print amp out",
         ]);
     let sim = deck.run().unwrap();
-    let amp = sim.value("amp").unwrap_or_else(|| panic!("{}", sim.log()));
+    let amp = sim.expect_value("amp");
     assert!(
         (amp - (0.2 - 0.01) * 11.0).abs() < 0.01,
         "amp = {amp}\n{}",
         sim.log()
     );
     // The transistor is on, so OUT is pulled low.
-    let out = sim.value("out").unwrap();
+    let out = sim.expect_value("out");
     assert!(out < 1.0, "out = {out}");
 }
 
