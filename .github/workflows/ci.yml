@@ -31,7 +31,7 @@ jobs:
       - run: rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --features shared-ngspice -- -D warnings
 
   test:
     name: test
@@ -42,11 +42,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # libngspice0 is the shared library of the shared-ngspice feature; ngspice does not depend on it.
       - name: Install ngspice and the KiCad libraries
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ngspice kicad-symbols kicad-footprints
+          apt-get install -y --no-install-recommends ngspice libngspice0 kicad-symbols kicad-footprints
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo test --workspace --features kicad-libraries
+      - run: cargo test --workspace --features kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored

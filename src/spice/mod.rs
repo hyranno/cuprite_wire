@@ -6,13 +6,17 @@ pub mod deck;
 pub mod digital;
 pub mod netlist;
 pub mod part;
+#[cfg(feature = "shared-ngspice")]
+pub mod shared;
 pub mod simulation;
 pub mod sources;
 
 pub use deck::SpiceDeck;
 pub use netlist::{GROUND, SpiceNetlist, spice_node_name};
 pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProblem};
-pub use simulation::{Ngspice, Simulation, SimulationError, Table};
+#[cfg(feature = "shared-ngspice")]
+pub use shared::SharedNgspice;
+pub use simulation::{Ngspice, Simulation, SimulationError, Simulator, Table};
 pub use sources::{Ammeter, IndependentSource, SourceKind, Waveform};
 
 #[cfg(test)]

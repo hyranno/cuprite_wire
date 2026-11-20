@@ -200,8 +200,28 @@ ground, ngspice falls back to gmin and source stepping and then to a transient o
 may report a plausible-looking result instead of failing. ERC (`doc/erc.md`) catches unconnected
 pins but not a missing DC path; check results against what the circuit can do.
 
-The devcontainer provides `ngspice`; the simulation tests need it. The output is checked against
-KiCad's SPICE export as described in `doc/dev/verifying.md`.
+**Shared library.** With the `shared-ngspice` feature, `SharedNgspice::default().run(&deck)` runs
+the same deck in the ngspice shared library (`libngspice.so.0`, loaded at run time; another file
+with `SharedNgspice { library }`) and returns the same `Simulation`. It is the backend for
+co-simulation with Rust models; plain runs should keep using the CLI:
+
+- The library has global state, so it runs one deck at a time in the process (other threads wait),
+  and a crash of ngspice takes the test process down. The CLI runs in parallel and isolated.
+- The run directory holds `deck.cir`, which `ngspice -b deck.cir` runs as the CLI would, and
+  `shared.cir`, the form the library runs: without `quit`, and with the relative output files of
+  `wrdata`, `write` and `wrs2p` made absolute, since the library runs in the working directory of
+  the process. Other commands writing files (`print ... > file`) need absolute paths. The run
+  directory must not contain whitespace or `"` (ngspice takes them literally).
+- The compatibility mode is set by `set ngbehavior=<mode>` (or `unset ngbehavior`) before the deck
+  is read.
+- After an error ngspice cannot recover from (it reports `cannot recover and awaits to be reset`),
+  the library is unloaded and loaded again for the next run.
+
+`Ngspice` and `SharedNgspice` implement the `Simulator` trait (`run(&deck)`), so a test can run on
+either. The simulation tests of the library run on both when the feature is enabled.
+
+The devcontainer provides `ngspice` and `libngspice0`; the simulation tests need them. The output is
+checked against KiCad's SPICE export as described in `doc/dev/verifying.md`.
 
 ## 6. Output
 

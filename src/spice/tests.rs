@@ -7,8 +7,8 @@ use crate::{
     error::CircuitErrorKind,
     naming::NetLabel,
     spice::{
-        Ammeter, IndependentSource, ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo, Table,
-        Waveform,
+        Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpiceNetlist,
+        SpicePartInfo, Table, Waveform,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
@@ -16,6 +16,40 @@ use crate::{
     },
     test_parts::{self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
 };
+
+/// Defines a module per test function, with a test running it on each [`Simulator`]:
+/// `cli` ([`Ngspice`]) and, with the `shared-ngspice` feature, `shared` ([`SharedNgspice`]).
+/// The backends must give the same results.
+///
+/// [`SharedNgspice`]: crate::spice::SharedNgspice
+macro_rules! on_each_simulator {
+    ($($name:ident),* $(,)?) => {$(
+        mod $name {
+            #[test]
+            fn cli() {
+                super::$name(&crate::spice::Ngspice::default());
+            }
+
+            #[cfg(feature = "shared-ngspice")]
+            #[test]
+            fn shared() {
+                super::$name(&crate::spice::SharedNgspice::default());
+            }
+        }
+    )*};
+}
+
+on_each_simulator!(
+    simulate_ac,
+    simulate_transient,
+    simulate_operating_point,
+    simulate_subcircuit_model,
+    simulate_pspice_model,
+    simulation_error,
+    simulate_digital_rc_load,
+    simulate_open_drain,
+    simulate_uart,
+);
 
 fn export(circuit: &CircuitBuilder) -> SpiceNetlist {
     circuit.build(&()).to_netlist().unwrap().to_spice().unwrap()
@@ -258,8 +292,7 @@ fn test_deck() {
 // Simulations.
 
 /// The -3 dB frequency of the RC filter is 1 / (2 pi R C).
-#[test]
-fn test_simulate_ac() {
+fn simulate_ac(simulator: &dyn Simulator) {
     let deck = export(&rc_filter_bench(
         IndependentSource::voltage(0.0).with_ac(1.0),
     ))
@@ -269,7 +302,7 @@ fn test_simulate_ac() {
         r#"meas ac f3db WHEN vdb("/OUT")=-3"#,
         r#"wrdata ac.txt vdb("/OUT") vp("/OUT")"#,
     ]);
-    let sim = deck.run().unwrap();
+    let sim = simulator.run(&deck).unwrap();
     let expected = 1.0 / (2.0 * std::f64::consts::PI * 10e3 * 100e-9);
     let f3db = sim.expect_value("f3db");
     assert!(
@@ -287,8 +320,7 @@ fn test_simulate_ac() {
 }
 
 /// The step response of the RC filter reaches 63.2% after one time constant (1 ms).
-#[test]
-fn test_simulate_transient() {
+fn simulate_transient(simulator: &dyn Simulator) {
     let step = Waveform::Pulse {
         initial: 0.0,
         pulsed: 1.0,
@@ -303,7 +335,7 @@ fn test_simulate_transient() {
     ))
     .deck()
     .control(["tran 10u 5m", r#"wrdata tran.txt v("/OUT")"#]);
-    let sim = deck.run().unwrap();
+    let sim = simulator.run(&deck).unwrap();
     let table = sim.table("tran.txt").unwrap();
     // ngspice writes the header without the quotes: `v(/OUT)`.
     assert_eq!(table.names(), ["time", "v(/OUT)"]);
@@ -312,8 +344,7 @@ fn test_simulate_transient() {
 }
 
 /// A divider with an ammeter: the operating point gives the node voltage and the current.
-#[test]
-fn test_simulate_operating_point() {
+fn simulate_operating_point(simulator: &dyn Simulator) {
     let mut circuit = CircuitBuilder::new();
     let v = circuit.instantiate_part(IndependentSource::voltage(10.0));
     let meter = circuit.instantiate_part(Box::new(Ammeter));
@@ -331,7 +362,7 @@ fn test_simulate_operating_point() {
         "let current = i(VM1)",
         "print mid current",
     ]);
-    let sim = deck.run().unwrap();
+    let sim = simulator.run(&deck).unwrap();
     assert!(
         (sim.expect_value("mid") - 7.5).abs() < 1e-6,
         "{}",
@@ -345,8 +376,7 @@ fn test_simulate_operating_point() {
 }
 
 /// A non-inverting amplifier with the op-amp's inline subcircuit model: gain 1 + 9k / 1k.
-#[test]
-fn test_simulate_subcircuit_model() {
+fn simulate_subcircuit_model(simulator: &dyn Simulator) {
     let mut circuit = CircuitBuilder::new();
     let amp = circuit.instantiate_part(Box::new(OpAmp));
     let feedback = circuit.instantiate_part(Box::new(Resistor("9k")));
@@ -367,7 +397,7 @@ fn test_simulate_subcircuit_model() {
     let deck = export(&circuit)
         .deck()
         .control(["op", r#"let out = v("/OUT")"#, "print out"]);
-    let sim = deck.run().unwrap();
+    let sim = simulator.run(&deck).unwrap();
     let out = sim.expect_value("out");
     assert!((out - 1.0).abs() < 1e-3, "out = {out}");
 }
@@ -379,8 +409,7 @@ E1 OUT 0 VALUE = { IF(V(IN) > 1 & V(IN) < 2, 5, 0) }
 ";
 
 /// A model marked as PSpice makes the deck run in ngspice's PSpice mode.
-#[test]
-fn test_simulate_pspice_model() {
+fn simulate_pspice_model(simulator: &dyn Simulator) {
     let deck = |model: ModelSource| {
         let mut circuit = CircuitBuilder::new();
         let window = circuit.instantiate_part(Box::new(CustomPart {
@@ -411,7 +440,7 @@ fn test_simulate_pspice_model() {
         text.starts_with(".title cuprite_wire\n* requires: set ngbehavior=psa (.spiceinit)\n"),
         "{text}"
     );
-    let sim = pspice.run().unwrap();
+    let sim = simulator.run(&pspice).unwrap();
     assert!(
         (sim.expect_value("out") - 5.0).abs() < 1e-6,
         "{}",
@@ -422,18 +451,17 @@ fn test_simulate_pspice_model() {
     assert_eq!(ngspice.netlist().ngbehavior(), None);
     assert!(!ngspice.to_string().contains("requires"));
     assert!(
-        ngspice.run().is_err(),
+        simulator.run(&ngspice).is_err(),
         "the default mode does not read the PSpice syntax"
     );
 }
 
 /// A deck that ngspice rejects is reported with its log.
-#[test]
-fn test_simulation_error() {
+fn simulation_error(simulator: &dyn Simulator) {
     let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
         .deck()
         .control(["op", r#"wrdata x.txt v("/nothing")"#]);
-    let error = deck.run().unwrap_err().to_string();
+    let error = simulator.run(&deck).unwrap_err().to_string();
     assert!(error.contains("no such vector"), "{error}");
 }
 
@@ -510,6 +538,7 @@ const LINE: &str = r#"v("/LINE")"#;
 /// A [`DigitalDriver`] and a [`DigitalLoad`] on the line `/LINE`, simulated for `stop` seconds;
 /// the table has the voltage of the line ([`LINE`]).
 fn simulate_line(
+    simulator: &dyn Simulator,
     driver: Box<DigitalDriver>,
     load: Box<DigitalLoad>,
     step: f64,
@@ -526,17 +555,17 @@ fn simulate_line(
         format!("tran {step:e} {stop:e}"),
         format!("wrdata line.txt {LINE}"),
     ]);
-    deck.run().unwrap().table("line.txt").unwrap()
+    simulator.run(&deck).unwrap().table("line.txt").unwrap()
 }
 
 /// A driver with 1 kohm output resistance into 1 nF: the rise follows the time constant (1 us),
 /// and the input reads `High` when it crosses 70 % of 3.3 V.
-#[test]
-fn test_simulate_digital_rc_load() {
+fn simulate_digital_rc_load(simulator: &dyn Simulator) {
     let output = OutputCharacteristics::cmos(3.3).with_resistance(1e3);
     let input = InputCharacteristics::cmos(3.3).with_capacitance(1e-9);
     let sent = DigitalSequence::new(Level::Low).at(1e-6, Level::High);
     let table = simulate_line(
+        simulator,
         DigitalDriver::new(output, sent),
         DigitalLoad::new(input.clone()),
         10e-9,
@@ -555,8 +584,7 @@ fn test_simulate_digital_rc_load() {
 
 /// An open-drain output with a 10 kohm pull-up and 100 pF: released (`HiZ`) at 1 us, it rises
 /// with the time constant of the pull-up (1 us); pulled low again at 5 us, it falls at once.
-#[test]
-fn test_simulate_open_drain() {
+fn simulate_open_drain(simulator: &dyn Simulator) {
     let output = OutputCharacteristics::cmos(3.3);
     let input = InputCharacteristics::cmos(3.3)
         .with_capacitance(100e-12)
@@ -565,6 +593,7 @@ fn test_simulate_open_drain() {
         .at(1e-6, Level::HiZ)
         .at(5e-6, Level::Low);
     let table = simulate_line(
+        simulator,
         DigitalDriver::new(output, sent),
         DigitalLoad::new(input.clone()),
         10e-9,
@@ -589,12 +618,12 @@ fn test_simulate_open_drain() {
 }
 
 /// UART frames read back at the middle of each bit.
-#[test]
-fn test_simulate_uart() {
+fn simulate_uart(simulator: &dyn Simulator) {
     let baud = 115_200.0;
     let sent = DigitalSequence::new(Level::High).uart(10e-6, baud, b"cuprite!");
     let input = InputCharacteristics::cmos(3.3);
     let table = simulate_line(
+        simulator,
         DigitalDriver::new(OutputCharacteristics::cmos(3.3), sent.clone()),
         DigitalLoad::new(input.clone()),
         100e-9,
@@ -606,4 +635,74 @@ fn test_simulate_uart() {
         assert_eq!(read.level_at(t), sent.level_at(t), "bit {bit}");
     }
     assert_eq!(read.events().len(), sent.events().len());
+}
+
+/// The shared library gives the same table and printed values as the CLI, and its run directory
+/// holds both forms of the deck.
+#[cfg(feature = "shared-ngspice")]
+#[test]
+fn test_shared_library_matches_cli() {
+    use crate::spice::{Ngspice, SharedNgspice};
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .deck()
+        .control([
+            "op",
+            r#"print v("/OUT")"#,
+            "tran 10u 2m uic",
+            r#"wrdata tran.txt v("/OUT")"#,
+            r#"meas tran half WHEN v("/OUT")=0.5"#,
+        ]);
+    let cli = Ngspice::default().run(&deck).unwrap();
+    let shared = SharedNgspice::default().run(&deck).unwrap();
+    assert_eq!(
+        shared.table("tran.txt").unwrap(),
+        cli.table("tran.txt").unwrap()
+    );
+    assert_eq!(shared.value("half"), cli.value("half"));
+    assert!(shared.value("half").is_some(), "{}", shared.log());
+    assert_eq!(shared.value("v(/out)"), Some(1.0), "{}", shared.log());
+    assert_eq!(
+        std::fs::read_to_string(shared.dir().join("deck.cir")).unwrap(),
+        deck.to_string()
+    );
+    let library_deck = std::fs::read_to_string(shared.dir().join("shared.cir")).unwrap();
+    let tran = shared.dir().join("tran.txt");
+    assert!(
+        library_deck.contains(&format!(r#"wrdata {} v("/OUT")"#, tran.display())),
+        "{library_deck}"
+    );
+    assert!(!library_deck.contains("quit"), "{library_deck}");
+}
+
+/// After an error ngspice cannot recover from (a syntax error in an expression), the library is
+/// loaded again and the next run succeeds.
+#[cfg(feature = "shared-ngspice")]
+#[test]
+fn test_shared_library_recovers() {
+    use crate::spice::SharedNgspice;
+    let simulator = SharedNgspice::default();
+    let deck = |args: &str| {
+        let mut circuit = CircuitBuilder::new();
+        let element = SpiceElement::new('B', ["1", "2"], args);
+        let source = circuit.instantiate_part(Box::new(CustomPart {
+            ref_base_name: "B",
+            spice: Some(SpicePartInfo::element(element)),
+            ..CustomPart::valid()
+        }));
+        let load = circuit.instantiate_part(Box::new(Resistor("1k")));
+        circuit.connect(source["1"], load["1"]);
+        circuit.label(source["1"], NetLabel::local("OUT"));
+        circuit.label(source["2"], NetLabel::global("GND"));
+        circuit.label(load["2"], NetLabel::global("GND"));
+        export(&circuit)
+            .deck()
+            .control(["op", r#"let out = v("/OUT")"#, "print out"])
+    };
+    let error = simulator
+        .run(&deck("V = { 1 + * 2 }"))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("cannot recover"), "{error}");
+    let sim = simulator.run(&deck("V = { 1 + 2 }")).unwrap();
+    assert_eq!(sim.expect_value("out"), 3.0);
 }

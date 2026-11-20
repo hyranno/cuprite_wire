@@ -249,6 +249,25 @@ Notes (verified with ngspice 44.2):
 KiCad copies `.control` blocks from schematic text items verbatim; cuprite_wire tests can instead
 append a generated control block to the netlist body.
 
+### 6.1 The shared library (libngspice)
+
+Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Command`):
+
+- `source <path>` reads a deck and runs its `.control` block, as `ngspice -b` does. `quit` in the
+  block calls the `ControlledExit` callback instead of returning, so a deck for the library has none.
+- The library runs in the working directory of the process (`cd` would change it for every thread),
+  so relative `wrdata` paths land there. Paths with quotes are taken literally (`"a b/x.txt"`
+  fails with `"a b/x.txt": No such file or directory`, which is not an `Error` line), so paths
+  with whitespace cannot be written.
+- `set ngbehavior=psa` before `source` selects the mode (`Note: Compatibility modes selected: ps a`),
+  and `unset ngbehavior` goes back to the default mode for the next deck. `set ngbehavior=` (empty)
+  is an error.
+- Output arrives line by line in the `SendChar` callback, prefixed with `stdout ` or `stderr `.
+- A syntax error in an expression prints `Error: ngspice.dll cannot recover and awaits to be reset or
+  detached`, calls `ControlledExit` (status 1) and makes `ngSpice_Command` return 1. Unloading the
+  library (`dlclose`) and loading it again prints the banner again and runs the next deck normally.
+- `remcirc` and `destroy all` free the circuit and the plots after a run.
+
 ## 7. Minimal form
 
 ```spice
