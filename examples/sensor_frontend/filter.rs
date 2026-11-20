@@ -7,10 +7,7 @@ use cuprite_wire::{
 };
 use petgraph::graph::NodeIndex;
 
-use crate::{
-    parts::RrioOpAmp,
-    ports::{add_interface, instantiate},
-};
+use crate::parts::RrioOpAmp;
 
 /// Unity-gain Sallen-Key second-order low-pass filter: 10k, 10k, 22n (feedback) and 10n (to
 /// `vref`), a natural frequency of 1.07 kHz and a Q of 0.74 (about Butterworth).
@@ -30,7 +27,8 @@ pub struct LowPassPorts {
 impl LowPass {
     #[track_caller]
     pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> LowPassPorts {
-        let [input, vref, vcc, gnd, output] = instantiate(circuit, name, self);
+        let [input, vref, vcc, gnd, output] =
+            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
         LowPassPorts {
             input,
             vref,
@@ -46,7 +44,7 @@ impl SubcircuitGenerator for LowPass {
 
     fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
         let mut c = CircuitBuilder::new();
-        let [input, vref, vcc, gnd, output] = add_interface(&mut c);
+        let [input, vref, vcc, gnd, output] = c.add_interface();
         let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
         let r2 = c.instantiate_part_named("r2", Box::new(Resistor0603::new("10k")));
         let c_feedback =
@@ -79,13 +77,11 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
+        subcircuit::interface,
     };
 
     use super::*;
-    use crate::{
-        bench::{Bench, assert_near, value},
-        ports::interface,
-    };
+    use crate::bench::{Bench, assert_near, value};
 
     #[test]
     fn erc() {

@@ -7,10 +7,7 @@ use cuprite_wire::{
 };
 use petgraph::graph::NodeIndex;
 
-use crate::{
-    parts::RrioOpAmp,
-    ports::{add_interface, instantiate},
-};
+use crate::parts::RrioOpAmp;
 
 /// Divides the supply by two, filters it and buffers it with an op-amp.
 ///
@@ -27,7 +24,8 @@ pub struct MidSupplyPorts {
 impl MidSupply {
     #[track_caller]
     pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> MidSupplyPorts {
-        let [vcc, gnd, vref] = instantiate(circuit, name, self);
+        let [vcc, gnd, vref] =
+            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
         MidSupplyPorts { vcc, gnd, vref }
     }
 }
@@ -37,7 +35,7 @@ impl SubcircuitGenerator for MidSupply {
 
     fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
         let mut c = CircuitBuilder::new();
-        let [vcc, gnd, vref] = add_interface(&mut c);
+        let [vcc, gnd, vref] = c.add_interface();
         let upper = c.instantiate_part_named("r_upper", Box::new(Resistor0603::new("100k")));
         let lower = c.instantiate_part_named("r_lower", Box::new(Resistor0603::new("100k")));
         let filter = c.instantiate_part_named("c_filter", Box::new(Capacitor0603::new("1u")));
@@ -69,13 +67,11 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
+        subcircuit::interface,
     };
 
     use super::*;
-    use crate::{
-        bench::{Bench, assert_near, value},
-        ports::interface,
-    };
+    use crate::bench::{Bench, assert_near, value};
 
     #[test]
     fn erc() {
