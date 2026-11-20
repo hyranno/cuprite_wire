@@ -81,7 +81,7 @@ fn follower_circuit(power_flags: bool) -> CircuitBuilder {
         output,
         vcc,
         gnd,
-    } = circuit.instantiate_subcircuit_named("f", Follower, |_: &()| ());
+    } = circuit.instantiate_subcircuit_named("f", Follower);
     circuit.virtual_pin(input, PinType::Output, "signal");
     circuit.label(output, NetLabel::global("OUT"));
     circuit.label(vcc, NetLabel::global("VCC"));

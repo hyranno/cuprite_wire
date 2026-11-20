@@ -80,7 +80,7 @@ let r = circuit.instantiate_part(Box::new(resistor));          // automatic name
 let c = circuit.instantiate_part_named("c_bypass", Box::new(capacitor));
 circuit.connect(node, r["1"]);
 circuit.label(c["2"], NetLabel::global("GND"));
-let amp = circuit.instantiate_subcircuit_named("amp_left", Follower, |o| o.clone());
+let amp = circuit.instantiate_subcircuit_named("amp_left", Follower);
 circuit.connect(amp.output, node);
 ```
 
@@ -109,8 +109,16 @@ impl SubcircuitGenerator for Follower {
 
 `Interface` is also implemented for arrays (`type Interface = [NodeIndex; 2]`) and for `()`.
 The same struct holding other values gives them per interface node, e.g. the pin types of
-`check_subcircuit` (`doc/erc.md` section 5). The generator is run when the circuit is built, with
-the options returned by the closure given to `instantiate_subcircuit*`.
+`check_subcircuit` (`doc/erc.md` section 5).
+
+The generator is run when the circuit is built. `instantiate_subcircuit` /
+`instantiate_subcircuit_named` give it the options the circuit is built with (its `Options` must be
+the same type, e.g. `()`); `instantiate_subcircuit_with` / `instantiate_subcircuit_named_with` take a
+function deriving its own options from them:
+
+```rust
+circuit.instantiate_subcircuit_named_with("amp", Amplifier, |board: &BoardOptions| board.amp.clone());
+```
 
 All of these record the calling source location with `#[track_caller]`, which is used in error
 messages (section 5).

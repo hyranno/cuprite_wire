@@ -96,7 +96,7 @@ mod tests {
         let mut bench = Bench::new(IndependentSource::voltage(5.0));
         let ports = bench
             .circuit
-            .instantiate_subcircuit_named("filter", LowPass, |o: &()| *o);
+            .instantiate_subcircuit_named("filter", LowPass);
         bench.circuit.connect(ports.vcc, bench.vcc);
         bench.circuit.connect(ports.gnd, bench.gnd);
         let vref = bench.source("vref", IndependentSource::voltage(2.5));

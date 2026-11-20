@@ -322,8 +322,8 @@ mod tests {
     #[test]
     fn test_golden_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let first = circuit.instantiate_subcircuit_named("stage1", RcStage, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit(RcStage, |o: &()| *o);
+        let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+        let second = circuit.instantiate_subcircuit(RcStage);
         circuit.connect(first[1], second[0]);
         circuit.label(first[0], NetLabel::local("IN"));
         let test_point = circuit.instantiate_part_named(
@@ -398,7 +398,7 @@ mod tests {
             interface: Self::Interface,
         ) {
             let [input, output] = interface;
-            let inner = circuit.instantiate_subcircuit_named("inner", Inner, |o: &()| *o);
+            let inner = circuit.instantiate_subcircuit_named("inner", Inner);
             let r_o = circuit.instantiate_part_named("o", Box::new(Resistor("3k")));
             circuit.connect(input, inner[0]);
             circuit.connect(inner[1], r_o["1"]);
@@ -411,8 +411,8 @@ mod tests {
     #[test]
     fn test_golden_nested_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let first = circuit.instantiate_subcircuit_named("outer", Outer, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit(Outer, |o: &()| *o);
+        let first = circuit.instantiate_subcircuit_named("outer", Outer);
+        let second = circuit.instantiate_subcircuit(Outer);
         let r_root = circuit.instantiate_part_named("root", Box::new(Resistor("10k")));
         circuit.label(r_root["1"], NetLabel::local("IN"));
         circuit.connect(r_root["1"], first[0]);

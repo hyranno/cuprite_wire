@@ -91,7 +91,7 @@ mod tests {
             let mut bench = Bench::new(IndependentSource::voltage(0.0).with_waveform(ramp));
             let ports = bench
                 .circuit
-                .instantiate_subcircuit_named("bias", MidSupply, |o: &()| *o);
+                .instantiate_subcircuit_named("bias", MidSupply);
             bench.circuit.connect(ports.vcc, bench.vcc);
             bench.circuit.connect(ports.gnd, bench.gnd);
             bench.probe(ports.vref, "VREF");

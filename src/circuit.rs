@@ -252,8 +252,34 @@ impl<B> CircuitBuilder<B> {
 
     /// Instantiates a subcircuit with an automatic name (`<base name>#<n>`) and returns its
     /// interface: new nodes in this circuit, connected to the subcircuit's interface nodes.
+    ///
+    /// The subcircuit is generated with the options this circuit is built with; use
+    /// [`Self::instantiate_subcircuit_with`] for a generator with other options.
     #[track_caller]
-    pub fn instantiate_subcircuit<G, F>(
+    pub fn instantiate_subcircuit<G>(&mut self, generator: G) -> G::Interface
+    where
+        B: Clone + 'static,
+        G: SubcircuitGenerator<Options = B> + 'static,
+    {
+        self.instantiate_subcircuit_impl(None, generator, B::clone)
+    }
+
+    /// Instantiates a subcircuit with an explicit name, used in hierarchical net names
+    /// (`/name/LABEL`) and as the key of the deterministic UUIDs of the parts inside it.
+    /// Returns its interface like [`Self::instantiate_subcircuit`].
+    #[track_caller]
+    pub fn instantiate_subcircuit_named<G>(&mut self, name: &str, generator: G) -> G::Interface
+    where
+        B: Clone + 'static,
+        G: SubcircuitGenerator<Options = B> + 'static,
+    {
+        self.instantiate_subcircuit_impl(Some(name), generator, B::clone)
+    }
+
+    /// [`Self::instantiate_subcircuit`] for a generator with its own options:
+    /// `options_for_generator` derives them from the options this circuit is built with.
+    #[track_caller]
+    pub fn instantiate_subcircuit_with<G, F>(
         &mut self,
         generator: G,
         options_for_generator: F,
@@ -266,11 +292,10 @@ impl<B> CircuitBuilder<B> {
         self.instantiate_subcircuit_impl(None, generator, options_for_generator)
     }
 
-    /// Instantiates a subcircuit with an explicit name, used in hierarchical net names
-    /// (`/name/LABEL`) and as the key of the deterministic UUIDs of the parts inside it.
-    /// Returns its interface like [`Self::instantiate_subcircuit`].
+    /// [`Self::instantiate_subcircuit_named`] for a generator with its own options, like
+    /// [`Self::instantiate_subcircuit_with`].
     #[track_caller]
-    pub fn instantiate_subcircuit_named<G, F>(
+    pub fn instantiate_subcircuit_named_with<G, F>(
         &mut self,
         name: &str,
         generator: G,
@@ -629,8 +654,7 @@ mod tests {
     impl TestSubcircuitGenerator1 {
         #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator1Pins {
-            let [pin1, pin2] =
-                circuit.instantiate_subcircuit(TestSubcircuitGenerator1, |options: &()| *options);
+            let [pin1, pin2] = circuit.instantiate_subcircuit(TestSubcircuitGenerator1);
             TestSubcircuitGenerator1Pins { pin1, pin2 }
         }
     }
@@ -664,8 +688,7 @@ mod tests {
     impl TestSubcircuitGenerator2 {
         #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestSubcircuitGenerator2Pins {
-            let [pin1, pin2] =
-                circuit.instantiate_subcircuit(TestSubcircuitGenerator2, |options: &()| *options);
+            let [pin1, pin2] = circuit.instantiate_subcircuit(TestSubcircuitGenerator2);
             TestSubcircuitGenerator2Pins { pin1, pin2 }
         }
     }
@@ -699,12 +722,12 @@ mod tests {
             interface: Self::Interface,
         ) {
             let [first, second] = interface;
-            let [inner_first, inner_second] =
-                circuit.instantiate_subcircuit(LeafOptionsGenerator, |options: &NestedOptions| {
-                    LeafOptions {
-                        part_count: options.part_count,
-                    }
-                });
+            let [inner_first, inner_second] = circuit.instantiate_subcircuit_with(
+                LeafOptionsGenerator,
+                |options: &NestedOptions| LeafOptions {
+                    part_count: options.part_count,
+                },
+            );
             circuit.connect(first, inner_first);
             circuit.connect(second, inner_second);
         }
@@ -732,7 +755,7 @@ mod tests {
     #[test]
     fn test_generator_specific_options_expand_recursively() {
         let mut circuit = CircuitBuilder::<BuildOptions>::new();
-        circuit.instantiate_subcircuit(NestedOptionsGenerator, |options: &BuildOptions| {
+        circuit.instantiate_subcircuit_with(NestedOptionsGenerator, |options: &BuildOptions| {
             NestedOptions {
                 part_count: options.part_count,
             }
@@ -921,7 +944,7 @@ mod tests {
         let part_line = line!() + 1;
         let _ = TestPart::instantiate(&mut circuit);
         let subcircuit_line = line!() + 1;
-        circuit.instantiate_subcircuit(TracedSubcircuitGenerator, |o: &()| *o);
+        circuit.instantiate_subcircuit(TracedSubcircuitGenerator);
         let node_line = line!() + 1;
         let node = circuit.add_node();
         let circuit = circuit.build(&());
@@ -1029,9 +1052,8 @@ mod tests {
     fn test_labels_connect_nets() {
         let mut circuit = CircuitBuilder::new();
         // U1 is the top-level part; U2, U3 / U4, U5 are inside the subcircuits.
-        let left =
-            circuit.instantiate_subcircuit_named("left", LabeledSubcircuitGenerator, |o: &()| *o);
-        circuit.instantiate_subcircuit_named("right", LabeledSubcircuitGenerator, |o: &()| *o);
+        let left = circuit.instantiate_subcircuit_named("left", LabeledSubcircuitGenerator);
+        circuit.instantiate_subcircuit_named("right", LabeledSubcircuitGenerator);
         let u5 = TestPart::instantiate(&mut circuit);
         circuit.label(u5.pin1, NetLabel::global("VCC"));
         circuit.label(u5.pin2, NetLabel::local("OUT"));
@@ -1124,11 +1146,11 @@ mod tests {
             _interface: Self::Interface,
         ) {
             let first = line!() + 1;
-            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, |o: &()| *o);
+            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1);
             let second = line!() + 1;
-            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1, |o: &()| *o);
+            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1);
             let hash = line!() + 1;
-            circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1, |o: &()| *o);
+            circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1);
             let node = circuit.add_node();
             let label = line!() + 1;
             circuit.label(node, NetLabel::local(""));
@@ -1140,7 +1162,7 @@ mod tests {
     fn test_invalid_names_are_reported_with_traces() {
         let mut circuit = CircuitBuilder::new();
         let outer = line!() + 1;
-        circuit.instantiate_subcircuit(BadNamesGenerator, |o: &()| *o);
+        circuit.instantiate_subcircuit(BadNamesGenerator);
         let circuit = circuit.build(&());
         let [first, second, hash, label] = BAD_NAME_LINES.lock().unwrap()[..] else {
             panic!()
@@ -1206,11 +1228,7 @@ mod tests {
             if extra_part {
                 circuit.instantiate_part(Box::new(MultiGndPart));
             }
-            circuit.instantiate_subcircuit_named(
-                "sub",
-                NamedPartsGenerator { reversed },
-                |o: &()| *o,
-            );
+            circuit.instantiate_subcircuit_named("sub", NamedPartsGenerator { reversed });
             circuit.build(&())
         };
 
@@ -1284,9 +1302,9 @@ mod tests {
     #[test]
     fn test_instantiate_subcircuit_keeps_the_order_of_an_array() {
         let mut circuit = CircuitBuilder::new();
-        let [first, second] = circuit.instantiate_subcircuit(InterfaceGenerator, |o: &()| *o);
+        let [first, second] = circuit.instantiate_subcircuit(InterfaceGenerator);
         let [named_first, named_second] =
-            circuit.instantiate_subcircuit_named("b", InterfaceGenerator, |o: &()| *o);
+            circuit.instantiate_subcircuit_named("b", InterfaceGenerator);
         let names: Vec<_> = circuit
             .subcircuits
             .iter()
@@ -1328,7 +1346,7 @@ mod tests {
     #[test]
     fn test_instantiate_subcircuit_with_a_derived_interface() {
         let mut circuit = CircuitBuilder::new();
-        let ports = circuit.instantiate_subcircuit(CrossedGenerator, |o: &()| *o);
+        let ports = circuit.instantiate_subcircuit(CrossedGenerator);
         let circuit = circuit.build(&());
         assert_eq!(pin_on(&circuit, ports.to_pin1), "pin1");
         assert_eq!(pin_on(&circuit, ports.to_pin2), "pin2");

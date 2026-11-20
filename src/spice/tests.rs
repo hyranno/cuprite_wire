@@ -47,8 +47,8 @@ fn test_golden_rc_filter() {
 #[test]
 fn test_golden_hierarchy() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, |o: &()| *o);
-    let second = circuit.instantiate_subcircuit(RcStage, |o: &()| *o);
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let second = circuit.instantiate_subcircuit(RcStage);
     circuit.connect(first[1], second[0]);
     let v = circuit.instantiate_part(IndependentSource::voltage(1.0));
     circuit.connect(v[IndependentSource::P], first[0]);
@@ -456,8 +456,8 @@ fn test_parts_without_spice_model_mix_with_kicad() {
 #[test]
 fn test_golden_kicad_pair() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, |o: &()| *o);
-    let second = circuit.instantiate_subcircuit(RcStage, |o: &()| *o);
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let second = circuit.instantiate_subcircuit(RcStage);
     let r_in = circuit.instantiate_part_named("input", Box::new(Resistor("100")));
     circuit.label(r_in["1"], NetLabel::local("I/O"));
     // An unnamed net between two parts in the root.

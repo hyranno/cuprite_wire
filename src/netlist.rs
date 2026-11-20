@@ -512,8 +512,8 @@ mod tests {
     #[test]
     fn test_hierarchical_names() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let first = circuit.instantiate_subcircuit_named("first", Divider, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit_named("second", Divider, |o: &()| *o);
+        let first = circuit.instantiate_subcircuit_named("first", Divider);
+        let second = circuit.instantiate_subcircuit_named("second", Divider);
         circuit.connect(first[1], second[0]);
         // A name in the outer circuit is preferred to one inside the subcircuit.
         circuit.label(first[0], NetLabel::local("ZZZ"));

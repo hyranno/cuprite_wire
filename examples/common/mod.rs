@@ -37,8 +37,8 @@ impl SubcircuitGenerator for RcStage {
 /// Returns the circuit and its input and output nodes.
 pub fn two_stage_filter() -> (CircuitBuilder, NodeIndex, NodeIndex) {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, |o: &()| *o);
-    let second = circuit.instantiate_subcircuit_named("stage2", RcStage, |o: &()| *o);
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let second = circuit.instantiate_subcircuit_named("stage2", RcStage);
     circuit.connect(first[1], second[0]);
     let input = first[0];
     circuit.label(input, NetLabel::local("IN"));
