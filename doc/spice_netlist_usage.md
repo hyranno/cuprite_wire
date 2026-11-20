@@ -82,9 +82,11 @@ Analyses and stimuli belong to the test, not to the circuit:
 
 - Put the circuit under test in a **test bench circuit** as a subcircuit (or build it directly in
   the bench), and add simulation-only parts from `cuprite_wire::spice`:
-  - `IndependentSource::voltage(dc)` / `IndependentSource::current(dc)` with pins `p` and `n`,
+  - `IndependentSource::voltage(dc)` / `IndependentSource::current(dc)` with pins `p` and `n`
+    (`IndependentSource::P` / `IndependentSource::N`),
     `.with_ac(magnitude)` and `.with_waveform(Waveform::sin(..) | Waveform::Pulse { .. } | Waveform::Pwl(..))`.
-  - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` is the vector `i(VM1)`.
+  - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` (`Ammeter::P` / `Ammeter::N`)
+    is the vector `i(VM1)`.
 
   These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
   under test still can.

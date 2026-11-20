@@ -167,11 +167,11 @@ fn test_golden() {
 fn test_simulate() {
     let mut bench = circuit();
     let supply = bench.instantiate_part_named("supply", IndependentSource::voltage(5.0));
-    bench.label(supply["p"], NetLabel::global("+5V"));
-    bench.label(supply["n"], NetLabel::global("GND"));
+    bench.label(supply[IndependentSource::P], NetLabel::global("+5V"));
+    bench.label(supply[IndependentSource::N], NetLabel::global("GND"));
     let input = bench.instantiate_part_named("input", IndependentSource::voltage(0.2));
-    bench.label(input["p"], NetLabel::local("IN"));
-    bench.label(input["n"], NetLabel::global("GND"));
+    bench.label(input[IndependentSource::P], NetLabel::local("IN"));
+    bench.label(input[IndependentSource::N], NetLabel::global("GND"));
     let deck = bench
         .build(&())
         .to_netlist()
