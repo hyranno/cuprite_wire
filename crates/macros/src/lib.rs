@@ -58,7 +58,7 @@ use quote::{format_ident, quote};
 /// | `symbol_dir`, `footprint_dir` | library directories, relative to the crate | `$KICAD9_SYMBOL_DIR` / `$KICAD9_FOOTPRINT_DIR`, else `/usr/share/kicad/...` |
 /// | `sim_library_dir` | base of relative `Sim.Library` / `sim.library` paths, relative to the crate | the crate |
 ///
-/// See `doc/kicad_part_macro.md` for details.
+/// See the guide [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) for details.
 #[proc_macro]
 pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as input::PartInput);
@@ -110,7 +110,7 @@ pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// | `dialect` | `auto`, `ngspice`, `pspice` or `ltspice` | `auto` (detected from the library) |
 /// | `sim_model` | `include` or `inline` | `include` |
 ///
-/// See `doc/spice_part_macro.md` for details.
+/// See the guide [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) for details.
 #[proc_macro]
 pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = syn::parse_macro_input!(input as input::SpicePartInput);

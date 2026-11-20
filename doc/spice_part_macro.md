@@ -207,11 +207,4 @@ so it is only read from that directory (e.g. the git-ignored `vendor_models.loca
 
 ## 7. Verifying
 
-- `tests/spice_part.rs` generates parts from the test model, checks that the nodes follow the
-  `.subckt` order rather than the pin numbers, and simulates the supervisor in the PSpice mode:
-  swapping two pins in the mapping changes the result, and without the PSpice mode ngspice
-  rejects the model.
-- `python3 tools/compare_kicad_cli_netlist.py --library-symbols [--spice] --symbol-dir
-  crates/kicad_lib/tests/fixtures/symbols tests/golden/spice_part.net` puts the `Sim.*` fields of
-  the netlist on the library symbol and checks that KiCad derives the same element from them.
-  Golden files write the repository as `${CARGO_MANIFEST_DIR}`, which the tool sets for KiCad.
+How the model handling is tested is described in `doc/dev/verifying.md`.

@@ -198,17 +198,6 @@ constructor argument, the op-amps' models are inlined). To import their netlists
 `libs/footprints/cuprite_basic.pretty` to the footprint library table as `cuprite_basic`
 (the check scripts in `tools/` do this themselves).
 
-## 8. Verifying generated parts
+## 8. Verifying
 
-- `cargo test --features kicad-libraries --test kicad_libraries` generates parts from the installed
-  KiCad libraries, compares the netlists of a circuit using them with `tests/golden/kicad_libraries.*`,
-  and simulates it with KiCad's models.
-- `python3 tools/compare_kicad_cli_netlist.py --library-symbols [--spice] NETLIST...` builds a
-  schematic from the components' library symbols (with their `Sim.*` fields for `--spice`, replaced by
-  those of the netlist for parts with a `sim` block) and compares KiCad's export with ours: pin
-  numbers, names and types, and the SPICE elements KiCad derives from the symbols.
-  `tests/golden/basic_parts.net`, `tests/golden/kicad_libraries.net` and (with
-  `--symbol-dir crates/kicad_lib/tests/fixtures/symbols`) `tests/golden/spice_part.net` are the same
-  as KiCad's.
-- `python3 tools/check_netlist_footprints.py` and `tools/check_netlist_import.py` (see
-  `doc/kicad_netlist_usage.md`) also find the footprints of `libs/` and `examples/*/libs/`.
+How generated parts are checked against KiCad is described in `doc/dev/verifying.md`.

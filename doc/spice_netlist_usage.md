@@ -1,9 +1,8 @@
 # Exporting a SPICE Netlist and Simulating
 
 This document explains how to export a circuit described with cuprite_wire as a SPICE netlist and
-simulate it with ngspice from Rust. See `doc/spice_netlist_format.md` for the SPICE format and
-`doc/kicad_netlist_usage.md` for describing circuits (parts, labels, subcircuits, errors), which
-works the same way for both formats.
+simulate it with ngspice from Rust. See `doc/circuits.md` for describing circuits (parts, labels,
+subcircuits, errors) and `doc/dev/spice_netlist_format.md` for the SPICE format.
 A complete example is in `examples/spice_rc_filter.rs` (`cargo run --example spice_rc_filter`);
 `examples/sensor_frontend/` tests each subcircuit of a board with a test bench.
 
@@ -24,9 +23,9 @@ let simulation = netlist
 let f3db = simulation.value("f3db");   // Option<f64>; `expect_value` panics with the log instead
 ```
 
-- `to_spice()` returns `Err(CircuitErrors)` with **all** errors found, like `to_kicad()`.
+- `to_spice()` returns `Err(CircuitErrors)` with all errors found (section 4).
 - The output is deterministic. `SpiceNetlist` and `SpiceDeck` implement `Display`;
-  `SpiceNetlist::write` writes the netlist alone (title, models, elements, `.end`).
+  `SpiceNetlist::write` writes the netlist alone (section 6).
 
 ## 2. Defining parts
 
@@ -96,7 +95,7 @@ Analyses and stimuli belong to the test, not to the circuit:
 
 ## 4. Node names and ground
 
-SPICE node names are the net names of the netlist (`doc/kicad_netlist_usage.md`, "Net names"),
+SPICE node names are the net names of the netlist (`doc/circuits.md` section 5),
 converted as KiCad does, so that the deck can be compared with KiCad's own export:
 
 | Net | Node |
@@ -109,7 +108,8 @@ converted as KiCad does, so that the deck can be compared with KiCad's own expor
 `SpiceNetlist::node(net_name)` returns the node name. In front-end commands quote names containing
 `/` or `-`: `v("/OUT")`.
 
-Errors specific to SPICE (each with the trace of the part or the label):
+Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_spice` reports (each with the
+trace of the part or the label):
 
 | Error (`CircuitErrorKind`) | Cause |
 |---|---|
@@ -154,18 +154,21 @@ The CLI copies its input with glibc `tmpfile()`, which always writes to `/tmp`; 
 `ngspice` wrapper (`.devcontainer/tmpfile_shim.c`) redirects it to `$TMPDIR`, so it also runs
 where `/tmp` is read-only, such as the Claude Code sandbox.
 
-The devcontainer provides `ngspice`; the simulation tests in `src/spice/tests.rs` need it.
+**Results without errors can still be wrong.** For a floating node or a node without a DC path to
+ground, ngspice falls back to gmin and source stepping and then to a transient operating point, and
+may report a plausible-looking result instead of failing. ERC (`doc/erc.md`) catches unconnected
+pins but not a missing DC path; check results against what the circuit can do.
 
-## 6. Verifying the output
+The devcontainer provides `ngspice`; the simulation tests need it. The output is checked against
+KiCad's SPICE export as described in `doc/dev/verifying.md`.
 
-- **Golden tests**: `tests/golden/*.cir`, regenerated with `UPDATE_GOLDEN=1 cargo test`.
-- **Simulation tests**: `src/spice/tests.rs` checks analyses against hand-calculated results
-  (RC corner frequency and time constant, a divider with an ammeter, an amplifier with a subcircuit model).
-- **Comparison with KiCad's SPICE export**:
-  `python3 tools/compare_kicad_cli_netlist.py --spice NETLIST.net...` takes a KiCad netlist and the
-  SPICE deck of the same circuit (`NETLIST.cir`), synthesizes the equivalent schematic as for the
-  `.net` comparison, adds Sim.* fields from the deck (`Sim.Pins` maps the pads to the element's
-  nodes by their nets), exports it with `kicad-cli sch export netlist --format spice`, and compares
-  the element lines. KiCad writes the ground as `GND` (mapped to `0` for the comparison) and orders
-  elements differently (reported, not a difference). Only `R`, `C`, `L` and `X` elements with an
-  inline `.subckt` are supported. `tests/golden/kicad_pair.net` / `kicad_pair.cir` is such a pair.
+## 6. Output
+
+- `SpiceNetlist` has a title line, the compatibility-mode comment if needed (section 5),
+  `.include` lines (absolute paths, sorted), inline `.model`/`.subckt` definitions (sorted by
+  name), the element lines, and `.end`. A `SpiceDeck` adds its directives and the `.control` block
+  before `.end`.
+- Elements follow the component order of the netlist (subcircuit instance by instance, then by
+  reference). KiCad uses the schematic order; ngspice does not care.
+- Element names are the device letter, the reference and the suffix (`XU1A`). The letter is
+  prepended only when the reference does not already start with it (`R1`, not `RR1`), as KiCad does.

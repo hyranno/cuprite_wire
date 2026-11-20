@@ -5,6 +5,8 @@
 //! ([`CircuitBuilder::no_connect`]), a `PWR_FLAG` ([`CircuitBuilder::power_flag`]), and pins outside the
 //! circuit ([`CircuitBuilder::virtual_pin`]). [`check_subcircuit`] checks a subcircuit alone.
 //!
+//! See the guide [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md).
+//!
 //! [`CircuitBuilder::no_connect`]: crate::circuit::CircuitBuilder::no_connect
 //! [`CircuitBuilder::power_flag`]: crate::circuit::CircuitBuilder::power_flag
 //! [`CircuitBuilder::virtual_pin`]: crate::circuit::CircuitBuilder::virtual_pin

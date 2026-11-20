@@ -1,6 +1,6 @@
 //! SPICE netlist (deck body) export.
 //!
-//! See `doc/spice_netlist_format.md` for the format.
+//! See [SPICE Netlist Format](https://github.com/hyranno/cuprite_wire/blob/main/doc/dev/spice_netlist_format.md) for the format.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},

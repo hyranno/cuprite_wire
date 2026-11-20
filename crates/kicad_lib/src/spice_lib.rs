@@ -9,7 +9,7 @@
 //! Vendor libraries are often written for PSpice: `.LIB "file"` includes a file, `$` is not a
 //! comment (`$G_DPWR` is a node name), and `OPTIONAL:` ports and encrypted blocks
 //! (`$CDNENCSTART` ... `$CDNENCFINISH`) may appear. These are recognized; see
-//! `doc/spice_part_macro.md` for what ngspice can simulate.
+//! [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) for what ngspice can simulate.
 
 use crate::Error;
 

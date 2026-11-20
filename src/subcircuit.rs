@@ -1,3 +1,7 @@
+//! Reusable subcircuits: [`SubcircuitGenerator`] and the [`Interface`] of its nodes.
+//!
+//! See the guide [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md#3-nodes-parts-and-subcircuits).
+
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData, panic::Location};
 
 use dyn_clone::DynClone;

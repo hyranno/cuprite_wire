@@ -1,3 +1,7 @@
+//! The format-independent [`Part`] trait and the electrical types of pins.
+//!
+//! See the guide [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md#2-parts).
+
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::{self, Debug},

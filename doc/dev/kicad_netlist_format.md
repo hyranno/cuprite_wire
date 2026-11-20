@@ -228,29 +228,10 @@ However, without `tstamps` components cannot be matched when updating from a net
       (node (ref "R1") (pin "1")))))
 ```
 
-## 8. Output policy for cuprite_wire
+## 8. What cuprite_wire writes
 
-See `doc/kicad_netlist_usage.md` for how to use the exporter.
-
-- Emit: `version "E"`; `design` with only `source` (optional) and `tool` (no date, so that the output
-  is deterministic); `components` (`ref` `value` `footprint`, `fields` if any, `libsource` if set,
-  value-less `property` flags, `sheetpath` `tstamps`); and `nets` (`code` `name` `class "Default"`,
-  with `ref` `pin` `pinfunction` (if named) `pintype` in each `node`).
-- Omit: `libparts`, `libraries`, `datasheet`, `description`, and the `Sheetname`/`Sheetfile` properties.
-- Emit `pin` as the footprint pad number. The mapping from pin IDs to pad numbers belongs to the
-  part definitions (one pin ID per pad).
-- Generate UUIDs deterministically (UUID v5 from the hierarchical path and the instance names),
-  so that they do not change between exports.
-- Name nets following section 6.1 (global / `/path/LOCAL` / `Net-(...)` / `unconnected-(...)`),
-  write components sheet by sheet (the root first, then each subcircuit instance followed by the
-  ones inside it, in instantiation order, like Eeschema's page order) sorted by reference in natural
-  order, sort nets by natural order, and nodes by reference then pad in string order.
-- Multi-unit parts (several `tstamps` per `comp`) are not supported yet.
-- Verification: `kicad-cli` and the `pcbnew` Python module cannot read a netlist, so
-  `tools/check_netlist_import.py` drives the import in the pcbnew GUI (File -> Import -> Netlist)
-  on a virtual X server. Footprint and pad existence is checked by `tools/check_netlist_footprints.py`.
-  `tools/compare_kicad_cli_netlist.py` compares the output with what `kicad-cli` exports for an
-  equivalent schematic.
+See `doc/kicad_netlist_usage.md` section 4 for which elements cuprite_wire writes and how it orders
+them, and `doc/dev/verifying.md` for how the output is checked against pcbnew and Eeschema.
 
 ## References
 

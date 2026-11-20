@@ -1,4 +1,6 @@
 //! SPICE-specific part information, netlist export and simulation with ngspice.
+//!
+//! See the guide [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md).
 
 pub mod deck;
 pub mod netlist;
