@@ -34,7 +34,7 @@ pub struct ModelBinding {
     /// The name of the `.subckt` or `.model`.
     pub name: String,
     /// Pin of the part (a pin number for KiCad parts) => port of the `.subckt`, or terminal of the
-    /// device for a `.model` (`A` `K`, `C` `B` `E`, `D` `G` `S` [`B`]).
+    /// device for a `.model` (`A` `K`, `C` `B` `E`, `D` `G` `S` \[`B`\]).
     pub pins: Vec<(String, String)>,
     /// Pins not connected to the model.
     pub unused: Vec<String>,

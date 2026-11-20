@@ -20,8 +20,9 @@ use crate::{
     trace::Trace,
 };
 
-/// A resolved netlist. Components are grouped by subcircuit instance (in the order of [`sheet_order`])
-/// and sorted by reference in each, and nets are sorted by name (both in natural order).
+/// A resolved netlist. Components are grouped by subcircuit instance (in the order of their first
+/// parts, like the pages of a KiCad schematic) and sorted by reference in each, and nets are sorted
+/// by name (both in natural order).
 #[derive(Debug, Clone)]
 pub struct Netlist {
     pub components: Vec<Component>,
