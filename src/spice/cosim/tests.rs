@@ -1,6 +1,6 @@
 //! Co-simulation runs with small models.
 
-use super::{CosimDevice, DeviceIo, DeviceModel, DeviceModels};
+use super::{CosimDevice, DeviceIo, DeviceModel, DeviceModels, PinIndex, PinState};
 use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
@@ -179,6 +179,125 @@ fn test_echo_input() {
             "{echo:?} {edge:?}"
         );
     }
+}
+
+/// A model counting the edges of an input, with the pin looked up once: the edges are seen at the
+/// first accepted point after the input crosses its threshold.
+#[test]
+fn test_edges() {
+    struct Edges {
+        clk: PinIndex,
+        rises: Vec<f64>,
+        falls: Vec<f64>,
+    }
+    impl DeviceModel for Edges {
+        fn step(&mut self, io: &mut DeviceIo<'_>) {
+            if io.rose(self.clk) {
+                self.rises.push(io.time());
+            }
+            if io.fell(self.clk) {
+                self.falls.push(io.time());
+            }
+        }
+    }
+    let mut circuit = CircuitBuilder::new();
+    let sent = DigitalSequence::new(Level::Low).pwm(1e-6, 2e-6, 0.5, 3);
+    let driver = circuit.instantiate_part(DigitalDriver::new(
+        OutputCharacteristics::cmos(3.3),
+        sent.clone(),
+    ));
+    let device = CosimDevice::new("mcu").input("clk", InputCharacteristics::cmos(3.3));
+    let mut model = Edges {
+        clk: device.pin_index("CLK"),
+        rises: Vec::new(),
+        falls: Vec::new(),
+    };
+    let device = circuit.instantiate_part(device);
+    circuit.connect(driver[DigitalDriver::OUT], device["clk"]);
+    for gnd in [driver[DigitalDriver::GND], device[CosimDevice::GND]] {
+        circuit.label(gnd, NetLabel::global("GND"));
+    }
+    let deck = circuit
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control(["tran 10n 8u".to_string()]);
+    deck.run_with(DeviceModels::new().with("mcu", &mut model))
+        .unwrap();
+    let edges = |level| -> Vec<f64> {
+        sent.events()
+            .iter()
+            .filter(|e| e.1 == level)
+            .map(|e| e.0)
+            .collect()
+    };
+    for (seen, sent) in [
+        (&model.rises, edges(Level::High)),
+        (&model.falls, edges(Level::Low)),
+    ] {
+        assert_eq!(seen.len(), sent.len(), "{seen:?} {sent:?}");
+        for (seen, sent) in seen.iter().zip(&sent) {
+            assert!(seen > sent && seen - sent < 50e-9, "{seen} {sent}");
+        }
+    }
+}
+
+/// `DeviceIo` without a run: buses and pins by index.
+#[test]
+fn test_buses() {
+    let device = CosimDevice::new("mcu")
+        .input("d0", InputCharacteristics::cmos(3.3))
+        .input("d1", InputCharacteristics::cmos(3.3))
+        .input("d2", InputCharacteristics::cmos(3.3))
+        .output("q0", OutputCharacteristics::cmos(3.3))
+        .output("q1", OutputCharacteristics::cmos(3.3));
+    let mut pins: Vec<PinState> = device.pins().iter().cloned().map(PinState::new).collect();
+    for (pin, read) in pins.iter_mut().zip([true, false, true]) {
+        pin.read = read;
+    }
+    let mut wakes = Vec::new();
+    let mut io = DeviceIo {
+        time: 0.0,
+        pins: &mut pins,
+        wakes: &mut wakes,
+    };
+    assert_eq!(io.read_bus(["d0", "d1", "d2"]), 0b101);
+    assert_eq!(io.read_bus(["d2", "d1", "d0"]), 0b101);
+    let names: Vec<String> = ["d1", "d2"].map(String::from).into();
+    assert_eq!(io.read_bus(&names), 0b10);
+    let q = [device.pin_index("q0"), io.pin_index("Q1")];
+    assert_eq!(q, [PinIndex(3), PinIndex(4)]);
+    io.set_bus(q, 0b10);
+    use super::Drive::Level as L;
+    let requests: Vec<_> = pins[3..].iter().map(|p| p.request).collect();
+    assert_eq!(requests, [Some(L(Level::Low)), Some(L(Level::High))]);
+}
+
+#[test]
+#[should_panic(expected = "does not fit in 2 pins")]
+fn test_bus_overflow() {
+    let device = CosimDevice::new("mcu")
+        .output("q0", OutputCharacteristics::cmos(3.3))
+        .output("q1", OutputCharacteristics::cmos(3.3));
+    let mut pins: Vec<PinState> = device.pins().iter().cloned().map(PinState::new).collect();
+    let mut wakes = Vec::new();
+    let mut io = DeviceIo {
+        time: 0.0,
+        pins: &mut pins,
+        wakes: &mut wakes,
+    };
+    io.set_bus(["q0", "q1"], 4);
+}
+
+#[test]
+#[should_panic(expected = "the device \"mcu\" has no pin \"x\"")]
+fn test_no_pin_index() {
+    let _ = CosimDevice::new("mcu")
+        .output("q0", OutputCharacteristics::cmos(3.3))
+        .pin_index("x");
 }
 
 #[test]

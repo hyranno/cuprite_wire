@@ -135,12 +135,7 @@ impl<'m> CosimSession<'m> {
                 .device
                 .pins()
                 .iter()
-                .map(|pin| PinState {
-                    pin: pin.clone(),
-                    voltage: 0.0,
-                    read: false,
-                    request: None,
-                })
+                .map(|pin| PinState::new(pin.clone()))
                 .collect();
             for (pin_index, pin) in pins.iter().enumerate() {
                 if pin.pin.output.is_some() {
@@ -221,6 +216,7 @@ impl Session for CosimSession<'_> {
                         pin.voltage >= (input.threshold_low + input.threshold_high) / 2.0
                     };
                     pin.read = input.read(pin.voltage, previous);
+                    pin.previous = if device.started { previous } else { pin.read };
                 }
                 pin.request = None;
             }

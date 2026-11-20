@@ -21,7 +21,7 @@ mod device;
 pub mod peripherals;
 mod session;
 
-pub use device::{CosimDevice, CosimPin};
+pub use device::{CosimDevice, CosimPin, PinIndex};
 pub(crate) use session::CosimSession;
 
 use crate::spice::{
@@ -56,16 +56,78 @@ pub(crate) struct PinState {
     voltage: f64,
     /// The level read at the last accepted point (inputs only).
     read: bool,
+    /// The level read at the accepted point before (the same as `read` at the first point).
+    previous: bool,
     /// Set by the model during [`DeviceModel::step`].
     request: Option<Drive>,
 }
 
+impl PinState {
+    pub(crate) fn new(pin: CosimPin) -> Self {
+        PinState {
+            pin,
+            voltage: 0.0,
+            read: false,
+            previous: false,
+            request: None,
+        }
+    }
+}
+
+/// A pin given to the methods of [`DeviceIo`]: its name (`&str`, `String`, anything
+/// `AsRef<str>`), case-insensitive, or its [`PinIndex`].
+pub trait PinRef: sealed::Sealed {}
+
+impl<T: sealed::Sealed> PinRef for T {}
+
+mod sealed {
+    use super::{DeviceIo, PinIndex};
+
+    pub trait Sealed {
+        /// The index of the pin in the pins of the device.
+        #[track_caller]
+        fn index_in(&self, io: &DeviceIo<'_>) -> usize;
+    }
+
+    impl<T: AsRef<str>> Sealed for T {
+        #[track_caller]
+        fn index_in(&self, io: &DeviceIo<'_>) -> usize {
+            io.index_of(self.as_ref())
+        }
+    }
+
+    impl Sealed for PinIndex {
+        #[track_caller]
+        fn index_in(&self, io: &DeviceIo<'_>) -> usize {
+            let count = io.pins.len();
+            assert!(
+                self.0 < count,
+                "the device has no pin {self:?} (it has {count} pins)"
+            );
+            self.0
+        }
+    }
+
+    impl Sealed for &PinIndex {
+        #[track_caller]
+        fn index_in(&self, io: &DeviceIo<'_>) -> usize {
+            (*self).index_in(io)
+        }
+    }
+}
+
 /// The pins of a device during [`DeviceModel::step`].
 ///
-/// The methods panic for a pin the device does not have, and the output methods for a pin
-/// without [`OutputCharacteristics`]. After a panic in a model, the run goes on without calling the
-/// models, and `run_with` resumes the panic when it ends.
+/// Pins are given by name or by [`PinIndex`] ([`PinRef`]). A name is looked up among the pins at
+/// every call; a model with many pins can look them up once with [`CosimDevice::pin_index`] or
+/// [`DeviceIo::pin_index`].
 ///
+/// The methods panic for a pin the device does not have, the input methods for a pin without
+/// [`InputCharacteristics`] and the output methods for a pin without [`OutputCharacteristics`].
+/// After a panic in a model, the run goes on without calling the models, and `run_with` resumes the
+/// panic when it ends.
+///
+/// [`InputCharacteristics`]: crate::spice::digital::InputCharacteristics
 /// [`OutputCharacteristics`]: crate::spice::digital::OutputCharacteristics
 pub struct DeviceIo<'a> {
     time: f64,
@@ -79,27 +141,43 @@ impl DeviceIo<'_> {
         self.time
     }
 
+    /// The index of the pin named `name` (case-insensitive), as [`CosimDevice::pin_index`].
+    ///
+    /// # Panics
+    /// If the device has no such pin.
     #[track_caller]
-    fn pin(&self, name: &str) -> &PinState {
-        let index = self.index(name);
-        &self.pins[index]
+    pub fn pin_index(&self, name: &str) -> PinIndex {
+        PinIndex(self.index_of(name))
     }
 
     #[track_caller]
-    fn index(&self, name: &str) -> usize {
-        self.pins
-            .iter()
-            .position(|pin| pin.pin.name.eq_ignore_ascii_case(name))
-            .unwrap_or_else(|| {
-                let names: Vec<&str> = self.pins.iter().map(|p| p.pin.name.as_str()).collect();
-                panic!("the device has no pin {name:?} (pins: {names:?})")
-            })
+    fn index_of(&self, name: &str) -> usize {
+        device::find_pin(self.pins.iter().map(|state| &state.pin), name).unwrap_or_else(|| {
+            let names: Vec<&str> = self.pins.iter().map(|p| p.pin.name.as_str()).collect();
+            panic!("the device has no pin {name:?} (pins: {names:?})")
+        })
+    }
+
+    #[track_caller]
+    fn state(&self, pin: impl PinRef) -> &PinState {
+        &self.pins[pin.index_in(self)]
+    }
+
+    #[track_caller]
+    fn input(&self, pin: impl PinRef) -> &PinState {
+        let state = self.state(pin);
+        assert!(
+            state.pin.input.is_some(),
+            "the pin {:?} is not an input",
+            state.pin.name
+        );
+        state
     }
 
     /// The voltage of the pin relative to the `gnd` pin of the device.
     #[track_caller]
-    pub fn voltage(&self, pin: &str) -> f64 {
-        self.pin(pin).voltage
+    pub fn voltage(&self, pin: impl PinRef) -> f64 {
+        self.state(pin).voltage
     }
 
     /// The level the input reads, with the thresholds and hysteresis of its
@@ -108,33 +186,87 @@ impl DeviceIo<'_> {
     /// # Panics
     /// If the pin has no input characteristics.
     #[track_caller]
-    pub fn read(&self, pin: &str) -> bool {
-        let state = self.pin(pin);
-        assert!(state.pin.input.is_some(), "the pin {pin:?} is not an input");
-        state.read
+    pub fn read(&self, pin: impl PinRef) -> bool {
+        self.input(pin).read
+    }
+
+    /// Whether the input reads high now and read low at the accepted point before. Always false
+    /// at the first point of the analysis.
+    ///
+    /// # Panics
+    /// As [`DeviceIo::read`].
+    #[track_caller]
+    pub fn rose(&self, pin: impl PinRef) -> bool {
+        let state = self.input(pin);
+        state.read && !state.previous
+    }
+
+    /// Whether the input reads low now and read high at the accepted point before. Always false
+    /// at the first point of the analysis.
+    ///
+    /// # Panics
+    /// As [`DeviceIo::read`].
+    #[track_caller]
+    pub fn fell(&self, pin: impl PinRef) -> bool {
+        let state = self.input(pin);
+        !state.read && state.previous
+    }
+
+    /// The levels the inputs read as a number: the first pin is bit 0 (the least significant).
+    ///
+    /// # Panics
+    /// If there are more than 32 pins, or as [`DeviceIo::read`].
+    #[track_caller]
+    pub fn read_bus<P: PinRef>(&self, pins: impl IntoIterator<Item = P>) -> u32 {
+        let mut value = 0;
+        for (bit, pin) in pins.into_iter().enumerate() {
+            assert!(bit < 32, "a bus has at most 32 pins");
+            value |= u32::from(self.read(pin)) << bit;
+        }
+        value
+    }
+
+    /// Drives the outputs to the bits of `value`: the first pin to bit 0 (the least significant),
+    /// `High` for 1 and `Low` for 0.
+    ///
+    /// # Panics
+    /// If there are more than 32 pins, `value` does not fit in them, or as [`DeviceIo::set`].
+    #[track_caller]
+    pub fn set_bus<P: PinRef>(&mut self, pins: impl IntoIterator<Item = P>, value: u32) {
+        let indices: Vec<usize> = pins.into_iter().map(|pin| pin.index_in(self)).collect();
+        let count = indices.len();
+        assert!(count <= 32, "a bus has at most 32 pins: {count}");
+        assert!(
+            count == 32 || value >> count == 0,
+            "the value {value:#x} does not fit in {count} pins"
+        );
+        for (bit, index) in indices.into_iter().enumerate() {
+            self.set(PinIndex(index), Level::from(value >> bit & 1 == 1));
+        }
     }
 
     /// Drives the output to a level, with the edges of its
     /// [`OutputCharacteristics`](crate::spice::digital::OutputCharacteristics).
     #[track_caller]
-    pub fn set(&mut self, pin: &str, level: Level) {
+    pub fn set(&mut self, pin: impl PinRef, level: Level) {
         self.request(pin, Drive::Level(level));
     }
 
     /// Drives the output to a voltage between its `low` and `high` levels (e.g. a DAC), changing
     /// at the rate of its edges.
     #[track_caller]
-    pub fn set_voltage(&mut self, pin: &str, voltage: f64) {
+    pub fn set_voltage(&mut self, pin: impl PinRef, voltage: f64) {
         self.request(pin, Drive::Voltage(voltage));
     }
 
     #[track_caller]
-    fn request(&mut self, pin: &str, drive: Drive) {
-        let index = self.index(pin);
+    fn request(&mut self, pin: impl PinRef, drive: Drive) {
+        let index = pin.index_in(self);
         let state = &mut self.pins[index];
         assert!(
             state.pin.output.is_some(),
-            "the pin {pin:?} is not an output"
+            "the pin {:?} is not an output",
+            state.pin.name
         );
         state.request = Some(drive);
     }

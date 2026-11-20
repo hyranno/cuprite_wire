@@ -16,6 +16,22 @@ pub struct CosimPin {
     pub input: Option<InputCharacteristics>,
 }
 
+/// A pin of a [`CosimDevice`] by its position: what [`CosimDevice::pin_index`] and
+/// [`DeviceIo::pin_index`](super::DeviceIo::pin_index) return, to give the pin to the methods of
+/// [`DeviceIo`](super::DeviceIo) without looking up its name. It stands for the pin of the device it
+/// was taken from; with another device it may name another pin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PinIndex(pub(super) usize);
+
+/// The position of the pin named `name` (case-insensitive).
+pub(super) fn find_pin<'a>(
+    pins: impl IntoIterator<Item = &'a CosimPin>,
+    name: &str,
+) -> Option<usize> {
+    pins.into_iter()
+        .position(|pin| pin.name.eq_ignore_ascii_case(name))
+}
+
 /// A device whose behavior is a Rust [`DeviceModel`](super::DeviceModel), bound by `name` when
 /// the deck is run ([`SpiceDeck::run_with`](crate::spice::SpiceDeck::run_with)). Its pins are those
 /// added with [`CosimDevice::output`], [`CosimDevice::input`] and [`CosimDevice::bidirectional`],
@@ -103,8 +119,7 @@ impl CosimDevice {
             "a pin name may only contain ASCII letters, digits and '_': {name:?}"
         );
         assert!(
-            !name.eq_ignore_ascii_case(Self::GND)
-                && !self.pins.iter().any(|p| p.name.eq_ignore_ascii_case(name)),
+            !name.eq_ignore_ascii_case(Self::GND) && find_pin(&self.pins, name).is_none(),
             "the device {:?} already has a pin {name:?}",
             self.name
         );
@@ -129,6 +144,18 @@ impl CosimDevice {
 
     pub fn pins(&self) -> &[CosimPin] {
         &self.pins
+    }
+
+    /// The index of the pin named `name` (case-insensitive), to look it up once before the run.
+    ///
+    /// # Panics
+    /// If the device has no such pin (`gnd` is not one).
+    #[track_caller]
+    pub fn pin_index(&self, name: &str) -> PinIndex {
+        PinIndex(
+            find_pin(&self.pins, name)
+                .unwrap_or_else(|| panic!("the device {:?} has no pin {name:?}", self.name)),
+        )
     }
 
     fn subcircuit_name(&self) -> String {

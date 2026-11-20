@@ -55,9 +55,37 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
 | `time()` | the time of the point, in seconds |
 | `voltage(pin)` | the voltage of the pin relative to `gnd` (an analog input) |
 | `read(pin)` | the level an input reads, with its thresholds and hysteresis |
+| `rose(pin)` / `fell(pin)` | whether the input changed to high / low since the accepted point before |
+| `read_bus(pins)` | the levels of the inputs as a `u32`, the first pin as bit 0 |
 | `set(pin, Level)` | drives an output `Low`, `High` or `HiZ` |
 | `set_voltage(pin, volts)` | drives an output to a voltage (a DAC) |
+| `set_bus(pins, value)` | drives the outputs to the bits of `value`, the first pin as bit 0 |
 | `wake_at(time)` | asks for an accepted point at `time` |
+
+A pin is given by its name (case-insensitive) or by a `PinIndex`. A name is looked up among the
+pins at every call; a model with many pins can look them up once, with `CosimDevice::pin_index(name)`
+before the device is put in the circuit or `DeviceIo::pin_index(name)` in `step`:
+
+```rust
+let device = CosimDevice::new("sram")
+    .input("cs", InputCharacteristics::cmos(3.3))
+    /* .input("a0", ...) ... .output("d7", ...) */;
+let model = Sram {
+    cs: device.pin_index("cs"),
+    address: ["a0", "a1", "a2", "a3"].map(|pin| device.pin_index(pin)),
+    data: ["d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7"].map(|pin| device.pin_index(pin)),
+    memory: [0; 16],
+};
+
+impl DeviceModel for Sram {
+    fn step(&mut self, io: &mut DeviceIo<'_>) {
+        if io.fell(self.cs) {
+            let address = io.read_bus(self.address) as usize;
+            io.set_bus(self.data, u32::from(self.memory[address]));
+        }
+    }
+}
+```
 
 - **Change state only in `step`.** ngspice also evaluates the outputs at trial time points it may
   reject; the outputs follow what `step` set, so a rejected point cannot change the model.
@@ -69,6 +97,8 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
   timer or a sampling instant needs `wake_at(time)` (a breakpoint of ngspice), or the change lands
   on whatever point comes next. Reacting to an input happens at the first accepted point after it
   crosses the threshold, so the reaction time depends on the time step (`tran <step>`, `.options`).
+  `rose` and `fell` compare the reads of two accepted points, so they report an edge at that
+  point too; a pulse shorter than the time between two points can be missed.
 - Outputs start `Low` and bidirectional pins `HiZ` until the model sets them. The operating point
   before the transient analysis is computed with these levels. Other analyses (`op`, `ac`, `dc`) see
   the outputs as they are and do not call the models; use one transient analysis per run.

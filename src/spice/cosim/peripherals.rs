@@ -197,15 +197,12 @@ mod tests {
     fn pins() -> Vec<PinState> {
         [("adc", false), ("pwm", true)]
             .into_iter()
-            .map(|(name, output)| PinState {
-                pin: CosimPin {
+            .map(|(name, output)| {
+                PinState::new(CosimPin {
                     name: name.into(),
                     output: output.then(|| OutputCharacteristics::cmos(3.3)),
                     input: (!output).then(|| InputCharacteristics::cmos(3.3)),
-                },
-                voltage: 0.0,
-                read: false,
-                request: None,
+                })
             })
             .collect()
     }
