@@ -9,6 +9,15 @@ use crate::{
     trace::Loc,
 };
 
+/// The interface nodes `0..N` of a subcircuit, as seen from inside it.
+///
+/// A subcircuit that creates them first with [`CircuitBuilder::add_interface`] is instantiated
+/// with [`CircuitBuilder::instantiate_subcircuit_interface`] in the same order, and can be
+/// checked alone by giving these nodes to [`crate::erc::check_subcircuit`].
+pub fn interface<const N: usize>() -> [NodeIndex; N] {
+    std::array::from_fn(NodeIndex::new)
+}
+
 pub trait SubcircuitGenerator: Debug + Clone {
     type Options;
 

@@ -14,7 +14,6 @@
 mod bias;
 mod filter;
 mod parts;
-mod ports;
 mod preamp;
 
 #[cfg(test)]

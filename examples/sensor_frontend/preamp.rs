@@ -7,10 +7,7 @@ use cuprite_wire::{
 };
 use petgraph::graph::NodeIndex;
 
-use crate::{
-    parts::RrioOpAmp,
-    ports::{add_interface, instantiate},
-};
+use crate::parts::RrioOpAmp;
 
 /// Gain `1 + feedback / ground` above the input high-pass corner (1.6 Hz with 1u and 100k).
 /// The output sits at `vref` without a signal.
@@ -45,7 +42,8 @@ pub struct PreampPorts {
 impl Preamp {
     #[track_caller]
     pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> PreampPorts {
-        let [input, vref, vcc, gnd, output] = instantiate(circuit, name, self);
+        let [input, vref, vcc, gnd, output] =
+            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
         PreampPorts {
             input,
             vref,
@@ -61,7 +59,7 @@ impl SubcircuitGenerator for Preamp {
 
     fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
         let mut c = CircuitBuilder::new();
-        let [input, vref, vcc, gnd, output] = add_interface(&mut c);
+        let [input, vref, vcc, gnd, output] = c.add_interface();
         let coupling = c.instantiate_part_named("c_in", Box::new(Capacitor0603::new("1u")));
         let bias = c.instantiate_part_named("r_bias", Box::new(Resistor0603::new("100k")));
         let feedback =
@@ -96,13 +94,11 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
+        subcircuit::interface,
     };
 
     use super::*;
-    use crate::{
-        bench::{Bench, assert_near, value},
-        ports::interface,
-    };
+    use crate::bench::{Bench, assert_near, value};
 
     #[test]
     fn erc() {

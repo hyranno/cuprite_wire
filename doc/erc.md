@@ -91,10 +91,11 @@ As in KiCad, a supply that enters the board through a connector (a `passive` pin
 connected to them, so give each one the pin the circuit around it is expected to connect:
 
 ```rust
+let [input, output, vcc] = subcircuit::interface(); // the nodes 0..3 (`add_interface`)
 let ports = [
-    (NodeIndex::new(0), PinType::Output),    // the input, driven from outside
-    (NodeIndex::new(1), PinType::Input),     // the output, read from outside
-    (NodeIndex::new(2), PinType::PowerOut),  // the supply
+    (input, PinType::Output),    // driven from outside
+    (output, PinType::Input),    // read from outside
+    (vcc, PinType::PowerOut),    // the supply
 ];
 check_subcircuit(&Follower, &(), &ports, &ErcSettings::default())?.assert_clean();
 ```

@@ -83,6 +83,27 @@ circuit.label(c["2"], NetLabel::global("GND"));
 let pins = circuit.instantiate_subcircuit_named("amp_left", generator, &interface_nodes, |o| o.clone());
 ```
 
+A subcircuit's interface nodes are nodes inside it, given to `instantiate_subcircuit*` as a set;
+the returned map gives the corresponding nodes in the outer circuit. A subcircuit that creates its
+interface first, with `add_interface`, has the nodes `0..N` as its interface, in a fixed order.
+`instantiate_subcircuit_interface` / `instantiate_subcircuit_interface_named` instantiate it and
+return the outer nodes as an array in the same order:
+
+```rust
+impl SubcircuitGenerator for Follower {
+    type Options = ();
+    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
+        let mut c = CircuitBuilder::new();
+        let [input, output, vcc, gnd] = c.add_interface(); // before any other node
+        // ...
+        c
+    }
+}
+
+let [input, output, vcc, gnd] =
+    circuit.instantiate_subcircuit_interface_named("buffer", Follower, |o: &()| *o);
+```
+
 All of these record the calling source location with `#[track_caller]`, which is used in error
 messages (section 5).
 

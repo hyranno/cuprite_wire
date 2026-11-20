@@ -27,8 +27,8 @@ prints it with the place in the source and writes no netlist, e.g. without the p
 
 ```text
 error: net "+5V": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)
-  at examples/sensor_frontend/bias.rs:45:21
-  in subcircuit instantiated at examples/sensor_frontend/main.rs:46:26
+  at examples/sensor_frontend/bias.rs:44:21
+  in subcircuit instantiated at examples/sensor_frontend/main.rs:45:26
 ```
 
 To import the netlist into pcbnew, add these footprint libraries to the footprint library table:
@@ -45,7 +45,6 @@ find both: `python3 tools/check_netlist_import.py sensor_frontend.net`.
 | `bias.rs` | `MidSupply`: divider, filter and follower giving VREF |
 | `preamp.rs` | `Preamp`: AC-coupled non-inverting amplifier biased at VREF |
 | `filter.rs` | `LowPass`: unity-gain Sallen-Key low-pass filter around VREF |
-| `ports.rs` | helpers keeping the interface nodes of a subcircuit in one order |
 | `bench.rs` | the test bench shared by the tests (supply, sources, ngspice) |
 | `libs/symbols/sensor_frontend.kicad_sym` | symbols `OPAMP_RRIO` and `CONN_01x04` |
 | `libs/footprints/sensor_frontend.pretty/` | the footprint of the pin header |
@@ -67,8 +66,10 @@ The other parts (resistors, capacitors) are the ready-made ones of `cuprite_wire
 
 ## Subcircuits and their interfaces
 
-Each subcircuit creates its interface nodes first (`ports::add_interface`), so they are the nodes
-`0..N` in a fixed order, and has a `place` method returning them by name:
+Each subcircuit creates its interface nodes first (`CircuitBuilder::add_interface`), so they are
+the nodes `0..N` in a fixed order. Its `place` method instantiates it with
+`instantiate_subcircuit_interface_named`, which returns the nodes in the same order, and gives them
+names; the ERC test gives the same nodes (`subcircuit::interface`) their pin types:
 
 ```rust
 let preamp = Preamp::default().place(&mut board, "preamp");
