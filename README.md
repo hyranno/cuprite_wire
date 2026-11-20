@@ -1,5 +1,10 @@
 # cuprite_wire
 
+[![crates.io](https://img.shields.io/crates/v/cuprite_wire.svg)](https://crates.io/crates/cuprite_wire)
+[![docs.rs](https://img.shields.io/docsrs/cuprite_wire)](https://docs.rs/cuprite_wire)
+[![CI](https://github.com/hyranno/cuprite_wire/actions/workflows/ci.yml/badge.svg)](https://github.com/hyranno/cuprite_wire/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/crates/l/cuprite_wire.svg)](LICENSE)
+
 Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to
 the KiCad 9 PCB editor (pcbnew) as a netlist.
 
@@ -7,7 +12,7 @@ the KiCad 9 PCB editor (pcbnew) as a netlist.
 use cuprite_wire::{basic::{Capacitor0603, OpAmpSot23, Resistor0603}, circuit::CircuitBuilder};
 
 // An RC low-pass filter followed by a voltage follower.
-let mut c = CircuitBuilder::new();
+let mut c: CircuitBuilder = CircuitBuilder::new();
 let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
 let c1 = c.instantiate_part_named("c1", Box::new(Capacitor0603::new("100n")));
 let amp = c.instantiate_part_named("amp", Box::new(OpAmpSot23::new("LMV321")));
@@ -74,19 +79,20 @@ The devcontainer in `.devcontainer/` has all of them.
 
 | Document | Contents |
 |---|---|
-| [`doc/kicad_netlist_usage.md`](doc/kicad_netlist_usage.md) | describing circuits and exporting a KiCad netlist |
+| [`doc/circuits.md`](doc/circuits.md) | describing circuits: parts, labels, subcircuits, errors |
+| [`doc/kicad_netlist_usage.md`](doc/kicad_netlist_usage.md) | exporting a KiCad netlist for pcbnew |
 | [`doc/kicad_part_macro.md`](doc/kicad_part_macro.md) | generating parts from KiCad symbols and footprints |
 | [`doc/spice_part_macro.md`](doc/spice_part_macro.md) | parts from SPICE models, dialects |
 | [`doc/spice_netlist_usage.md`](doc/spice_netlist_usage.md) | test benches and simulation with ngspice |
 | [`doc/erc.md`](doc/erc.md) | the electrical rules check |
-| [`doc/kicad_netlist_format.md`](doc/kicad_netlist_format.md) | the KiCad netlist format |
-| [`doc/spice_netlist_format.md`](doc/spice_netlist_format.md) | the SPICE netlist format |
 
+The API reference is on [docs.rs](https://docs.rs/cuprite_wire).
 Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Documents for contributors (the file formats, and how
+the output is verified against KiCad and ngspice) are in [`doc/dev/`](doc/dev/).
 
 ## License
 

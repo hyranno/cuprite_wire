@@ -1,6 +1,6 @@
 //! KiCad S-expression netlist (`.net`, `version "E"`) export.
 //!
-//! See `doc/kicad_netlist_format.md` for the format.
+//! See [KiCad Netlist Format](https://github.com/hyranno/cuprite_wire/blob/main/doc/dev/kicad_netlist_format.md) for the format.
 
 use std::{fmt, io};
 

@@ -137,7 +137,7 @@ the `F` after the suffix is ignored), but cuprite_wire should emit clean numeric
 ## 4. Nodes (nets)
 
 - Node names are arbitrary tokens. KiCad uses the net names of the `.net` export
-  (see `kicad_netlist_format.md`, 6.1), converted as follows:
+  (see `doc/dev/kicad_netlist_format.md` section 6.1), converted as follows:
   - Eeschema escapes (`{slash}` etc.) are unescaped first.
   - The characters `% ( ) , [ ] < > ~` and space are replaced by `_`
     (so `Net-(R1-Pad2)` becomes `Net-_R1-Pad2_`, `Net-(U1-+)` becomes `Net-_U1-+_`).
@@ -260,34 +260,11 @@ C1 /out 0 1u
 .end
 ```
 
-## 8. Output policy for cuprite_wire
+## 8. What cuprite_wire writes
 
-Implemented in `src/spice/` (usage: `doc/spice_netlist_usage.md`).
-
-- The netlist has a title line, `.include` lines (absolute paths, sorted), inline `.model`/`.subckt`
-  definitions (sorted by name), the element lines, and `.end`. Analyses and `.control` blocks are
-  supplied by the test (`SpiceDeck`), not by the circuit, so the same circuit can be simulated with
-  different analyses and stimuli. Stimuli are simulation-only parts in a test bench circuit.
-- Elements follow the component order of the netlist (subcircuit instance by instance, then by
-  reference). KiCad uses the schematic order; ngspice does not care.
-- Element names: SPICE device letter + reference (+ a suffix for parts with several elements),
-  prepending the letter only when the reference does not already start with it (same rule as KiCad).
-- Node names: the net names of the `.net` output, converted by KiCad's rule (section 4), so that
-  the output can be cross-checked against KiCad's export of an equivalent schematic
-  (`tools/compare_kicad_cli_netlist.py --spice`). Names ngspice cannot read and names that collide
-  case-insensitively are errors.
-- Ground: a net named `GND` (any case) or `0` is written as `0`; a netlist without one is an error.
-- Each part carries its SPICE description (`SpicePartInfo`): device letter, nodes in model order
-  (part pin IDs), arguments, and model files or inline definitions -- the counterpart of
-  `Sim.Device` / `Sim.Library` / `Sim.Name` / `Sim.Params` / `Sim.Pins`. Parts without one are an
-  error; parts not to be simulated (connectors, mechanical parts, ...) are excluded explicitly
-  (`SpicePartInfo::Excluded`, like `exclude_from_sim`). Every pin must be used by the model or
-  declared unused.
-- Models written for PSpice or LTspice (`ModelSource::pspice()` / `ltspice()`) need ngspice's
-  compatibility mode, which a deck cannot set itself: a comment after the title line,
-  `* requires: set ngbehavior=ps (.spiceinit)`, says which (`doc/spice_part_macro.md` section 4).
-- Arguments with `;` or `$` are rejected, so values are clean (`100u`, not `100uF;16V`).
-- Running: `ngspice -b -o sim.log deck.cir` from a shell; `SpiceDeck::run` does the same.
+See `doc/spice_netlist_usage.md` for the netlist cuprite_wire writes (section 6), its node names
+(section 4) and running ngspice (section 5), and `doc/dev/verifying.md` for the comparison with KiCad's
+export.
 
 ## References
 

@@ -1,7 +1,7 @@
 //! SPICE-specific part information.
 //!
 //! The counterpart of KiCad's `Sim.Device` / `Sim.Params` / `Sim.Library` / `Sim.Name` /
-//! `Sim.Pins` fields and the `exclude_from_sim` flag (see `doc/spice_netlist_format.md`).
+//! `Sim.Pins` fields and the `exclude_from_sim` flag (see [SPICE Netlist Format](https://github.com/hyranno/cuprite_wire/blob/main/doc/dev/spice_netlist_format.md)).
 
 use std::{
     collections::{BTreeSet, HashSet},

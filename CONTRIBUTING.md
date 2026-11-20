@@ -47,6 +47,16 @@ others get the same environment.
    `CUPRITE_VENDOR_MODELS_DIR=/path/to/models cargo test --features vendor-models --test vendor_models`
    (see `doc/spice_part_macro.md`).
 
+## Developer documentation
+
+| Document | Contents |
+|---|---|
+| [`doc/dev/kicad_netlist_format.md`](doc/dev/kicad_netlist_format.md) | the KiCad netlist format, as observed in KiCad 9 |
+| [`doc/dev/spice_netlist_format.md`](doc/dev/spice_netlist_format.md) | the SPICE netlist format and ngspice's behavior |
+| [`doc/dev/verifying.md`](doc/dev/verifying.md) | the tests and the scripts in `tools/` that check the output against KiCad and ngspice |
+
+The user documentation is listed in [`README.md`](README.md#documentation).
+
 ## Language
 
 - Write code comments, commit messages, pull requests and documents (`README.md`, files under
@@ -91,10 +101,10 @@ Respect the licenses of everything the project touches. In particular:
   models for the project instead, as in `crates/kicad_lib/tests/fixtures/models/`.
 - **Do not quote or reproduce sources without a license statement.** Describe facts (e.g. the
   structure of a file format) in your own words, and list the sources you used, with their licenses,
-  in the references of the document, as in `doc/kicad_netlist_format.md`.
+  in the references of the document, as in `doc/dev/kicad_netlist_format.md`.
 - **New dependencies** must have licenses compatible with MIT (e.g. MIT, Apache-2.0, BSD).
 - **AI-generated content** is subject to the same rules. Make sure it does not reproduce code or
   text from sources with incompatible licenses.
 
 The details are in the license sections of `doc/kicad_part_macro.md`, `doc/spice_part_macro.md`,
-`doc/kicad_netlist_format.md` and `doc/spice_netlist_format.md`.
+`doc/dev/kicad_netlist_format.md` and `doc/dev/spice_netlist_format.md`.

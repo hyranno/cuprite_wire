@@ -20,7 +20,7 @@ report.assert_no_errors();        // or assert_clean(), errors(), warnings(), vi
 
 ERC returns an `ErcReport` instead of failing: it holds every violation with its `Severity`
 (`Error` or `Warning`; ignored ones are left out). `Display` prints them with traces like the errors
-of `to_netlist` (`doc/kicad_netlist_usage.md` section 5). The report also holds the warnings of
+of `to_netlist` (`doc/circuits.md` section 6). The report also holds the warnings of
 `to_netlist` (`MultipleNetNames`, `LabelOnlyNet`), so a test only needs to look at the report.
 
 ## 2. Pin types

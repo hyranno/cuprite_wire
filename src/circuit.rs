@@ -1,3 +1,7 @@
+//! Describing circuits: nodes, parts, labels and subcircuits, built into a netlist.
+//!
+//! See the guide [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md).
+
 use std::{collections::HashMap, fmt::Debug, panic::Location};
 
 use petgraph::{

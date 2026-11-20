@@ -58,7 +58,7 @@ from pathlib import Path
 import kicad_netlist
 from kicad_netlist import TOKEN, children, parse, project_symbol_libs, read, symbol_lib_path, value
 
-# Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_format.md §8).
+# Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_usage.md section 4).
 KNOWN_DIFFERENCES = {
     "design": "only `source` and `tool` are written; both differ by design",
     "libparts / libraries": "not written",

@@ -1,3 +1,34 @@
+//! Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to
+//! the KiCad 9 PCB editor (pcbnew) as a netlist.
+//!
+//! ```
+//! use cuprite_wire::{basic::{Capacitor0603, OpAmpSot23, Resistor0603}, circuit::CircuitBuilder};
+//!
+//! // An RC low-pass filter followed by a voltage follower.
+//! let mut c: CircuitBuilder = CircuitBuilder::new();
+//! let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
+//! let c1 = c.instantiate_part_named("c1", Box::new(Capacitor0603::new("100n")));
+//! let amp = c.instantiate_part_named("amp", Box::new(OpAmpSot23::new("LMV321")));
+//! c.connect(r1["2"], c1["1"]);
+//! c.connect(r1["2"], amp[OpAmpSot23::IN_P]);
+//! c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
+//! ```
+//!
+//! A circuit is described with a [`circuit::CircuitBuilder`] and built into a
+//! [`netlist::Netlist`], which is exported to KiCad ([`netlist::Netlist::to_kicad`]), to SPICE
+//! ([`netlist::Netlist::to_spice`]) or checked by ERC ([`netlist::Netlist::erc`]).
+//!
+//! # Guides
+//!
+//! | Guide | Contents |
+//! |---|---|
+//! | [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md) | parts, labels, subcircuits, errors ([`circuit`], [`parts`], [`subcircuit`]) |
+//! | [Exporting a KiCad netlist](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_netlist_usage.md) | the netlist for pcbnew ([`kicad`]) |
+//! | [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) | [`kicad_part!`] and [`basic`] |
+//! | [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) | [`spice_part!`], the `sim` block, dialects |
+//! | [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md) | test benches and ngspice ([`spice`]) |
+//! | [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md) | [`erc`] |
+
 pub mod basic;
 pub mod circuit;
 pub mod erc;
