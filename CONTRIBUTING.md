@@ -33,10 +33,14 @@ others get the same environment.
 
    ```sh
    cargo fmt --all --check
-   cargo clippy --workspace --all-targets -- -D warnings
-   cargo test --workspace --features kicad-libraries
+   cargo clippy --workspace --all-targets --features shared-ngspice -- -D warnings
+   cargo clippy -p cuprite_wire --all-targets -- -D warnings
+   cargo test --workspace --features kicad-libraries,shared-ngspice
    cargo test -p cuprite_wire_kicad_lib -- --ignored
    ```
+
+   The `shared-ngspice` tests and `cuprite_wire_embedded_hal` need the ngspice shared library
+   (`libngspice0`, in the devcontainer).
 
    The code is formatted with the default rustfmt settings.
 

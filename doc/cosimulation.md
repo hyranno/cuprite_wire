@@ -100,7 +100,39 @@ impl DeviceModel for Controller {
 Models of a particular microcontroller (its registers, its ADC timing) belong to the user's code;
 build them on these.
 
-## 4. The netlist and the run
+## 4. Firmware written with embedded-hal
+
+The crate `cuprite_wire_embedded_hal` (`crates/embedded_hal`) runs the control logic of a firmware
+written against the `embedded-hal` 1.0 traits, unchanged, as the model of a device. A complete
+example is `crates/embedded_hal/examples/pwm_dac_firmware.rs`
+(`cargo run -p cuprite_wire_embedded_hal --example pwm_dac_firmware`): the regulator of section 3
+as a firmware module that depends only on `core` and `embedded-hal`.
+
+```rust
+use cuprite_wire_embedded_hal::{Board, Firmware};
+
+let board = Board::new();
+let regulator = Regulator::new(board.pwm("pwm", 10e-6, 1000), board.adc("adc", 12, 3.3));
+let mut mcu = Firmware::new(&board, 20e-6, regulator, Regulator::step);
+deck.run_with(DeviceModels::new().with("mcu", &mut mcu))?;
+let regulator = mcu.into_task();   // check its state after the run
+```
+
+- `Board` hands out the pins of the `CosimDevice` as `embedded-hal` objects:
+  `input_pin(pin)` (`InputPin`), `output_pin(pin)` (`OutputPin`, `StatefulOutputPin`),
+  `pwm(pin, period, max_duty)` (`SetDutyCycle`; a new duty takes effect at the next period) and
+  `adc(pin, bits, reference)` (`AdcChannel`). The errors are `Infallible`.
+- **The firmware runs as a periodic task.** `Firmware::new(&board, period, task, step)` calls
+  `step(&mut task)` every `period` seconds from time 0, as a timer interrupt or the body of a super
+  loop would. At each call the inputs and ADC codes are those of that time, and the outputs set
+  during the call change from that time on. Blocking waits (`DelayNs`) cannot advance the simulated
+  time from inside a call, so they are not provided: write waits as states of the task.
+- **ADC.** `embedded-hal` 1.0 has no ADC trait. The crate has a minimal one, `AdcChannel`
+  (`read() -> u16`), but a firmware built for the target cannot depend on the crate: it defines
+  its own trait, implemented by its HAL on the target and, in the test, for `AdcPin` in one line
+  (`impl AnalogInput for AdcPin { fn read(&mut self) -> u16 { AdcChannel::read(self) } }`).
+
+## 5. The netlist and the run
 
 The device is written as a subcircuit `cuprite_cosim_<name>`, so `deck.cir` in the run directory
 shows what ngspice simulates:

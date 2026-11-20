@@ -35,7 +35,8 @@ c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
 - **SPICE simulation.** A subcircuit is placed in a test bench with simulation-only sources and
   simulated with ngspice from `cargo test`. Digital stimuli (UART, PWM, open-drain lines) drive it
   through the electrical models of the pins, and a Rust model of a microcontroller's firmware can
-  read and drive it in a closed loop (co-simulation). Vendor models written for PSpice or LTspice
+  read and drive it in a closed loop (co-simulation), including firmware code written against the
+  `embedded-hal` traits (`cuprite_wire_embedded_hal`). Vendor models written for PSpice or LTspice
   are read as they are, through ngspice's compatibility modes.
 - **KiCad netlist.** The board is exported as a KiCad S-expression netlist (`.net`) that pcbnew
   imports directly. The output is deterministic.
