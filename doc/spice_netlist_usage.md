@@ -217,6 +217,9 @@ co-simulation with Rust models; plain runs should keep using the CLI:
 - After an error ngspice cannot recover from (it reports `cannot recover and awaits to be reset`),
   the library is unloaded and loaded again for the next run.
 
+`SharedNgspice::run_with` (and `SpiceDeck::run_with`) runs a deck with Rust models of devices:
+see `doc/cosimulation.md`.
+
 `Ngspice` and `SharedNgspice` implement the `Simulator` trait (`run(&deck)`), so a test can run on
 either. The simulation tests of the library run on both when the feature is enabled.
 

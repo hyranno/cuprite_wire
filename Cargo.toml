@@ -64,3 +64,9 @@ required-features = ["vendor-models"]
 [[example]]
 name = "sensor_frontend"
 test = true
+
+# Co-simulation with a Rust model of a microcontroller; needs the ngspice shared library.
+[[example]]
+name = "pwm_dac_feedback"
+required-features = ["shared-ngspice"]
+test = true

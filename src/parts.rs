@@ -36,6 +36,13 @@ pub trait Part: Debug + DynClone {
     fn spice(&self) -> Option<SpicePartInfo> {
         None
     }
+    /// The device of a co-simulation this part is: only
+    /// [`CosimDevice`](crate::spice::cosim::CosimDevice) is one.
+    #[cfg(feature = "shared-ngspice")]
+    #[doc(hidden)]
+    fn cosim_device(&self) -> Option<&crate::spice::cosim::CosimDevice> {
+        None
+    }
     /// Electrical types of the pins for ERC, keyed by pin ID. Defaults to those of the KiCad
     /// information. ERC treats pins without a type as [`PinType::Passive`].
     fn pin_types(&self) -> BTreeMap<String, PinType> {

@@ -256,6 +256,8 @@ pub enum SimulationError {
     },
     /// The ngspice shared library cannot be loaded or used.
     SharedLibrary(String),
+    /// The models of a co-simulation do not match the devices of the deck.
+    Cosimulation(String),
 }
 
 impl fmt::Display for SimulationError {
@@ -273,6 +275,7 @@ impl fmt::Display for SimulationError {
             SimulationError::SharedLibrary(reason) => {
                 write!(f, "cannot use the ngspice shared library: {reason}")
             }
+            SimulationError::Cosimulation(reason) => write!(f, "cannot co-simulate: {reason}"),
         }
     }
 }
