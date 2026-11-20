@@ -1,0 +1,19 @@
+[package]
+name = "cuprite_wire_embedded_hal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["embedded-hal", "spice", "simulation", "firmware", "testing"]
+categories = ["simulation", "embedded", "development-tools::testing"]
+description = "embedded-hal implementations that run firmware against a cuprite_wire circuit simulated with ngspice"
+
+[dependencies]
+cuprite_wire = { workspace = true, features = ["shared-ngspice"] }
+embedded-hal = "1.0.0"
+
+# Runs the test of the example with `cargo test` (it needs the ngspice shared library, like the
+# co-simulation tests of cuprite_wire).
+[[example]]
+name = "pwm_dac_firmware"
+test = true
