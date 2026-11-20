@@ -24,6 +24,10 @@ use crate::{
     },
 };
 
+/// The node of the generated subcircuits that their `gnd` pin connects to. ngspice reads a node
+/// named `gnd` as the ground (node 0), even as a port of a subcircuit, so it cannot be used there.
+pub(crate) const SUBCIRCUIT_REFERENCE: &str = "ref";
+
 /// The resistance of an output in the high-impedance state.
 pub const HIZ_RESISTANCE: f64 = 1e9;
 
@@ -313,8 +317,8 @@ impl OutputCharacteristics {
     }
 
     /// The lines of the high-impedance switch from the source node `drive` to `out`,
-    /// closed while the voltage of `enable` is above 0.5 V: an `S` element `SO<suffix>` and its
-    /// model `hiz<suffix>`.
+    /// closed while the voltage of `enable` above [`SUBCIRCUIT_REFERENCE`] is above 0.5 V:
+    /// an `S` element `SO<suffix>` and its model `hiz<suffix>`.
     pub(crate) fn switch_lines(
         &self,
         suffix: &str,
@@ -323,7 +327,7 @@ impl OutputCharacteristics {
         enable: &str,
     ) -> String {
         format!(
-            "SO{suffix} {drive} {out} {enable} gnd hiz{suffix}\n\
+            "SO{suffix} {drive} {out} {enable} {SUBCIRCUIT_REFERENCE} hiz{suffix}\n\
              .model hiz{suffix} SW( vt=0.5 vh=0 ron={} roff={} )\n",
             spice_number(self.resistance),
             spice_number(HIZ_RESISTANCE)
@@ -553,18 +557,21 @@ impl DigitalDriver {
     fn subcircuit(&self) -> (String, String) {
         let output = &self.output;
         let mut body = format!(
-            "VD d gnd {}\n",
+            "VD d {SUBCIRCUIT_REFERENCE} {}\n",
             self.sequence.voltage_waveform(output).to_spice()
         );
         match self.sequence.enable_waveform(output.enable_transition()) {
             None => body.push_str(&format!("RO d out {}\n", spice_number(output.resistance))),
             Some(enable) => {
-                body.push_str(&format!("VE e gnd {}\n", enable.to_spice()));
+                body.push_str(&format!(
+                    "VE e {SUBCIRCUIT_REFERENCE} {}\n",
+                    enable.to_spice()
+                ));
                 body.push_str(&output.switch_lines("", "d", "out", "e"));
             }
         }
         let name = format!("cuprite_digital_{:016x}", fnv1a(body.as_bytes()));
-        let text = format!(".subckt {name} out gnd\n{body}.ends {name}\n");
+        let text = format!(".subckt {name} out {SUBCIRCUIT_REFERENCE}\n{body}.ends {name}\n");
         (name, text)
     }
 }
@@ -785,8 +792,8 @@ mod tests {
         assert_eq!(
             text,
             format!(
-                ".subckt {name} out gnd\n\
-                 VD d gnd PWL( 0 0 1e-6 0 {edge_end} 3.3 )\n\
+                ".subckt {name} out ref\n\
+                 VD d ref PWL( 0 0 1e-6 0 {edge_end} 3.3 )\n\
                  RO d out 50\n\
                  .ends {name}\n"
             )
@@ -799,8 +806,8 @@ mod tests {
         assert_ne!(other, name);
         assert!(
             text.contains(&format!(
-                "VE e gnd PWL( 0 1 1e-6 1 {edge_end} 0 )\n\
-                     SO d out e gnd hiz\n\
+                "VE e ref PWL( 0 1 1e-6 1 {edge_end} 0 )\n\
+                     SO d out e ref hiz\n\
                      .model hiz SW( vt=0.5 vh=0 ron=50 roff=1e9 )\n"
             )),
             "{text}"

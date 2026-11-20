@@ -706,3 +706,39 @@ fn test_shared_library_recovers() {
     let sim = simulator.run(&deck("V = { 1 + 2 }")).unwrap();
     assert_eq!(sim.expect_value("out"), 3.0);
 }
+
+/// A driver whose `gnd` is 1 V above the ground drives relative to it.
+#[test]
+fn test_digital_driver_reference() {
+    let mut circuit = CircuitBuilder::new();
+    let sequence = DigitalSequence::new(Level::Low).at(1e-6, Level::High);
+    let driver = circuit.instantiate_part(DigitalDriver::new(
+        OutputCharacteristics::cmos(3.3),
+        sequence,
+    ));
+    let load = circuit.instantiate_part(Box::new(Resistor("1meg")));
+    let offset = circuit.instantiate_part(IndependentSource::voltage(1.0));
+    circuit.connect(driver[DigitalDriver::OUT], load["1"]);
+    circuit.label(driver[DigitalDriver::OUT], NetLabel::local("LINE"));
+    circuit.label(driver[DigitalDriver::GND], NetLabel::local("VSS"));
+    circuit.label(load["2"], NetLabel::local("VSS"));
+    circuit.label(offset[IndependentSource::P], NetLabel::local("VSS"));
+    circuit.label(offset[IndependentSource::N], NetLabel::global("GND"));
+    let deck = export(&circuit).deck().control([
+        "tran 10n 2u",
+        r#"let low = v("/LINE")[1]"#,
+        r#"let high = v("/LINE")[length(time) - 1]"#,
+        "print low high",
+    ]);
+    let sim = deck.run().unwrap();
+    assert!(
+        (sim.expect_value("low") - 1.0).abs() < 1e-3,
+        "{}",
+        sim.log()
+    );
+    assert!(
+        (sim.expect_value("high") - 4.3).abs() < 1e-3,
+        "{}",
+        sim.log()
+    );
+}

@@ -4,7 +4,7 @@ use crate::{
     parts::Part,
     spice::{
         ModelSource, SpiceElement, SpicePartInfo,
-        digital::{InputCharacteristics, OutputCharacteristics},
+        digital::{InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE},
     },
 };
 
@@ -138,12 +138,19 @@ impl CosimDevice {
     fn subcircuit(&self) -> String {
         let name = self.subcircuit_name();
         let ports: Vec<&str> = self.pins.iter().map(|p| p.name.as_str()).collect();
-        let mut text = format!(".subckt {name} {} {}\n", ports.join(" "), Self::GND);
+        let mut text = format!(
+            ".subckt {name} {} {SUBCIRCUIT_REFERENCE}\n",
+            ports.join(" ")
+        );
         for pin in &self.pins {
             let p = &pin.name;
             if let Some(output) = &pin.output {
-                text.push_str(&format!("VD_{p} d_{p} gnd DC 0 EXTERNAL\n"));
-                text.push_str(&format!("VE_{p} e_{p} gnd DC 0 EXTERNAL\n"));
+                text.push_str(&format!(
+                    "VD_{p} d_{p} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
+                ));
+                text.push_str(&format!(
+                    "VE_{p} e_{p} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
+                ));
                 text.push_str(&output.switch_lines(
                     &format!("_{p}"),
                     &format!("d_{p}"),
@@ -152,7 +159,7 @@ impl CosimDevice {
                 ));
             }
             if let Some(input) = &pin.input {
-                for element in input.load_elements(p, Self::GND) {
+                for element in input.load_elements(p, SUBCIRCUIT_REFERENCE) {
                     text.push_str(&format!(
                         "{}{}_{p} {} {}\n",
                         element.device,
@@ -215,12 +222,12 @@ mod tests {
         assert_eq!(device.pin_ids(), ["pa0", "adc", "gnd"]);
         assert_eq!(
             device.subcircuit(),
-            ".subckt cuprite_cosim_mcu pa0 adc gnd\n\
-             VD_pa0 d_pa0 gnd DC 0 EXTERNAL\n\
-             VE_pa0 e_pa0 gnd DC 0 EXTERNAL\n\
-             SO_pa0 d_pa0 pa0 e_pa0 gnd hiz_pa0\n\
+            ".subckt cuprite_cosim_mcu pa0 adc ref\n\
+             VD_pa0 d_pa0 ref DC 0 EXTERNAL\n\
+             VE_pa0 e_pa0 ref DC 0 EXTERNAL\n\
+             SO_pa0 d_pa0 pa0 e_pa0 ref hiz_pa0\n\
              .model hiz_pa0 SW( vt=0.5 vh=0 ron=50 roff=1e9 )\n\
-             CC_adc adc gnd 1e-11\n\
+             CC_adc adc ref 1e-11\n\
              .ends cuprite_cosim_mcu\n"
         );
         assert_eq!(CosimDevice::source_name("XU1", 'd', "PA0"), "v.xu1.vd_pa0");

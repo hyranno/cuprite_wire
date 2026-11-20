@@ -138,16 +138,17 @@ The device is written as a subcircuit `cuprite_cosim_<name>`, so `deck.cir` in t
 shows what ngspice simulates:
 
 ```text
-.subckt cuprite_cosim_mcu button led gnd
-CC_button button gnd 5e-12
-VD_led d_led gnd DC 0 EXTERNAL
-VE_led e_led gnd DC 0 EXTERNAL
-SO_led d_led led e_led gnd hiz_led
+.subckt cuprite_cosim_mcu button led ref
+CC_button button ref 5e-12
+VD_led d_led ref DC 0 EXTERNAL
+VE_led e_led ref DC 0 EXTERNAL
+SO_led d_led led e_led ref hiz_led
 .model hiz_led SW( vt=0.5 vh=0 ron=50 roff=1e9 )
 .ends cuprite_cosim_mcu
 ```
 
-An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
+The `gnd` pin is the port `ref` (ngspice reads a node named `gnd` as the ground, even inside a
+subcircuit). An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
 resistance, closed by the `EXTERNAL` source `VE_<pin>` (1 while driving, 0 in `HiZ`). An input pin
 has the elements of `DigitalLoad` (capacitance, pull resistor, leakage). The values of the
 `EXTERNAL` sources come from the models through the callbacks of the shared library, so the deck

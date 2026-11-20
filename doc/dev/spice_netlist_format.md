@@ -268,7 +268,15 @@ Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Comman
   library (`dlclose`) and loading it again prints the banner again and runs the next deck normally.
 - `remcirc` and `destroy all` free the circuit and the plots after a run.
 
-### 6.2 Callbacks for co-simulation
+### 6.2 Node `gnd`
+
+Verified with ngspice 44.2:
+
+- A node named `gnd` is the ground (node 0) everywhere, also as a port of a subcircuit:
+  in `.subckt sub gnd`, elements on `gnd` connect to the ground, not to the node the port is
+  connected to. Generated subcircuits name their reference port `ref` instead.
+
+### 6.3 Callbacks for co-simulation
 
 Verified with libngspice 44.2 (`ngSpice_Init` with `SendData` / `SendInitData`,
 `ngSpice_Init_Sync` with `GetVSRCData`, `ngSpice_SetBkpt`):

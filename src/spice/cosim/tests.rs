@@ -5,7 +5,7 @@ use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
     spice::{
-        SimulationError, SpiceDeck, Table,
+        IndependentSource, SimulationError, SpiceDeck, Table,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
@@ -245,4 +245,48 @@ fn test_model_panics() {
     deck.run_with(DeviceModels::new().with("mcu", &mut player))
         .unwrap();
     assert!(player.steps > 0);
+}
+
+/// With the device's `gnd` 1 V above the ground, the pins read and drive relative to it.
+#[test]
+fn test_reference_above_ground() {
+    struct Probe {
+        sense: f64,
+    }
+    impl DeviceModel for Probe {
+        fn step(&mut self, io: &mut DeviceIo<'_>) {
+            self.sense = io.voltage("sense");
+            io.set("out", Level::High);
+        }
+    }
+    let mut circuit = CircuitBuilder::new();
+    let device = circuit.instantiate_part(
+        CosimDevice::new("mcu")
+            .input("sense", InputCharacteristics::cmos(3.3))
+            .output("out", OutputCharacteristics::cmos(3.3)),
+    );
+    let offset = circuit.instantiate_part(IndependentSource::voltage(1.0));
+    let sense = circuit.instantiate_part(IndependentSource::voltage(2.5));
+    circuit.connect(device["sense"], sense[IndependentSource::P]);
+    circuit.label(device["out"], NetLabel::local("LINE"));
+    for vss in [device[CosimDevice::GND], offset[IndependentSource::P]] {
+        circuit.label(vss, NetLabel::local("VSS"));
+    }
+    for gnd in [offset[IndependentSource::N], sense[IndependentSource::N]] {
+        circuit.label(gnd, NetLabel::global("GND"));
+    }
+    let deck = circuit
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control(["tran 10n 1u".to_string(), format!("wrdata line.txt {LINE}")]);
+    let mut probe = Probe { sense: 0.0 };
+    let table = table(&deck, DeviceModels::new().with("mcu", &mut probe));
+    assert!((probe.sense - 1.5).abs() < 1e-6, "{}", probe.sense);
+    let end = *table.scale().last().unwrap();
+    let out = table.interpolate(LINE, end).unwrap();
+    assert!((out - 4.3).abs() < 1e-3, "{out}");
 }
