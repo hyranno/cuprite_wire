@@ -18,6 +18,74 @@ pub fn interface<const N: usize>() -> [NodeIndex; N] {
     std::array::from_fn(NodeIndex::new)
 }
 
+/// Derives [`Interface`] for a struct with one type parameter whose fields all have that type.
+pub use cuprite_wire_macros::Interface;
+
+/// The interface of a subcircuit: the nodes the circuit around it connects to, in a fixed order.
+///
+/// A subcircuit's interface is usually a struct generic over the type of its fields, deriving this
+/// trait. The same struct holds the nodes inside the subcircuit, the nodes of an instance in the
+/// circuit around it, and other values per node, such as the pin types given to
+/// [`check_subcircuit`](crate::erc::check_subcircuit):
+///
+/// ```
+/// use cuprite_wire::subcircuit::Interface;
+/// use petgraph::graph::NodeIndex;
+///
+/// #[derive(Interface)]
+/// pub struct FollowerPorts<T = NodeIndex> {
+///     pub input: T,
+///     pub output: T,
+///     pub vcc: T,
+///     pub gnd: T,
+/// }
+/// ```
+///
+/// It is also implemented for arrays (`[NodeIndex; 2]`) and for `()` (no interface).
+pub trait Interface<T = NodeIndex>: Sized {
+    /// The same interface holding `U`s.
+    type With<U>: Interface<U>;
+
+    /// Creates the interface from its values in order: `f(0)`, `f(1)`, ...
+    fn from_fn(f: impl FnMut(usize) -> T) -> Self;
+
+    /// The values in order.
+    fn values(&self) -> Vec<&T>;
+
+    /// The names of the values in order: the field names, or the indices of an array.
+    fn names() -> Vec<String>;
+}
+
+impl<T, const N: usize> Interface<T> for [T; N] {
+    type With<U> = [U; N];
+
+    fn from_fn(f: impl FnMut(usize) -> T) -> Self {
+        std::array::from_fn(f)
+    }
+
+    fn values(&self) -> Vec<&T> {
+        self.iter().collect()
+    }
+
+    fn names() -> Vec<String> {
+        (0..N).map(|index| index.to_string()).collect()
+    }
+}
+
+impl<T> Interface<T> for () {
+    type With<U> = ();
+
+    fn from_fn(_f: impl FnMut(usize) -> T) -> Self {}
+
+    fn values(&self) -> Vec<&T> {
+        Vec::new()
+    }
+
+    fn names() -> Vec<String> {
+        Vec::new()
+    }
+}
+
 pub trait SubcircuitGenerator: Debug + Clone {
     type Options;
 
@@ -135,5 +203,45 @@ impl<B> SubcircuitInstance<B> {
             name,
             location,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Interface, Debug, PartialEq)]
+    struct Ports<T = NodeIndex> {
+        input: T,
+        output: T,
+    }
+
+    #[test]
+    fn test_derived_interface() {
+        let ports = <Ports>::from_fn(NodeIndex::new);
+        assert_eq!(
+            ports,
+            Ports {
+                input: NodeIndex::new(0),
+                output: NodeIndex::new(1)
+            }
+        );
+        assert_eq!(ports.values(), [&ports.input, &ports.output]);
+        assert_eq!(<Ports as Interface>::names(), ["input", "output"]);
+        let mut labels = ["a", "b"].into_iter();
+        let labels: <Ports as Interface>::With<&str> =
+            Interface::from_fn(|_| labels.next().unwrap());
+        assert_eq!(labels.values(), [&"a", &"b"]);
+    }
+
+    #[test]
+    fn test_array_and_unit_interfaces() {
+        let nodes = <[NodeIndex; 3]>::from_fn(NodeIndex::new);
+        assert_eq!(nodes, [0, 1, 2].map(NodeIndex::new));
+        assert_eq!(nodes.values(), nodes.iter().collect::<Vec<_>>());
+        assert_eq!(<[NodeIndex; 3] as Interface>::names(), ["0", "1", "2"]);
+        <() as Interface>::from_fn(|_| unreachable!());
+        assert!(Interface::<NodeIndex>::values(&()).is_empty());
+        assert!(<() as Interface>::names().is_empty());
     }
 }

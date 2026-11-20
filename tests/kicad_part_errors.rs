@@ -1,4 +1,4 @@
-//! Compile errors of `kicad_part!` and `spice_part!`, checked with trybuild (`tests/ui/*.stderr`).
+//! Compile errors of `kicad_part!`, `spice_part!` and `#[derive(Interface)]`, checked with trybuild (`tests/ui/*.stderr`).
 //! Run with `TRYBUILD=overwrite` to (re)generate the expected output.
 
 #[test]
