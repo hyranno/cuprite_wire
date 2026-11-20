@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut bench, input, _) = common::two_stage_filter();
     let source =
         bench.instantiate_part_named("source", IndependentSource::voltage(0.0).with_ac(1.0));
-    bench.connect(source["p"], input);
-    bench.label(source["n"], NetLabel::global("GND"));
+    bench.connect(source[IndependentSource::P], input);
+    bench.label(source[IndependentSource::N], NetLabel::global("GND"));
 
     let netlist = bench
         .build(&())

@@ -71,7 +71,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::bench::{Bench, assert_near, value};
+    use crate::bench::{Bench, assert_near};
 
     #[test]
     fn erc() {
@@ -111,7 +111,7 @@ mod tests {
                 "tran 100u 600m",
                 r#"meas tran vref FIND v("/VREF") AT=600m"#,
             ]);
-            assert_near("vref", value(&sim, "vref"), supply / 2.0, 1e-3);
+            assert_near("vref", sim.expect_value("vref"), supply / 2.0, 1e-3);
         }
     }
 }

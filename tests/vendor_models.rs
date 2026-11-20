@@ -116,13 +116,19 @@ fn test_tps3899() {
     let pullup = c.instantiate_part(Box::new(Resistor0603::new("1k")));
     let ctr = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
     let cts = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
-    c.connect(vdd["p"], u["VDD"]);
-    c.connect(sense["p"], u["SENSE"]);
+    c.connect(vdd[IndependentSource::P], u["VDD"]);
+    c.connect(sense[IndependentSource::P], u["SENSE"]);
     c.connect(pullup["1"], u["VDD"]);
     c.connect(pullup["2"], u[Tps3899::RESET_N]);
     c.connect(ctr["1"], u["CTR"]);
     c.connect(cts["1"], u["CTS"]);
-    for pin in [vdd["n"], sense["n"], ctr["2"], cts["2"], u["GND"]] {
+    for pin in [
+        vdd[IndependentSource::N],
+        sense[IndependentSource::N],
+        ctr["2"],
+        cts["2"],
+        u["GND"],
+    ] {
         c.label(pin, NetLabel::global("GND"));
     }
     c.label(u[Tps3899::RESET_N], NetLabel::local("RESET"));
@@ -160,12 +166,17 @@ fn test_lm358_units() {
     let supply = c.instantiate_part(IndependentSource::voltage(5.0));
     let a = c.instantiate_part(IndependentSource::voltage(1.0));
     let b = c.instantiate_part(IndependentSource::voltage(2.0));
-    c.connect(supply["p"], u["8"]);
-    c.connect(a["p"], u["3"]);
-    c.connect(b["p"], u["5"]);
+    c.connect(supply[IndependentSource::P], u["8"]);
+    c.connect(a[IndependentSource::P], u["3"]);
+    c.connect(b[IndependentSource::P], u["5"]);
     c.connect(u["1"], u["2"]);
     c.connect(u["7"], u["6"]);
-    for pin in [supply["n"], a["n"], b["n"], u["4"]] {
+    for pin in [
+        supply[IndependentSource::N],
+        a[IndependentSource::N],
+        b[IndependentSource::N],
+        u["4"],
+    ] {
         c.label(pin, NetLabel::global("GND"));
     }
     c.label(u["1"], NetLabel::local("OUT_A"));

@@ -118,6 +118,11 @@ pub struct IndependentSource {
 }
 
 impl IndependentSource {
+    /// The positive pin.
+    pub const P: &'static str = "p";
+    /// The negative pin.
+    pub const N: &'static str = "n";
+
     pub fn voltage(dc: f64) -> Box<Self> {
         Box::new(IndependentSource {
             kind: SourceKind::Voltage,
@@ -169,7 +174,7 @@ impl Part for IndependentSource {
         self.device().to_string()
     }
     fn pin_ids(&self) -> Vec<String> {
-        vec!["p".into(), "n".into()]
+        vec![Self::P.into(), Self::N.into()]
     }
     fn value(&self) -> String {
         self.args()
@@ -177,7 +182,7 @@ impl Part for IndependentSource {
     fn spice(&self) -> Option<SpicePartInfo> {
         Some(SpicePartInfo::element(SpiceElement::new(
             self.device(),
-            ["p", "n"],
+            [Self::P, Self::N],
             self.args(),
         )))
     }
@@ -188,12 +193,19 @@ impl Part for IndependentSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ammeter;
 
+impl Ammeter {
+    /// The pin the measured current flows into.
+    pub const P: &'static str = "p";
+    /// The pin the measured current flows out of.
+    pub const N: &'static str = "n";
+}
+
 impl Part for Ammeter {
     fn get_ref_base_name(&self) -> String {
         "VM".into()
     }
     fn pin_ids(&self) -> Vec<String> {
-        vec!["p".into(), "n".into()]
+        vec![Self::P.into(), Self::N.into()]
     }
     fn value(&self) -> String {
         "DC 0".into()
@@ -201,7 +213,7 @@ impl Part for Ammeter {
     fn spice(&self) -> Option<SpicePartInfo> {
         Some(SpicePartInfo::element(SpiceElement::new(
             'V',
-            ["p", "n"],
+            [Self::P, Self::N],
             "DC 0",
         )))
     }

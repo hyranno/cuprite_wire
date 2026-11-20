@@ -33,8 +33,8 @@ fn interface() -> HashSet<NodeIndex> {
 fn rc_filter_bench(source: Box<IndependentSource>) -> CircuitBuilder {
     let mut circuit = rc_filter();
     let v = circuit.instantiate_part_named("source", source);
-    circuit.label(v["p"], NetLabel::local("IN"));
-    circuit.label(v["n"], NetLabel::global("GND"));
+    circuit.label(v[IndependentSource::P], NetLabel::local("IN"));
+    circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
     circuit
 }
 
@@ -59,9 +59,9 @@ fn test_golden_hierarchy() {
     let second = circuit.instantiate_subcircuit(RcStage, &interface(), |o: &()| *o);
     circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
     let v = circuit.instantiate_part(IndependentSource::voltage(1.0));
-    circuit.connect(v["p"], first[&NodeIndex::new(0)]);
-    circuit.label(v["p"], NetLabel::local("IN"));
-    circuit.label(v["n"], NetLabel::global("GND"));
+    circuit.connect(v[IndependentSource::P], first[&NodeIndex::new(0)]);
+    circuit.label(v[IndependentSource::P], NetLabel::local("IN"));
+    circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
     let connector = circuit.instantiate_part_named(
         "connector",
         Box::new(CustomPart {
@@ -275,7 +275,7 @@ fn test_simulate_ac() {
     ]);
     let sim = deck.run().unwrap();
     let expected = 1.0 / (2.0 * std::f64::consts::PI * 10e3 * 100e-9);
-    let f3db = sim.value("f3db").unwrap();
+    let f3db = sim.expect_value("f3db");
     assert!(
         (f3db / expected - 1.0).abs() < 0.01,
         "f3db = {f3db}, expected {expected}"
@@ -323,12 +323,12 @@ fn test_simulate_operating_point() {
     let meter = circuit.instantiate_part(Box::new(Ammeter));
     let top = circuit.instantiate_part(Box::new(Resistor("1k")));
     let bottom = circuit.instantiate_part(Box::new(Resistor("3k")));
-    circuit.connect(v["p"], meter["p"]);
-    circuit.connect(meter["n"], top["1"]);
+    circuit.connect(v[IndependentSource::P], meter[Ammeter::P]);
+    circuit.connect(meter[Ammeter::N], top["1"]);
     circuit.connect(top["2"], bottom["1"]);
     circuit.label(bottom["1"], NetLabel::local("MID"));
     circuit.label(bottom["2"], NetLabel::global("GND"));
-    circuit.label(v["n"], NetLabel::global("GND"));
+    circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
     let deck = export(&circuit).deck().control([
         "op",
         r#"let mid = v("/MID")"#,
@@ -337,12 +337,12 @@ fn test_simulate_operating_point() {
     ]);
     let sim = deck.run().unwrap();
     assert!(
-        (sim.value("mid").unwrap() - 7.5).abs() < 1e-6,
+        (sim.expect_value("mid") - 7.5).abs() < 1e-6,
         "{}",
         sim.log()
     );
     assert!(
-        (sim.value("current").unwrap() - 2.5e-3).abs() < 1e-9,
+        (sim.expect_value("current") - 2.5e-3).abs() < 1e-9,
         "{}",
         sim.log()
     );
@@ -361,18 +361,18 @@ fn test_simulate_subcircuit_model() {
     circuit.label(ground["2"], NetLabel::global("GND"));
     circuit.label(amp["out"], NetLabel::local("OUT"));
     let input = circuit.instantiate_part(IndependentSource::voltage(0.1));
-    circuit.connect(input["p"], amp["in_p"]);
-    circuit.label(input["n"], NetLabel::global("GND"));
+    circuit.connect(input[IndependentSource::P], amp["in_p"]);
+    circuit.label(input[IndependentSource::N], NetLabel::global("GND"));
     let supply = circuit.instantiate_part(IndependentSource::voltage(5.0));
-    circuit.connect(supply["p"], amp["vdd"]);
-    circuit.connect(supply["n"], amp["vss"]);
-    circuit.label(supply["n"], NetLabel::global("GND"));
+    circuit.connect(supply[IndependentSource::P], amp["vdd"]);
+    circuit.connect(supply[IndependentSource::N], amp["vss"]);
+    circuit.label(supply[IndependentSource::N], NetLabel::global("GND"));
 
     let deck = export(&circuit)
         .deck()
         .control(["op", r#"let out = v("/OUT")"#, "print out"]);
     let sim = deck.run().unwrap();
-    let out = sim.value("out").unwrap();
+    let out = sim.expect_value("out");
     assert!((out - 1.0).abs() < 1e-3, "out = {out}");
 }
 
@@ -398,10 +398,10 @@ fn test_simulate_pspice_model() {
         }));
         let input = circuit.instantiate_part(IndependentSource::voltage(1.5));
         let load = circuit.instantiate_part(Box::new(Resistor("1k")));
-        circuit.connect(input["p"], window["in"]);
+        circuit.connect(input[IndependentSource::P], window["in"]);
         circuit.connect(window["out"], load["1"]);
         circuit.label(window["out"], NetLabel::local("OUT"));
-        circuit.label(input["n"], NetLabel::global("GND"));
+        circuit.label(input[IndependentSource::N], NetLabel::global("GND"));
         circuit.label(load["2"], NetLabel::global("GND"));
         export(&circuit)
             .deck()
@@ -417,7 +417,7 @@ fn test_simulate_pspice_model() {
     );
     let sim = pspice.run().unwrap();
     assert!(
-        (sim.value("out").unwrap() - 5.0).abs() < 1e-6,
+        (sim.expect_value("out") - 5.0).abs() < 1e-6,
         "{}",
         sim.log()
     );

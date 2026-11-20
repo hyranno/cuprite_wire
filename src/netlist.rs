@@ -577,10 +577,10 @@ mod tests {
         let mut circuit = CircuitBuilder::<()>::new();
         let v = circuit.instantiate_part(IndependentSource::voltage(5.0));
         let r = circuit.instantiate_part(Box::new(Resistor("1k")));
-        circuit.connect(v["p"], r["1"]);
-        circuit.connect(v["n"], r["2"]);
+        circuit.connect(v[IndependentSource::P], r["1"]);
+        circuit.connect(v[IndependentSource::N], r["2"]);
         let v2 = circuit.instantiate_part(IndependentSource::voltage(5.0));
-        circuit.connect(v2["p"], v2["n"]);
+        circuit.connect(v2[IndependentSource::P], v2[IndependentSource::N]);
         let netlist = circuit.build(&()).to_netlist().unwrap();
         assert_eq!(
             summary(&netlist),

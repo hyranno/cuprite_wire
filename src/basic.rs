@@ -135,7 +135,7 @@ mod tests {
             .deck()
             .control(["op", r#"let out = v("/OUT")"#, "print out"]);
         let sim = deck.run().unwrap();
-        sim.value("out").unwrap_or_else(|| panic!("{}", sim.log()))
+        sim.expect_value("out")
     }
 
     /// Channel B of the dual op-amp as a non-inverting amplifier with a gain of 11.
@@ -154,12 +154,12 @@ mod tests {
         circuit.connect(amp["out_a"], amp["in_n_a"]);
         circuit.label(amp["in_p_a"], NetLabel::global("GND"));
         let input = circuit.instantiate_part(IndependentSource::voltage(0.1));
-        circuit.connect(input["p"], amp["in_p_b"]);
-        circuit.label(input["n"], NetLabel::global("GND"));
+        circuit.connect(input[IndependentSource::P], amp["in_p_b"]);
+        circuit.label(input[IndependentSource::N], NetLabel::global("GND"));
         let supply = circuit.instantiate_part(IndependentSource::voltage(5.0));
-        circuit.connect(supply["p"], amp["vcc"]);
-        circuit.connect(supply["n"], amp["vee"]);
-        circuit.label(supply["n"], NetLabel::global("GND"));
+        circuit.connect(supply[IndependentSource::P], amp["vcc"]);
+        circuit.connect(supply[IndependentSource::N], amp["vee"]);
+        circuit.label(supply[IndependentSource::N], NetLabel::global("GND"));
         let out = out_voltage(&circuit);
         assert!((out - 1.1).abs() < 1e-3, "out = {out}");
     }
@@ -179,8 +179,8 @@ mod tests {
             let d = circuit.instantiate_part(diode);
             let source = circuit.instantiate_part(IndependentSource::current(current));
             // The current flows from p through the source to n, so into the anode.
-            circuit.label(source["p"], NetLabel::global("GND"));
-            circuit.connect(source["n"], d["a"]);
+            circuit.label(source[IndependentSource::P], NetLabel::global("GND"));
+            circuit.connect(source[IndependentSource::N], d["a"]);
             circuit.label(d["a"], NetLabel::local("OUT"));
             circuit.label(d["k"], NetLabel::global("GND"));
             let out = out_voltage(&circuit);

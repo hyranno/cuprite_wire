@@ -233,10 +233,17 @@ fn reset_voltage(part: Box<dyn Part>, pins: SupervisorPins, sense: f64) -> Resul
     let supply = circuit.instantiate_part(IndependentSource::voltage(3.3));
     let input = circuit.instantiate_part(IndependentSource::voltage(sense));
     let load = circuit.instantiate_part(Box::new(Resistor::new("100k")));
-    circuit.connect(supply["p"], u[vdd]);
-    circuit.connect(input["p"], u[sense_pin]);
+    circuit.connect(supply[IndependentSource::P], u[vdd]);
+    circuit.connect(input[IndependentSource::P], u[sense_pin]);
     circuit.connect(load["1"], u[reset]);
-    for pin in [supply["n"], input["n"], load["2"], u[gnd], u[ctr], u[cts]] {
+    for pin in [
+        supply[IndependentSource::N],
+        input[IndependentSource::N],
+        load["2"],
+        u[gnd],
+        u[ctr],
+        u[cts],
+    ] {
         circuit.label(pin, NetLabel::global("GND"));
     }
     circuit.label(u[reset], NetLabel::local("RESET"));
