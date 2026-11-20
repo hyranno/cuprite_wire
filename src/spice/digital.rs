@@ -174,18 +174,10 @@ impl DigitalSequence {
             Level::High => Some(output.high),
             Level::HiZ => None,
         };
-        let swing = (output.high - output.low).abs();
         let mut pwl = Pwl::new(voltage(self.initial).unwrap_or(output.low));
         for &(time, level) in &self.events {
             if let Some(target) = voltage(level) {
-                pwl.ramp_to(time, target, |from, to| {
-                    let edge = if to > from {
-                        output.rise_time
-                    } else {
-                        output.fall_time
-                    };
-                    edge * (to - from).abs() / swing
-                });
+                pwl.ramp_to(time, target, |from, to| output.edge_duration(from, to));
             }
         }
         Waveform::Pwl(pwl.points)
@@ -218,19 +210,20 @@ impl DigitalSequence {
 }
 
 /// Points of a piecewise linear waveform built from ramps.
-struct Pwl {
-    points: Vec<(f64, f64)>,
+#[derive(Debug, Clone)]
+pub(crate) struct Pwl {
+    pub(crate) points: Vec<(f64, f64)>,
 }
 
 impl Pwl {
-    fn new(initial: f64) -> Self {
+    pub(crate) fn new(initial: f64) -> Self {
         Pwl {
             points: vec![(0.0, initial)],
         }
     }
 
     /// The value at `time`, which is not before the start of the last ramp.
-    fn value_at(&self, time: f64) -> f64 {
+    pub(crate) fn value_at(&self, time: f64) -> f64 {
         match self.points[..] {
             [.., (t0, v0), (t1, v1)] if time < t1 => {
                 if time <= t0 {
@@ -246,7 +239,7 @@ impl Pwl {
 
     /// Ramps from the value at `time` to `target` in `duration(from, target)` seconds,
     /// cutting the previous ramp short if it has not ended yet.
-    fn ramp_to(&mut self, time: f64, target: f64, duration: impl Fn(f64, f64) -> f64) {
+    pub(crate) fn ramp_to(&mut self, time: f64, target: f64, duration: impl Fn(f64, f64) -> f64) {
         if self.points.last().is_some_and(|&(_, v)| v == target) {
             // Already there, or ramping there.
             return;
@@ -303,8 +296,42 @@ impl OutputCharacteristics {
         self
     }
 
+    /// The time an edge from `from` to `to` volts takes: the rise or fall time, scaled by the
+    /// part of the swing it covers.
+    pub(crate) fn edge_duration(&self, from: f64, to: f64) -> f64 {
+        let edge = if to > from {
+            self.rise_time
+        } else {
+            self.fall_time
+        };
+        edge * (to - from).abs() / (self.high - self.low).abs()
+    }
+
+    /// The time the switch to and from `HiZ` takes (the shorter edge).
+    pub(crate) fn enable_transition(&self) -> f64 {
+        self.rise_time.min(self.fall_time)
+    }
+
+    /// The lines of the high-impedance switch from the source node `drive` to `out`,
+    /// closed while the voltage of `enable` is above 0.5 V: an `S` element `SO<suffix>` and its
+    /// model `hiz<suffix>`.
+    pub(crate) fn switch_lines(
+        &self,
+        suffix: &str,
+        drive: &str,
+        out: &str,
+        enable: &str,
+    ) -> String {
+        format!(
+            "SO{suffix} {drive} {out} {enable} gnd hiz{suffix}\n\
+             .model hiz{suffix} SW( vt=0.5 vh=0 ron={} roff={} )\n",
+            spice_number(self.resistance),
+            spice_number(HIZ_RESISTANCE)
+        )
+    }
+
     #[track_caller]
-    fn validate(&self) {
+    pub(crate) fn validate(&self) {
         assert!(
             self.low.is_finite() && self.high.is_finite() && self.low != self.high,
             "the output levels must be finite and differ: {} V and {} V",
@@ -438,8 +465,33 @@ impl InputCharacteristics {
         sequence
     }
 
+    /// The elements of the load between the pins `pin` and `gnd`: the capacitor (suffix `C`),
+    /// and the pull resistor and the leakage as their Norton equivalent (`P`, `I`).
+    pub(crate) fn load_elements(&self, pin: &str, gnd: &str) -> Vec<SpiceElement> {
+        let mut elements = Vec::new();
+        if self.capacitance > 0.0 {
+            elements.push(
+                SpiceElement::new('C', [pin, gnd], spice_number(self.capacitance)).with_suffix("C"),
+            );
+        }
+        let mut current = -self.leakage;
+        if let Some(pull) = self.pull {
+            elements.push(
+                SpiceElement::new('R', [pin, gnd], spice_number(pull.resistance)).with_suffix("P"),
+            );
+            current += pull.voltage / pull.resistance;
+        }
+        if current != 0.0 {
+            elements.push(
+                SpiceElement::new('I', [gnd, pin], format!("DC {}", spice_number(current)))
+                    .with_suffix("I"),
+            );
+        }
+        elements
+    }
+
     #[track_caller]
-    fn validate(&self) {
+    pub(crate) fn validate(&self) {
         assert!(
             self.threshold_low <= self.threshold_high,
             "the input thresholds must not cross: V_IL {} V, V_IH {} V",
@@ -504,15 +556,12 @@ impl DigitalDriver {
             "VD d gnd {}\n",
             self.sequence.voltage_waveform(output).to_spice()
         );
-        let transition = output.rise_time.min(output.fall_time);
-        match self.sequence.enable_waveform(transition) {
+        match self.sequence.enable_waveform(output.enable_transition()) {
             None => body.push_str(&format!("RO d out {}\n", spice_number(output.resistance))),
-            Some(enable) => body.push_str(&format!(
-                "VE e gnd {}\nSO d out e gnd hiz\n.model hiz SW( vt=0.5 vh=0 ron={} roff={} )\n",
-                enable.to_spice(),
-                spice_number(output.resistance),
-                spice_number(HIZ_RESISTANCE)
-            )),
+            Some(enable) => {
+                body.push_str(&format!("VE e gnd {}\n", enable.to_spice()));
+                body.push_str(&output.switch_lines("", "d", "out", "e"));
+            }
         }
         let name = format!("cuprite_digital_{:016x}", fnv1a(body.as_bytes()));
         let text = format!(".subckt {name} out gnd\n{body}.ends {name}\n");
@@ -585,32 +634,7 @@ impl Part for DigitalLoad {
         "DigitalLoad".into()
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        let input = &self.input;
-        let mut elements = Vec::new();
-        if input.capacitance > 0.0 {
-            elements.push(
-                SpiceElement::new('C', [Self::IN, Self::GND], spice_number(input.capacitance))
-                    .with_suffix("C"),
-            );
-        }
-        let mut current = -input.leakage;
-        if let Some(pull) = input.pull {
-            elements.push(
-                SpiceElement::new('R', [Self::IN, Self::GND], spice_number(pull.resistance))
-                    .with_suffix("P"),
-            );
-            current += pull.voltage / pull.resistance;
-        }
-        if current != 0.0 {
-            elements.push(
-                SpiceElement::new(
-                    'I',
-                    [Self::GND, Self::IN],
-                    format!("DC {}", spice_number(current)),
-                )
-                .with_suffix("I"),
-            );
-        }
+        let elements = self.input.load_elements(Self::IN, Self::GND);
         Some(if elements.is_empty() {
             // An ideal input draws nothing.
             SpicePartInfo::Excluded

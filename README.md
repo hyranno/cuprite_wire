@@ -34,8 +34,9 @@ c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
   Rust source that made the connection.
 - **SPICE simulation.** A subcircuit is placed in a test bench with simulation-only sources and
   simulated with ngspice from `cargo test`. Digital stimuli (UART, PWM, open-drain lines) drive it
-  through the electrical models of the pins. Vendor models written for PSpice or LTspice are read
-  as they are, through ngspice's compatibility modes.
+  through the electrical models of the pins, and a Rust model of a microcontroller's firmware can
+  read and drive it in a closed loop (co-simulation). Vendor models written for PSpice or LTspice
+  are read as they are, through ngspice's compatibility modes.
 - **KiCad netlist.** The board is exported as a KiCad S-expression netlist (`.net`) that pcbnew
   imports directly. The output is deterministic.
 
@@ -85,6 +86,7 @@ The devcontainer in `.devcontainer/` has all of them.
 | [`doc/kicad_part_macro.md`](doc/kicad_part_macro.md) | generating parts from KiCad symbols and footprints |
 | [`doc/spice_part_macro.md`](doc/spice_part_macro.md) | parts from SPICE models, dialects |
 | [`doc/spice_netlist_usage.md`](doc/spice_netlist_usage.md) | test benches and simulation with ngspice |
+| [`doc/cosimulation.md`](doc/cosimulation.md) | co-simulation with Rust models of microcontrollers |
 | [`doc/erc.md`](doc/erc.md) | the electrical rules check |
 
 The API reference is on [docs.rs](https://docs.rs/cuprite_wire).

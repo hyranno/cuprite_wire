@@ -32,6 +32,8 @@ pub struct SpiceNetlist {
     elements: Vec<SpiceLine>,
     /// SPICE node name of each net used by an element, keyed by the net name.
     nodes: BTreeMap<String, String>,
+    #[cfg(feature = "shared-ngspice")]
+    cosim_devices: Vec<crate::spice::cosim::CosimInstance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +120,9 @@ impl Netlist {
 
         // (element name, net indices, args, trace)
         let mut lines = Vec::new();
+        // (index into `lines`, device) of the co-simulated devices.
+        #[cfg(feature = "shared-ngspice")]
+        let mut cosim_lines = Vec::new();
         let mut includes = BTreeSet::new();
         let mut dialects = BTreeSet::new();
         // Lowercase name -> (definition, trace of the first user).
@@ -170,6 +175,10 @@ impl Netlist {
                         }
                     }
                 }
+                #[cfg(feature = "shared-ngspice")]
+                if let Some(device) = component.part.cosim_device() {
+                    cosim_lines.push((lines.len(), device.clone()));
+                }
                 lines.push((
                     element_name(element.device, &component.ref_name, &element.suffix),
                     nets,
@@ -195,6 +204,18 @@ impl Netlist {
                 nodes: nets.iter().map(|net| nodes[net].clone()).collect(),
                 args,
             })
+            .collect::<Vec<_>>();
+        #[cfg(feature = "shared-ngspice")]
+        let cosim_devices = cosim_lines
+            .into_iter()
+            .map(|(index, device)| {
+                let line: &SpiceLine = &elements[index];
+                crate::spice::cosim::CosimInstance {
+                    element: line.name.clone(),
+                    nodes: line.nodes.clone(),
+                    device,
+                }
+            })
             .collect();
         let nodes = nodes
             .into_iter()
@@ -209,6 +230,8 @@ impl Netlist {
                 models: models.into_values().map(|(text, _)| text).collect(),
                 elements,
                 nodes,
+                #[cfg(feature = "shared-ngspice")]
+                cosim_devices,
             },
         )
     }
@@ -335,6 +358,12 @@ fn check_element_names<'a>(
 }
 
 impl SpiceNetlist {
+    /// The co-simulated devices, with their elements and nodes.
+    #[cfg(feature = "shared-ngspice")]
+    pub(crate) fn cosim_devices(&self) -> &[crate::spice::cosim::CosimInstance] {
+        &self.cosim_devices
+    }
+
     /// Sets the title line (default: the crate name). Line breaks are replaced by spaces.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = title.into().lines().collect::<Vec<_>>().join(" ");

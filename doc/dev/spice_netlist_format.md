@@ -268,6 +268,27 @@ Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Comman
   library (`dlclose`) and loading it again prints the banner again and runs the next deck normally.
 - `remcirc` and `destroy all` free the circuit and the plots after a run.
 
+### 6.2 Callbacks for co-simulation
+
+Verified with libngspice 44.2 (`ngSpice_Init` with `SendData` / `SendInitData`,
+`ngSpice_Init_Sync` with `GetVSRCData`, `ngSpice_SetBkpt`):
+
+- A voltage source `V1 a b DC 0 EXTERNAL` takes its value from `GetVSRCData(&value, time, name, ...)`.
+  Inside a subcircuit the name has the instance path, in lowercase: `VPA0` in `XU1` is `v.xu1.vpa0`.
+- `GetVSRCData` is called about twice per accepted point (Newton iterations and trial points), but
+  never with a time before the last accepted point.
+- `SendInitData` is called when a plot starts, with its type (`op1`, `tran1`) and vectors;
+  `SendData` is called for every accepted point with the values of all vectors: node voltages
+  named by the node in lowercase (`/line` for `/LINE`, `xu1.d` inside `XU1`), branch currents
+  (`v.xu1.vpa0#branch`) and, in a transient analysis, the scale `time`. A deck running `op` and then
+  `tran` gives two plots.
+- `ngSpice_SetBkpt(time)` puts a time point at `time`. It works from inside `SendData`; before a
+  circuit is loaded it fails with `Error: no circuit loaded.`. Without a breakpoint, a source
+  changed at an accepted point only takes effect from the next one: a step meant for 1 us landed
+  about 8 ns late with `tran 10n`, and exactly on time with a breakpoint.
+- The callbacks run in the thread that called `ngSpice_Command` (the run is not in the background
+  thread unless `bg_run` is used).
+
 ## 7. Minimal form
 
 ```spice
