@@ -193,3 +193,36 @@ let counter = bench.instantiate_part_named("counter", counter);
 - The model runs at the time points of the analysis and at its input events: a model that changes
   its outputs by itself (an internal clock) does so at the next time point, so give the analysis a
   time step fine enough for it.
+
+### 6.1 Verilog designs (Verilator)
+
+`Verilator` builds Verilog sources into a library for `d_cosim`, as ngspice's `vlnggen` script
+does, and reads the ports of the top module to make the part:
+
+```rust
+use cuprite_wire::spice::xspice::Verilator;
+
+let model = Verilator::new([concat!(env!("CARGO_MANIFEST_DIR"), "/hdl/counter.v")])
+    .arg("--top-module").arg("counter")          // any Verilator argument
+    .build()?;                                   // Result<VerilatedModel, VerilatorError>
+let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristics::cmos(3.3));
+// pins: the input bits, the output bits, gnd: e.g. clk, rst, q_1, q_0, carry, gnd
+```
+
+- The build runs `verilator --cc` (C++ with the class prefix `Vlng`), reads the ports from the
+  generated class, and compiles the design with ngspice's `verilator_shim.cpp` and
+  `verilator_main.cpp` (`DEFAULT_SHIM_DIR`, `/usr/share/ngspice/scripts/src`) into a shared library
+  with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them).
+- Builds take a few seconds and are cached by the contents of the sources, the arguments and the
+  version of Verilator, in `cuprite_wire-verilator` in the temporary directory (`cache_dir` to
+  change it). A failed build returns `VerilatorError::Command` with the log, and keeps its
+  directory.
+- Ports are taken in the order of their declaration; a port of several bits gives a pin per bit,
+  `<name>_<bit>` from the most significant bit. `model.inputs()` / `model.outputs()` list them, to
+  build a `DCosim` with other characteristics per pin. Inout ports and ports wider than 32 bits are
+  not supported (`VerilatorError::Ports`).
+- Verilator is cycle-based: the design advances on input changes (the shim uses `After_input`),
+  so it needs a clock or other inputs to do anything. Delays (`#10`) need `--timing`, which this
+  build does not support.
+- Icarus Verilog is not used: the `ivlng.so` shim of Debian's ngspice 44.2 exports no symbols
+  (`undefined symbol: Cosim_setup`), and Debian's Icarus Verilog 12 has no `libvvp`.

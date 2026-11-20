@@ -2,9 +2,9 @@
 //! model, with its ports bridged to the analog pins of a part.
 //!
 //! The library implements `Cosim_setup` of ngspice's `cosim.h` (shipped with ngspice in
-//! `/usr/share/ngspice/scripts/src/ngspice/cosim.h`), such as a model written in C. Unlike
-//! `spice::cosim` (Rust models, with the `shared-ngspice` feature), it runs in the ngspice CLI as
-//! well.
+//! `/usr/share/ngspice/scripts/src/ngspice/cosim.h`): a model written in C, or a Verilog design
+//! built with [`Verilator`]. Unlike `spice::cosim` (Rust models, with the `shared-ngspice`
+//! feature), it runs in the ngspice CLI as well.
 
 use std::path::PathBuf;
 
@@ -271,6 +271,10 @@ impl Part for DCosim {
         ))
     }
 }
+
+mod verilator;
+
+pub use verilator::{DEFAULT_SHIM_DIR, Port, VerilatedModel, Verilator, VerilatorError};
 
 #[cfg(test)]
 mod tests;

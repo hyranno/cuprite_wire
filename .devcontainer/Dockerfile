@@ -13,6 +13,7 @@ RUN \
     kicad \
     libngspice0 \
     ngspice \
+    verilator \
     xvfb \
   && \
 # clean up
