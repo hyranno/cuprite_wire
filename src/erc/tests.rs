@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use petgraph::graph::NodeIndex;
 
 use super::*;
@@ -7,7 +5,7 @@ use crate::{
     basic::{OpAmpSot23, Resistor0603},
     circuit::CircuitBuilder,
     naming::NetLabel,
-    subcircuit::SubcircuitGenerator,
+    subcircuit::{Interface, SubcircuitGenerator},
     test_parts::rc_filter,
 };
 
@@ -35,16 +33,34 @@ fn warning(message: &str) -> (Severity, String) {
     (Severity::Warning, message.to_string())
 }
 
-/// A voltage follower. Interface nodes: 0 = input, 1 = output, 2 = positive supply, 3 = ground.
+/// A voltage follower.
 #[derive(Debug, Clone)]
 struct Follower;
 
+#[derive(Interface)]
+struct FollowerPorts<T = NodeIndex> {
+    input: T,
+    output: T,
+    vcc: T,
+    gnd: T,
+}
+
 impl SubcircuitGenerator for Follower {
     type Options = ();
+    type Interface = FollowerPorts;
 
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
-        let mut circuit = CircuitBuilder::new();
-        let [input, output, vcc, gnd] = [(); 4].map(|_| circuit.add_node());
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        circuit: &mut CircuitBuilder,
+        interface: Self::Interface,
+    ) {
+        let FollowerPorts {
+            input,
+            output,
+            vcc,
+            gnd,
+        } = interface;
         let u = circuit.instantiate_part_named("u", Box::new(OpAmpSot23::new("OPA")));
         let load = circuit.instantiate_part_named("load", Box::new(Resistor0603::new("10k")));
         circuit.connect(input, u["in_p"]);
@@ -54,20 +70,18 @@ impl SubcircuitGenerator for Follower {
         circuit.connect(load["2"], gnd);
         circuit.connect(u["vcc"], vcc);
         circuit.connect(u["vee"], gnd);
-        circuit
     }
-}
-
-fn follower_interface() -> HashSet<NodeIndex> {
-    (0..4).map(NodeIndex::new).collect()
 }
 
 /// A [`Follower`] with labeled supplies (`VCC` / `GND`) and its input driven from outside.
 fn follower_circuit(power_flags: bool) -> CircuitBuilder {
     let mut circuit = CircuitBuilder::new();
-    let nodes =
-        circuit.instantiate_subcircuit_named("f", Follower, &follower_interface(), |_: &()| ());
-    let [input, output, vcc, gnd] = [0, 1, 2, 3].map(|i| nodes[&NodeIndex::new(i)]);
+    let FollowerPorts {
+        input,
+        output,
+        vcc,
+        gnd,
+    } = circuit.instantiate_subcircuit_named("f", Follower, |_: &()| ());
     circuit.virtual_pin(input, PinType::Output, "signal");
     circuit.label(output, NetLabel::global("OUT"));
     circuit.label(vcc, NetLabel::global("VCC"));
@@ -214,19 +228,19 @@ fn test_severities() {
 #[test]
 fn test_check_subcircuit() {
     let settings = ErcSettings::default();
-    let node = NodeIndex::new;
-    let ports = [
-        (node(0), PinType::Output),
-        (node(1), PinType::Input),
-        (node(2), PinType::PowerOut),
-        (node(3), PinType::PowerOut),
-    ];
+    let mut ports = FollowerPorts {
+        input: Some(PinType::Output),
+        output: Some(PinType::Input),
+        vcc: Some(PinType::PowerOut),
+        gnd: Some(PinType::PowerOut),
+    };
     check_subcircuit(&Follower, &(), &ports, &settings)
         .unwrap()
         .assert_clean();
 
     // Without a driver for the input.
-    let report = check_subcircuit(&Follower, &(), &ports[1..], &settings).unwrap();
+    ports.input = None;
+    let report = check_subcircuit(&Follower, &(), &ports, &settings).unwrap();
     assert_eq!(
         summary(&report),
         vec![
@@ -237,13 +251,13 @@ fn test_check_subcircuit() {
         ]
     );
     // A port of the wrong type.
-    let mut ports = ports;
-    ports[1].1 = PinType::Output;
+    ports.input = Some(PinType::Output);
+    ports.output = Some(PinType::Output);
     let report = check_subcircuit(&Follower, &(), &ports, &settings).unwrap();
     assert_eq!(
         summary(&report),
         vec![error(
-            "net \"Net-(U1--)\": pins of type output and output are connected: U1.out (output) and virtual pin \"port 1\" (output)"
+            "net \"Net-(U1--)\": pins of type output and output are connected: U1.out (output) and virtual pin \"port output\" (output)"
         )]
     );
     // The virtual pin points at the caller.

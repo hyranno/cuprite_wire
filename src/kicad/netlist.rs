@@ -274,7 +274,7 @@ impl KicadNet {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use petgraph::graph::NodeIndex;
 
@@ -322,12 +322,10 @@ mod tests {
     #[test]
     fn test_golden_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-        let first =
-            circuit.instantiate_subcircuit_named("stage1", RcStage, &interface, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit(RcStage, &interface, |o: &()| *o);
-        circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
-        circuit.label(first[&NodeIndex::new(0)], NetLabel::local("IN"));
+        let first = circuit.instantiate_subcircuit_named("stage1", RcStage, |o: &()| *o);
+        let second = circuit.instantiate_subcircuit(RcStage, |o: &()| *o);
+        circuit.connect(first[1], second[0]);
+        circuit.label(first[0], NetLabel::local("IN"));
         let test_point = circuit.instantiate_part_named(
             "test_point",
             Box::new(CustomPart {
@@ -352,7 +350,7 @@ mod tests {
                 ..CustomPart::valid()
             }),
         );
-        circuit.connect(test_point["1"], second[&NodeIndex::new(1)]);
+        circuit.connect(test_point["1"], second[1]);
 
         let netlist = export(&circuit);
         check_golden("hierarchy.net", &netlist);
@@ -365,11 +363,15 @@ mod tests {
     struct Inner;
     impl SubcircuitGenerator for Inner {
         type Options = ();
+        type Interface = [NodeIndex; 2];
 
-        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
-            let mut circuit = CircuitBuilder::new();
-            let input = circuit.add_node();
-            let output = circuit.add_node();
+        fn construct_subcircuit(
+            &self,
+            _options: &(),
+            circuit: &mut CircuitBuilder<()>,
+            interface: Self::Interface,
+        ) {
+            let [input, output] = interface;
             let r_a = circuit.instantiate_part_named("a", Box::new(Resistor("1k")));
             let r_b = circuit.instantiate_part(Box::new(Resistor("2k")));
             let c = circuit.instantiate_part(Box::new(Capacitor("1n")));
@@ -379,7 +381,6 @@ mod tests {
             circuit.label(c["2"], NetLabel::global("VCC"));
             circuit.connect(r_b["2"], output);
             circuit.label(output, NetLabel::local("X"));
-            circuit
         }
     }
 
@@ -388,19 +389,20 @@ mod tests {
     struct Outer;
     impl SubcircuitGenerator for Outer {
         type Options = ();
+        type Interface = [NodeIndex; 2];
 
-        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
-            let mut circuit = CircuitBuilder::new();
-            let input = circuit.add_node();
-            let output = circuit.add_node();
-            let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-            let inner =
-                circuit.instantiate_subcircuit_named("inner", Inner, &interface, |o: &()| *o);
+        fn construct_subcircuit(
+            &self,
+            _options: &(),
+            circuit: &mut CircuitBuilder<()>,
+            interface: Self::Interface,
+        ) {
+            let [input, output] = interface;
+            let inner = circuit.instantiate_subcircuit_named("inner", Inner, |o: &()| *o);
             let r_o = circuit.instantiate_part_named("o", Box::new(Resistor("3k")));
-            circuit.connect(input, inner[&NodeIndex::new(0)]);
-            circuit.connect(inner[&NodeIndex::new(1)], r_o["1"]);
+            circuit.connect(input, inner[0]);
+            circuit.connect(inner[1], r_o["1"]);
             circuit.connect(r_o["2"], output);
-            circuit
         }
     }
 
@@ -409,13 +411,12 @@ mod tests {
     #[test]
     fn test_golden_nested_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-        let first = circuit.instantiate_subcircuit_named("outer", Outer, &interface, |o: &()| *o);
-        let second = circuit.instantiate_subcircuit(Outer, &interface, |o: &()| *o);
+        let first = circuit.instantiate_subcircuit_named("outer", Outer, |o: &()| *o);
+        let second = circuit.instantiate_subcircuit(Outer, |o: &()| *o);
         let r_root = circuit.instantiate_part_named("root", Box::new(Resistor("10k")));
         circuit.label(r_root["1"], NetLabel::local("IN"));
-        circuit.connect(r_root["1"], first[&NodeIndex::new(0)]);
-        circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+        circuit.connect(r_root["1"], first[0]);
+        circuit.connect(first[1], second[0]);
         circuit.label(r_root["2"], NetLabel::global("VCC"));
         check_golden("nested_hierarchy.net", &export(&circuit));
     }

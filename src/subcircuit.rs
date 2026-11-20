@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
+use std::{collections::HashMap, fmt::Debug, marker::PhantomData, panic::Location};
 
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
@@ -8,15 +8,6 @@ use crate::{
     naming::short_type_name,
     trace::Loc,
 };
-
-/// The interface nodes `0..N` of a subcircuit, as seen from inside it.
-///
-/// A subcircuit that creates them first with [`CircuitBuilder::add_interface`] is instantiated
-/// with [`CircuitBuilder::instantiate_subcircuit_interface`] in the same order, and can be
-/// checked alone by giving these nodes to [`crate::erc::check_subcircuit`].
-pub fn interface<const N: usize>() -> [NodeIndex; N] {
-    std::array::from_fn(NodeIndex::new)
-}
 
 /// Derives [`Interface`] for a struct with one type parameter whose fields all have that type.
 pub use cuprite_wire_macros::Interface;
@@ -86,16 +77,42 @@ impl<T> Interface<T> for () {
     }
 }
 
+/// The values of `G`'s interface holding `U`s, e.g. `FollowerPorts<Option<PinType>>`.
+pub type InterfaceWith<G, U> = <<G as SubcircuitGenerator>::Interface as Interface>::With<U>;
+
+/// Generates the contents of a subcircuit.
 pub trait SubcircuitGenerator: Debug + Clone {
     type Options;
+    /// The nodes the circuit around the subcircuit connects to.
+    type Interface: Interface;
 
-    fn construct_subcircuit(&self, options: &Self::Options) -> CircuitBuilder<Self::Options>;
+    /// Adds the contents of the subcircuit to `circuit`, which has only the nodes of `interface`.
+    fn construct_subcircuit(
+        &self,
+        options: &Self::Options,
+        circuit: &mut CircuitBuilder<Self::Options>,
+        interface: Self::Interface,
+    );
 
     /// Base of automatic instance names (`<base name>#<n>`).
     /// Defaults to the type name without the module path and generic arguments.
     fn base_name(&self) -> String {
         short_type_name::<Self>()
     }
+}
+
+/// Creates a circuit with the interface nodes `0..N` of `generator`, traced to `location`, and
+/// constructs the subcircuit in it.
+pub(crate) fn construct<G: SubcircuitGenerator>(
+    generator: &G,
+    options: &G::Options,
+    location: &'static Location<'static>,
+) -> (CircuitBuilder<G::Options>, G::Interface) {
+    let mut circuit = CircuitBuilder::new();
+    let interface = G::Interface::from_fn(|_| circuit.add_node_at(location));
+    let nodes = interface.values().into_iter().copied().collect::<Vec<_>>();
+    generator.construct_subcircuit(options, &mut circuit, G::Interface::from_fn(|i| nodes[i]));
+    (circuit, interface)
 }
 
 pub(crate) trait ErasedSubcircuitGenerator<B>: Debug + DynClone {
@@ -135,7 +152,8 @@ where
     G: SubcircuitGenerator,
 {
     fn generate_subcircuit(&self, options: &G::Options) -> ExpandedCircuit {
-        self.generator.construct_subcircuit(options).expand(options)
+        let (circuit, _) = construct(&self.generator, options, Location::caller());
+        circuit.expand(options)
     }
 }
 
