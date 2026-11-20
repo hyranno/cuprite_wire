@@ -7,8 +7,12 @@ use crate::{
     error::CircuitErrorKind,
     naming::NetLabel,
     spice::{
-        Ammeter, IndependentSource, ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo,
+        Ammeter, IndependentSource, ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo, Table,
         Waveform,
+        digital::{
+            DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
+            OutputCharacteristics, Pull,
+        },
     },
     test_parts::{self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
 };
@@ -498,4 +502,108 @@ fn test_golden_kicad_pair() {
         "kicad_pair.cir",
         &netlist.to_spice().unwrap().with_title("kicad_pair"),
     );
+}
+
+/// The voltage of the line in the table of [`simulate_line`].
+const LINE: &str = r#"v("/LINE")"#;
+
+/// A [`DigitalDriver`] and a [`DigitalLoad`] on the line `/LINE`, simulated for `stop` seconds;
+/// the table has the voltage of the line ([`LINE`]).
+fn simulate_line(
+    driver: Box<DigitalDriver>,
+    load: Box<DigitalLoad>,
+    step: f64,
+    stop: f64,
+) -> Table {
+    let mut circuit = CircuitBuilder::new();
+    let driver = circuit.instantiate_part(driver);
+    let load = circuit.instantiate_part(load);
+    circuit.connect(driver[DigitalDriver::OUT], load[DigitalLoad::IN]);
+    circuit.label(driver[DigitalDriver::OUT], NetLabel::local("LINE"));
+    circuit.label(driver[DigitalDriver::GND], NetLabel::global("GND"));
+    circuit.label(load[DigitalLoad::GND], NetLabel::global("GND"));
+    let deck = export(&circuit).deck().control([
+        format!("tran {step:e} {stop:e}"),
+        format!("wrdata line.txt {LINE}"),
+    ]);
+    deck.run().unwrap().table("line.txt").unwrap()
+}
+
+/// A driver with 1 kohm output resistance into 1 nF: the rise follows the time constant (1 us),
+/// and the input reads `High` when it crosses 70 % of 3.3 V.
+#[test]
+fn test_simulate_digital_rc_load() {
+    let output = OutputCharacteristics::cmos(3.3).with_resistance(1e3);
+    let input = InputCharacteristics::cmos(3.3).with_capacitance(1e-9);
+    let sent = DigitalSequence::new(Level::Low).at(1e-6, Level::High);
+    let table = simulate_line(
+        DigitalDriver::new(output, sent),
+        DigitalLoad::new(input.clone()),
+        10e-9,
+        6e-6,
+    );
+    let v = table.interpolate(LINE, 2e-6).unwrap();
+    assert!((v - 3.3 * 0.632).abs() < 0.02, "v(2us) = {v}");
+    let read = input.decode(table.scale(), table.column(LINE).unwrap());
+    assert_eq!(read.initial(), Level::Low);
+    let [(t, Level::High)] = read.events() else {
+        panic!("{read:?}");
+    };
+    // 1 us + ln(1 / 0.3) us
+    assert!((t - 2.204e-6).abs() < 10e-9, "{t}");
+}
+
+/// An open-drain output with a 10 kohm pull-up and 100 pF: released (`HiZ`) at 1 us, it rises
+/// with the time constant of the pull-up (1 us); pulled low again at 5 us, it falls at once.
+#[test]
+fn test_simulate_open_drain() {
+    let output = OutputCharacteristics::cmos(3.3);
+    let input = InputCharacteristics::cmos(3.3)
+        .with_capacitance(100e-12)
+        .with_pull(Pull::up(3.3, 10e3));
+    let sent = DigitalSequence::new(Level::Low)
+        .at(1e-6, Level::HiZ)
+        .at(5e-6, Level::Low);
+    let table = simulate_line(
+        DigitalDriver::new(output, sent),
+        DigitalLoad::new(input.clone()),
+        10e-9,
+        6e-6,
+    );
+    let at = |t| table.interpolate(LINE, t).unwrap();
+    // Driven low through 50 ohm against the pull-up.
+    assert!(
+        (at(0.5e-6) - 3.3 * 50.0 / 10_050.0).abs() < 1e-3,
+        "{}",
+        at(0.5e-6)
+    );
+    assert!((at(2e-6) - 3.3 * 0.632).abs() < 0.03, "{}", at(2e-6));
+    assert!((at(4.9e-6) - 3.3).abs() < 0.1, "{}", at(4.9e-6));
+    assert!(at(5.1e-6) < 0.05, "{}", at(5.1e-6));
+    let read = input.decode(table.scale(), table.column(LINE).unwrap());
+    let [(rise, Level::High), (fall, Level::Low)] = read.events() else {
+        panic!("{read:?}");
+    };
+    assert!((rise - 2.204e-6).abs() < 30e-9, "{rise}");
+    assert!((fall - 5e-6).abs() < 20e-9, "{fall}");
+}
+
+/// UART frames read back at the middle of each bit.
+#[test]
+fn test_simulate_uart() {
+    let baud = 115_200.0;
+    let sent = DigitalSequence::new(Level::High).uart(10e-6, baud, b"cuprite!");
+    let input = InputCharacteristics::cmos(3.3);
+    let table = simulate_line(
+        DigitalDriver::new(OutputCharacteristics::cmos(3.3), sent.clone()),
+        DigitalLoad::new(input.clone()),
+        100e-9,
+        sent.end_time() + 20e-6,
+    );
+    let read = input.decode(table.scale(), table.column(LINE).unwrap());
+    for bit in 0..80 {
+        let t = 10e-6 + (bit as f64 + 0.5) / baud;
+        assert_eq!(read.level_at(t), sent.level_at(t), "bit {bit}");
+    }
+    assert_eq!(read.events().len(), sent.events().len());
 }

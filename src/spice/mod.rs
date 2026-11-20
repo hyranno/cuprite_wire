@@ -3,6 +3,7 @@
 //! See the guide [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md).
 
 pub mod deck;
+pub mod digital;
 pub mod netlist;
 pub mod part;
 pub mod simulation;

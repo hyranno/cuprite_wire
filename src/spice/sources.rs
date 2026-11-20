@@ -71,7 +71,7 @@ impl Waveform {
         }
     }
 
-    fn to_spice(&self) -> String {
+    pub(crate) fn to_spice(&self) -> String {
         match self {
             Waveform::Sin {
                 offset,
