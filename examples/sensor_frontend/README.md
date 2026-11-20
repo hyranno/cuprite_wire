@@ -27,8 +27,8 @@ prints it with the place in the source and writes no netlist, e.g. without the p
 
 ```text
 error: net "+5V": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)
-  at examples/sensor_frontend/bias.rs:44:21
-  in subcircuit instantiated at examples/sensor_frontend/main.rs:45:26
+  at examples/sensor_frontend/bias.rs:40:21
+  in subcircuit instantiated at examples/sensor_frontend/main.rs:45:22
 ```
 
 To import the netlist into pcbnew, add these footprint libraries to the footprint library table:
@@ -66,13 +66,12 @@ The other parts (resistors, capacitors) are the ready-made ones of `cuprite_wire
 
 ## Subcircuits and their interfaces
 
-Each subcircuit creates its interface nodes first (`CircuitBuilder::add_interface`), so they are
-the nodes `0..N` in a fixed order. Its `place` method instantiates it with
-`instantiate_subcircuit_interface_named`, which returns the nodes in the same order, and gives them
-names; the ERC test gives the same nodes (`subcircuit::interface`) their pin types:
+Each subcircuit has an interface struct deriving `Interface` (`PreampPorts`, ...). Instantiating
+the subcircuit returns its nodes in the board by name, and the ERC test gives the same fields their
+pin types:
 
 ```rust
-let preamp = Preamp::default().place(&mut board, "preamp");
+let preamp = board.instantiate_subcircuit_named("preamp", Preamp::default());
 board.connect(preamp.vref, bias.vref);
 ```
 

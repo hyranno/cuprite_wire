@@ -365,7 +365,7 @@ impl PartialOrd for NetNode {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::collections::BTreeMap;
 
     use super::*;
     use crate::{
@@ -488,12 +488,16 @@ mod tests {
     struct Divider;
     impl SubcircuitGenerator for Divider {
         type Options = ();
+        type Interface = [NodeIndex; 2];
 
         // Node 0: input (labeled "IN" inside), node 1: output.
-        fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
-            let mut circuit = CircuitBuilder::new();
-            let input = circuit.add_node();
-            let output = circuit.add_node();
+        fn construct_subcircuit(
+            &self,
+            _options: &(),
+            circuit: &mut CircuitBuilder<()>,
+            interface: Self::Interface,
+        ) {
+            let [input, output] = interface;
             circuit.label(input, NetLabel::local("IN"));
             let top = circuit.instantiate_part_named("top", Box::new(Resistor("10k")));
             let bottom = circuit.instantiate_part_named("bottom", Box::new(Resistor("10k")));
@@ -502,20 +506,17 @@ mod tests {
             circuit.connect(output, bottom["1"]);
             circuit.label(output, NetLabel::local("MID"));
             circuit.label(bottom["2"], NetLabel::global("GND"));
-            circuit
         }
     }
 
     #[test]
     fn test_hierarchical_names() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let interface = HashSet::from([NodeIndex::new(0), NodeIndex::new(1)]);
-        let first = circuit.instantiate_subcircuit_named("first", Divider, &interface, |o: &()| *o);
-        let second =
-            circuit.instantiate_subcircuit_named("second", Divider, &interface, |o: &()| *o);
-        circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+        let first = circuit.instantiate_subcircuit_named("first", Divider);
+        let second = circuit.instantiate_subcircuit_named("second", Divider);
+        circuit.connect(first[1], second[0]);
         // A name in the outer circuit is preferred to one inside the subcircuit.
-        circuit.label(first[&NodeIndex::new(0)], NetLabel::local("ZZZ"));
+        circuit.label(first[0], NetLabel::local("ZZZ"));
         let netlist = circuit.build(&()).to_netlist().unwrap();
 
         assert_eq!(

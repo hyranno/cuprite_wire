@@ -1,9 +1,11 @@
 //! Procedural macros generating cuprite_wire parts from KiCad libraries and SPICE models.
 //!
 //! Use them through the `cuprite_wire` crate (`cuprite_wire::kicad_part!`,
-//! `cuprite_wire::spice_part!`), which documents them.
+//! `cuprite_wire::spice_part!`, `#[derive(cuprite_wire::subcircuit::Interface)]`), which documents
+//! them.
 
 mod input;
+mod interface;
 
 use std::path::PathBuf;
 
@@ -130,6 +132,17 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &resolver,
     )
     .into()
+}
+
+/// Implements `Interface` for a struct with one type parameter whose fields all have that type,
+/// e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`. The order of the fields is the
+/// order of the interface. `cuprite_wire::subcircuit::Interface` documents it.
+#[proc_macro_derive(Interface)]
+pub fn derive_interface(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = syn::parse_macro_input!(input as syn::DeriveInput);
+    interface::derive(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 fn resolver(sim_library_dir: Option<&syn::LitStr>) -> syn::Result<Resolver> {

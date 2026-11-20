@@ -3,7 +3,7 @@
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
     circuit::CircuitBuilder,
-    subcircuit::SubcircuitGenerator,
+    subcircuit::{Interface, SubcircuitGenerator},
 };
 use petgraph::graph::NodeIndex;
 
@@ -11,8 +11,6 @@ use crate::parts::RrioOpAmp;
 
 /// Gain `1 + feedback / ground` above the input high-pass corner (1.6 Hz with 1u and 100k).
 /// The output sits at `vref` without a signal.
-///
-/// Interface: `[input, vref, vcc, gnd, output]`.
 #[derive(Debug, Clone)]
 pub struct Preamp {
     /// The feedback resistor, from the output to the inverting input.
@@ -31,35 +29,33 @@ impl Default for Preamp {
     }
 }
 
-pub struct PreampPorts {
-    pub input: NodeIndex,
-    pub vref: NodeIndex,
-    pub vcc: NodeIndex,
-    pub gnd: NodeIndex,
-    pub output: NodeIndex,
+/// The interface of [`Preamp`].
+#[derive(Interface)]
+pub struct PreampPorts<T = NodeIndex> {
+    pub input: T,
+    pub vref: T,
+    pub vcc: T,
+    pub gnd: T,
+    pub output: T,
 }
 
-impl Preamp {
-    #[track_caller]
-    pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> PreampPorts {
-        let [input, vref, vcc, gnd, output] =
-            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
-        PreampPorts {
+impl SubcircuitGenerator for Preamp {
+    type Options = ();
+    type Interface = PreampPorts;
+
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        c: &mut CircuitBuilder,
+        interface: Self::Interface,
+    ) {
+        let PreampPorts {
             input,
             vref,
             vcc,
             gnd,
             output,
-        }
-    }
-}
-
-impl SubcircuitGenerator for Preamp {
-    type Options = ();
-
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
-        let mut c = CircuitBuilder::new();
-        let [input, vref, vcc, gnd, output] = c.add_interface();
+        } = interface;
         let coupling = c.instantiate_part_named("c_in", Box::new(Capacitor0603::new("1u")));
         let bias = c.instantiate_part_named("r_bias", Box::new(Resistor0603::new("100k")));
         let feedback =
@@ -84,7 +80,6 @@ impl SubcircuitGenerator for Preamp {
         c.connect(gnd, amp[RrioOpAmp::VEE]);
         c.connect(vcc, decoupling["1"]);
         c.connect(gnd, decoupling["2"]);
-        c
     }
 }
 
@@ -94,7 +89,6 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
-        subcircuit::interface,
     };
 
     use super::*;
@@ -102,14 +96,13 @@ mod tests {
 
     #[test]
     fn erc() {
-        let [input, vref, vcc, gnd, output] = interface();
-        let ports = [
-            (input, PinType::Output),
-            (vref, PinType::Output),
-            (vcc, PinType::PowerOut),
-            (gnd, PinType::PowerOut),
-            (output, PinType::Input),
-        ];
+        let ports = PreampPorts {
+            input: Some(PinType::Output),
+            vref: Some(PinType::Output),
+            vcc: Some(PinType::PowerOut),
+            gnd: Some(PinType::PowerOut),
+            output: Some(PinType::Input),
+        };
         check_subcircuit(&Preamp::default(), &(), &ports, &ErcSettings::default())
             .unwrap()
             .assert_clean();
@@ -118,7 +111,9 @@ mod tests {
     /// The preamp on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
     fn bench(input: Box<IndependentSource>) -> Bench {
         let mut bench = Bench::new(IndependentSource::voltage(5.0));
-        let ports = Preamp::default().place(&mut bench.circuit, "preamp");
+        let ports = bench
+            .circuit
+            .instantiate_subcircuit_named("preamp", Preamp::default());
         bench.circuit.connect(ports.vcc, bench.vcc);
         bench.circuit.connect(ports.gnd, bench.gnd);
         let vref = bench.source("vref", IndependentSource::voltage(2.5));

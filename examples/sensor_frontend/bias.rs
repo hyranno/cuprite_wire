@@ -3,39 +3,35 @@
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
     circuit::CircuitBuilder,
-    subcircuit::SubcircuitGenerator,
+    subcircuit::{Interface, SubcircuitGenerator},
 };
 use petgraph::graph::NodeIndex;
 
 use crate::parts::RrioOpAmp;
 
 /// Divides the supply by two, filters it and buffers it with an op-amp.
-///
-/// Interface: `[vcc, gnd, vref]`.
 #[derive(Debug, Clone)]
 pub struct MidSupply;
 
-pub struct MidSupplyPorts {
-    pub vcc: NodeIndex,
-    pub gnd: NodeIndex,
-    pub vref: NodeIndex,
-}
-
-impl MidSupply {
-    #[track_caller]
-    pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> MidSupplyPorts {
-        let [vcc, gnd, vref] =
-            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
-        MidSupplyPorts { vcc, gnd, vref }
-    }
+/// The interface of [`MidSupply`].
+#[derive(Interface)]
+pub struct MidSupplyPorts<T = NodeIndex> {
+    pub vcc: T,
+    pub gnd: T,
+    pub vref: T,
 }
 
 impl SubcircuitGenerator for MidSupply {
     type Options = ();
+    type Interface = MidSupplyPorts;
 
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
-        let mut c = CircuitBuilder::new();
-        let [vcc, gnd, vref] = c.add_interface();
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        c: &mut CircuitBuilder,
+        interface: Self::Interface,
+    ) {
+        let MidSupplyPorts { vcc, gnd, vref } = interface;
         let upper = c.instantiate_part_named("r_upper", Box::new(Resistor0603::new("100k")));
         let lower = c.instantiate_part_named("r_lower", Box::new(Resistor0603::new("100k")));
         let filter = c.instantiate_part_named("c_filter", Box::new(Capacitor0603::new("1u")));
@@ -57,7 +53,6 @@ impl SubcircuitGenerator for MidSupply {
         c.connect(gnd, amp[RrioOpAmp::VEE]);
         c.connect(vcc, decoupling["1"]);
         c.connect(gnd, decoupling["2"]);
-        c
     }
 }
 
@@ -67,7 +62,6 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
-        subcircuit::interface,
     };
 
     use super::*;
@@ -75,12 +69,11 @@ mod tests {
 
     #[test]
     fn erc() {
-        let [vcc, gnd, vref] = interface();
-        let ports = [
-            (vcc, PinType::PowerOut),
-            (gnd, PinType::PowerOut),
-            (vref, PinType::Input),
-        ];
+        let ports = MidSupplyPorts {
+            vcc: Some(PinType::PowerOut),
+            gnd: Some(PinType::PowerOut),
+            vref: Some(PinType::Input),
+        };
         check_subcircuit(&MidSupply, &(), &ports, &ErcSettings::default())
             .unwrap()
             .assert_clean();
@@ -96,7 +89,9 @@ mod tests {
             // The supply ramps up in 1 ms.
             let ramp = Waveform::Pwl(vec![(0.0, 0.0), (1e-3, supply)]);
             let mut bench = Bench::new(IndependentSource::voltage(0.0).with_waveform(ramp));
-            let ports = MidSupply.place(&mut bench.circuit, "bias");
+            let ports = bench
+                .circuit
+                .instantiate_subcircuit_named("bias", MidSupply);
             bench.circuit.connect(ports.vcc, bench.vcc);
             bench.circuit.connect(ports.gnd, bench.gnd);
             bench.probe(ports.vref, "VREF");

@@ -2,10 +2,6 @@
 //!
 //! The simulation tests run the `ngspice` program, which the devcontainer provides.
 
-use std::collections::HashSet;
-
-use petgraph::graph::NodeIndex;
-
 use crate::{
     circuit::CircuitBuilder,
     error::CircuitErrorKind,
@@ -23,10 +19,6 @@ fn export(circuit: &CircuitBuilder) -> SpiceNetlist {
 
 fn check_golden(name: &str, text: &impl ToString) {
     test_parts::check_golden(name, &text.to_string());
-}
-
-fn interface() -> HashSet<NodeIndex> {
-    HashSet::from([NodeIndex::new(0), NodeIndex::new(1)])
 }
 
 /// [`rc_filter`] driven by a voltage source on `IN`.
@@ -55,11 +47,11 @@ fn test_golden_rc_filter() {
 #[test]
 fn test_golden_hierarchy() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, &interface(), |o: &()| *o);
-    let second = circuit.instantiate_subcircuit(RcStage, &interface(), |o: &()| *o);
-    circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let second = circuit.instantiate_subcircuit(RcStage);
+    circuit.connect(first[1], second[0]);
     let v = circuit.instantiate_part(IndependentSource::voltage(1.0));
-    circuit.connect(v[IndependentSource::P], first[&NodeIndex::new(0)]);
+    circuit.connect(v[IndependentSource::P], first[0]);
     circuit.label(v[IndependentSource::P], NetLabel::local("IN"));
     circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
     let connector = circuit.instantiate_part_named(
@@ -70,7 +62,7 @@ fn test_golden_hierarchy() {
             ..CustomPart::valid()
         }),
     );
-    circuit.connect(connector["1"], second[&NodeIndex::new(1)]);
+    circuit.connect(connector["1"], second[1]);
     circuit.label(connector["2"], NetLabel::global("GND"));
     check_golden("hierarchy_bench.cir", &export(&circuit));
 }
@@ -464,17 +456,17 @@ fn test_parts_without_spice_model_mix_with_kicad() {
 #[test]
 fn test_golden_kicad_pair() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage, &interface(), |o: &()| *o);
-    let second = circuit.instantiate_subcircuit(RcStage, &interface(), |o: &()| *o);
+    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let second = circuit.instantiate_subcircuit(RcStage);
     let r_in = circuit.instantiate_part_named("input", Box::new(Resistor("100")));
     circuit.label(r_in["1"], NetLabel::local("I/O"));
     // An unnamed net between two parts in the root.
     let r_mid = circuit.instantiate_part_named("mid", Box::new(Resistor("220")));
     circuit.connect(r_in["2"], r_mid["1"]);
-    circuit.connect(r_mid["2"], first[&NodeIndex::new(0)]);
-    circuit.connect(first[&NodeIndex::new(1)], second[&NodeIndex::new(0)]);
+    circuit.connect(r_mid["2"], first[0]);
+    circuit.connect(first[1], second[0]);
     let amp = circuit.instantiate_part_named("amp", Box::new(OpAmp));
-    circuit.connect(amp["in_p"], second[&NodeIndex::new(1)]);
+    circuit.connect(amp["in_p"], second[1]);
     circuit.connect(amp["out"], amp["in_n"]);
     circuit.label(amp["out"], NetLabel::local("a(b) c"));
     circuit.label(amp["vdd"], NetLabel::global("+5V"));

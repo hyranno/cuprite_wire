@@ -80,28 +80,44 @@ let r = circuit.instantiate_part(Box::new(resistor));          // automatic name
 let c = circuit.instantiate_part_named("c_bypass", Box::new(capacitor));
 circuit.connect(node, r["1"]);
 circuit.label(c["2"], NetLabel::global("GND"));
-let pins = circuit.instantiate_subcircuit_named("amp_left", generator, &interface_nodes, |o| o.clone());
+let amp = circuit.instantiate_subcircuit_named("amp_left", Follower);
+circuit.connect(amp.output, node);
 ```
 
-A subcircuit's interface nodes are nodes inside it, given to `instantiate_subcircuit*` as a set;
-the returned map gives the corresponding nodes in the outer circuit. A subcircuit that creates its
-interface first, with `add_interface`, has the nodes `0..N` as its interface, in a fixed order.
-`instantiate_subcircuit_interface` / `instantiate_subcircuit_interface_named` instantiate it and
-return the outer nodes as an array in the same order:
+A subcircuit is a `SubcircuitGenerator`. Its `Interface` type lists the nodes the circuit around
+it connects to, usually as a struct deriving `subcircuit::Interface`, generic over the type of its
+fields. The generator gets the interface nodes inside the subcircuit, and `instantiate_subcircuit*`
+returns the corresponding new nodes in the outer circuit, in the same struct:
 
 ```rust
-impl SubcircuitGenerator for Follower {
-    type Options = ();
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
-        let mut c = CircuitBuilder::new();
-        let [input, output, vcc, gnd] = c.add_interface(); // before any other node
-        // ...
-        c
-    }
+#[derive(Interface)]
+pub struct FollowerPorts<T = NodeIndex> {
+    pub input: T,
+    pub output: T,
+    pub vcc: T,
+    pub gnd: T,
 }
 
-let [input, output, vcc, gnd] =
-    circuit.instantiate_subcircuit_interface_named("buffer", Follower, |o: &()| *o);
+impl SubcircuitGenerator for Follower {
+    type Options = ();
+    type Interface = FollowerPorts;
+    fn construct_subcircuit(&self, _options: &(), c: &mut CircuitBuilder, ports: FollowerPorts) {
+        // `c` has only the interface nodes; add the parts and connect them to `ports.input`, ...
+    }
+}
+```
+
+`Interface` is also implemented for arrays (`type Interface = [NodeIndex; 2]`) and for `()`.
+The same struct holding other values gives them per interface node, e.g. the pin types of
+`check_subcircuit` (`doc/erc.md` section 5).
+
+The generator is run when the circuit is built. `instantiate_subcircuit` /
+`instantiate_subcircuit_named` give it the options the circuit is built with (its `Options` must be
+the same type, e.g. `()`); `instantiate_subcircuit_with` / `instantiate_subcircuit_named_with` take a
+function deriving its own options from them:
+
+```rust
+circuit.instantiate_subcircuit_named_with("amp", Amplifier, |board: &BoardOptions| board.amp.clone());
 ```
 
 All of these record the calling source location with `#[track_caller]`, which is used in error

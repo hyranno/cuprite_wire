@@ -3,7 +3,7 @@
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
     circuit::CircuitBuilder,
-    subcircuit::SubcircuitGenerator,
+    subcircuit::{Interface, SubcircuitGenerator},
 };
 use petgraph::graph::NodeIndex;
 
@@ -11,40 +11,36 @@ use crate::parts::RrioOpAmp;
 
 /// Unity-gain Sallen-Key second-order low-pass filter: 10k, 10k, 22n (feedback) and 10n (to
 /// `vref`), a natural frequency of 1.07 kHz and a Q of 0.74 (about Butterworth).
-///
-/// Interface: `[input, vref, vcc, gnd, output]`.
 #[derive(Debug, Clone)]
 pub struct LowPass;
 
-pub struct LowPassPorts {
-    pub input: NodeIndex,
-    pub vref: NodeIndex,
-    pub vcc: NodeIndex,
-    pub gnd: NodeIndex,
-    pub output: NodeIndex,
+/// The interface of [`LowPass`].
+#[derive(Interface)]
+pub struct LowPassPorts<T = NodeIndex> {
+    pub input: T,
+    pub vref: T,
+    pub vcc: T,
+    pub gnd: T,
+    pub output: T,
 }
 
-impl LowPass {
-    #[track_caller]
-    pub fn place(self, circuit: &mut CircuitBuilder, name: &str) -> LowPassPorts {
-        let [input, vref, vcc, gnd, output] =
-            circuit.instantiate_subcircuit_interface_named(name, self, |o: &()| *o);
-        LowPassPorts {
+impl SubcircuitGenerator for LowPass {
+    type Options = ();
+    type Interface = LowPassPorts;
+
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        c: &mut CircuitBuilder,
+        interface: Self::Interface,
+    ) {
+        let LowPassPorts {
             input,
             vref,
             vcc,
             gnd,
             output,
-        }
-    }
-}
-
-impl SubcircuitGenerator for LowPass {
-    type Options = ();
-
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder {
-        let mut c = CircuitBuilder::new();
-        let [input, vref, vcc, gnd, output] = c.add_interface();
+        } = interface;
         let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
         let r2 = c.instantiate_part_named("r2", Box::new(Resistor0603::new("10k")));
         let c_feedback =
@@ -67,7 +63,6 @@ impl SubcircuitGenerator for LowPass {
         c.connect(gnd, amp[RrioOpAmp::VEE]);
         c.connect(vcc, decoupling["1"]);
         c.connect(gnd, decoupling["2"]);
-        c
     }
 }
 
@@ -77,7 +72,6 @@ mod tests {
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
         spice::{IndependentSource, Waveform},
-        subcircuit::interface,
     };
 
     use super::*;
@@ -85,14 +79,13 @@ mod tests {
 
     #[test]
     fn erc() {
-        let [input, vref, vcc, gnd, output] = interface();
-        let ports = [
-            (input, PinType::Output),
-            (vref, PinType::Output),
-            (vcc, PinType::PowerOut),
-            (gnd, PinType::PowerOut),
-            (output, PinType::Input),
-        ];
+        let ports = LowPassPorts {
+            input: Some(PinType::Output),
+            vref: Some(PinType::Output),
+            vcc: Some(PinType::PowerOut),
+            gnd: Some(PinType::PowerOut),
+            output: Some(PinType::Input),
+        };
         check_subcircuit(&LowPass, &(), &ports, &ErcSettings::default())
             .unwrap()
             .assert_clean();
@@ -101,7 +94,9 @@ mod tests {
     /// The filter on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
     fn bench(input: Box<IndependentSource>) -> Bench {
         let mut bench = Bench::new(IndependentSource::voltage(5.0));
-        let ports = LowPass.place(&mut bench.circuit, "filter");
+        let ports = bench
+            .circuit
+            .instantiate_subcircuit_named("filter", LowPass);
         bench.circuit.connect(ports.vcc, bench.vcc);
         bench.circuit.connect(ports.gnd, bench.gnd);
         let vref = bench.source("vref", IndependentSource::voltage(2.5));

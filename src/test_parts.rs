@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, path::Path};
 
+use petgraph::graph::NodeIndex;
+
 use crate::{
     circuit::CircuitBuilder,
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
@@ -45,11 +47,15 @@ pub struct RcStage;
 
 impl SubcircuitGenerator for RcStage {
     type Options = ();
+    type Interface = [NodeIndex; 2];
 
-    fn construct_subcircuit(&self, _options: &()) -> CircuitBuilder<()> {
-        let mut circuit = CircuitBuilder::new();
-        let input = circuit.add_node();
-        let output = circuit.add_node();
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        circuit: &mut CircuitBuilder<()>,
+        interface: Self::Interface,
+    ) {
+        let [input, output] = interface;
         let r = circuit.instantiate_part(Box::new(Resistor("1k")));
         let c = circuit.instantiate_part(Box::new(Capacitor("1u")));
         circuit.connect(input, r["1"]);
@@ -57,7 +63,6 @@ impl SubcircuitGenerator for RcStage {
         circuit.connect(output, c["1"]);
         circuit.label(output, NetLabel::local("OUT"));
         circuit.label(c["2"], NetLabel::global("GND"));
-        circuit
     }
 }
 

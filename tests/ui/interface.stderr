@@ -1,0 +1,35 @@
+error: `Interface` can only be derived for a struct with named fields
+ --> tests/ui/interface.rs:4:6
+  |
+4 | enum NotAStruct {
+  |      ^^^^^^^^^^
+
+error: `Interface` can only be derived for a struct with named fields
+ --> tests/ui/interface.rs:9:8
+  |
+9 | struct Tuple<T>(T, T);
+  |        ^^^^^
+
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+  --> tests/ui/interface.rs:12:8
+   |
+12 | struct NoParameter {
+   |        ^^^^^^^^^^^
+
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+  --> tests/ui/interface.rs:17:22
+   |
+17 | struct TwoParameters<T, U> {
+   |                      ^
+
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+  --> tests/ui/interface.rs:23:16
+   |
+23 | struct Bounded<T: Clone> {
+   |                ^
+
+error: every field of an `Interface` must have the type `T`
+  --> tests/ui/interface.rs:30:12
+   |
+30 |     count: u32,
+   |            ^^^

@@ -88,20 +88,22 @@ As in KiCad, a supply that enters the board through a connector (a `passive` pin
 ## 5. Checking a subcircuit
 
 `check_subcircuit` runs ERC on one `SubcircuitGenerator` alone. Its interface nodes have nothing
-connected to them, so give each one the pin the circuit around it is expected to connect:
+connected to them, so give each one the pin the circuit around it is expected to connect, in the
+generator's interface struct holding `Option<PinType>`:
 
 ```rust
-let [input, output, vcc] = subcircuit::interface(); // the nodes 0..3 (`add_interface`)
-let ports = [
-    (input, PinType::Output),    // driven from outside
-    (output, PinType::Input),    // read from outside
-    (vcc, PinType::PowerOut),    // the supply
-];
+let ports = FollowerPorts {
+    input: Some(PinType::Output),    // driven from outside
+    output: Some(PinType::Input),    // read from outside
+    vcc: Some(PinType::PowerOut),    // the supply
+    gnd: Some(PinType::PowerOut),
+};
 check_subcircuit(&Follower, &(), &ports, &ErcSettings::default())?.assert_clean();
 ```
 
-Each port becomes a virtual pin named `port <node index>`, traced to the call of
-`check_subcircuit`. Interface nodes not given are checked as if nothing were connected to them.
+Each port becomes a virtual pin named `port <name>` (the field name, or the index in an array),
+traced to the call of `check_subcircuit`. Nodes given `None` are checked as if nothing were
+connected to them.
 `check_subcircuit` fails only if the subcircuit cannot be converted to a netlist.
 `examples/sensor_frontend/` checks each of its subcircuits this way, and the whole board before
 writing its netlist.

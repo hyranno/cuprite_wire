@@ -42,9 +42,9 @@ fn board() -> CircuitBuilder {
     board.power_flag(vcc);
     board.power_flag(gnd);
 
-    let bias = MidSupply.place(&mut board, "bias");
-    let preamp = Preamp::default().place(&mut board, "preamp");
-    let filter = LowPass.place(&mut board, "filter");
+    let bias = board.instantiate_subcircuit_named("bias", MidSupply);
+    let preamp = board.instantiate_subcircuit_named("preamp", Preamp::default());
+    let filter = board.instantiate_subcircuit_named("filter", LowPass);
     for (stage_vcc, stage_gnd) in [
         (bias.vcc, bias.gnd),
         (preamp.vcc, preamp.gnd),
