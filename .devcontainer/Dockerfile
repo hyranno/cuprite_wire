@@ -1,4 +1,4 @@
-FROM rust
+FROM rust:trixie
 
 ENV LANG=C.UTF-8
 ENV LC_CTYPE=C.UTF-8
