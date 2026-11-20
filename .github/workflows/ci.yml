@@ -46,10 +46,11 @@ jobs:
         with:
           persist-credentials: false
       # libngspice0 is the shared library of the shared-ngspice feature; ngspice does not depend on it.
-      - name: Install ngspice and the KiCad libraries
+      # Verilator builds the Verilog designs of the XSPICE tests.
+      - name: Install ngspice, Verilator and the KiCad libraries
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ngspice libngspice0 kicad-symbols kicad-footprints
+          apt-get install -y --no-install-recommends ngspice libngspice0 verilator kicad-symbols kicad-footprints
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test --workspace --features kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries

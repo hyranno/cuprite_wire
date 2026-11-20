@@ -1,8 +1,9 @@
 # Co-simulation with Rust Models
 
-This document explains how to simulate a circuit together with a Rust model of a device that
-reads and drives it, such as the control logic of a microcontroller's firmware. It needs the
-`shared-ngspice` feature and the ngspice shared library (`libngspice0`); see
+This document explains how to simulate a circuit together with a model of a device that reads and
+drives it: a Rust model, such as the control logic of a microcontroller's firmware (sections 1-5),
+or a digital model compiled into a shared library, such as an HDL design (section 6).
+Rust models need the `shared-ngspice` feature and the ngspice shared library (`libngspice0`); see
 `doc/spice_netlist_usage.md` for test benches and running ngspice. A complete example is
 `examples/pwm_dac_feedback.rs`
 (`cargo run --example pwm_dac_feedback --features shared-ngspice`).
@@ -138,16 +139,17 @@ The device is written as a subcircuit `cuprite_cosim_<name>`, so `deck.cir` in t
 shows what ngspice simulates:
 
 ```text
-.subckt cuprite_cosim_mcu button led gnd
-CC_button button gnd 5e-12
-VD_led d_led gnd DC 0 EXTERNAL
-VE_led e_led gnd DC 0 EXTERNAL
-SO_led d_led led e_led gnd hiz_led
+.subckt cuprite_cosim_mcu button led ref
+CC_button button ref 5e-12
+VD_led d_led ref DC 0 EXTERNAL
+VE_led e_led ref DC 0 EXTERNAL
+SO_led d_led led e_led ref hiz_led
 .model hiz_led SW( vt=0.5 vh=0 ron=50 roff=1e9 )
 .ends cuprite_cosim_mcu
 ```
 
-An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
+The `gnd` pin is the port `ref` (ngspice reads a node named `gnd` as the ground, even inside a
+subcircuit). An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
 resistance, closed by the `EXTERNAL` source `VE_<pin>` (1 while driving, 0 in `HiZ`). An input pin
 has the elements of `DigitalLoad` (capacitance, pull resistor, leakage). The values of the
 `EXTERNAL` sources come from the models through the callbacks of the shared library, so the deck
@@ -159,3 +161,68 @@ time in the process, and a crash of ngspice ends the test process.
 **Speed.** Every edge of an output adds time points. Simulating milliseconds of a fast PWM is
 quick (the example runs 3 ms with a 100 kHz PWM in a fraction of a second), but long stretches of
 firmware time are not: test the interval that matters, with the state the model starts from.
+
+## 6. Digital models in shared libraries (XSPICE `d_cosim`)
+
+`cuprite_wire::spice::xspice::DCosim` puts a digital model compiled into a shared library in the
+circuit, through ngspice's `d_cosim` code model. It needs no feature and runs with the CLI
+(`deck.run()`), so it fits HDL designs and digital models written in C. The library implements
+`Cosim_setup` of `cosim.h` (shipped with ngspice in `/usr/share/ngspice/scripts/src/ngspice/`).
+
+```rust
+use cuprite_wire::spice::{digital::*, xspice::DCosim};
+
+let counter = DCosim::new("/abs/path/libcounter.so")   // the `simulation` parameter
+    .with_sim_args(["8"])                               // `sim_args`, passed to the model
+    .input("clk", InputCharacteristics::cmos(3.3))      // input port 0
+    .output("q0", OutputCharacteristics::cmos(3.3))     // output port 0
+    .output("q1", OutputCharacteristics::cmos(3.3));    // output port 1
+let counter = bench.instantiate_part_named("counter", counter);
+```
+
+- The ports of the model are the inputs and the outputs in the order they are added; a model
+  without inputs gets `NULL`. Bidirectional ports and high impedance are not supported.
+- Each input has the load of its `InputCharacteristics` and an `adc_bridge` at its thresholds
+  (`in_low` = `threshold_low`, `in_high` = `threshold_high`; between them the model sees the unknown
+  state, without hysteresis). Each output has a `dac_bridge` from `low` to `high` with the rise and
+  fall times (unknown is the middle), behind the output resistance.
+- Voltages are relative to the `gnd` pin: the bridges work against the ground, so they are connected
+  through unity-gain sources (`EI_<pin>`, `EO_<pin>`).
+- `with_delay(seconds)` sets the delay of the model's outputs (`delay`, 1 ns by default),
+  `with_lib_args` the arguments of the library's shim (`lib_args`). Paths must be absolute.
+- The model runs at the time points of the analysis and at its input events: a model that changes
+  its outputs by itself (an internal clock) does so at the next time point, so give the analysis a
+  time step fine enough for it.
+
+### 6.1 Verilog designs (Verilator)
+
+`Verilator` builds Verilog sources into a library for `d_cosim`, as ngspice's `vlnggen` script
+does, and reads the ports of the top module to make the part:
+
+```rust
+use cuprite_wire::spice::xspice::Verilator;
+
+let model = Verilator::new([concat!(env!("CARGO_MANIFEST_DIR"), "/hdl/counter.v")])
+    .arg("--top-module").arg("counter")          // any Verilator argument
+    .build()?;                                   // Result<VerilatedModel, VerilatorError>
+let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristics::cmos(3.3));
+// pins: the input bits, the output bits, gnd: e.g. clk, rst, q_1, q_0, carry, gnd
+```
+
+- The build runs `verilator --cc` (C++ with the class prefix `Vlng`), reads the ports from the
+  generated class, and compiles the design with ngspice's `verilator_shim.cpp` and
+  `verilator_main.cpp` (`DEFAULT_SHIM_DIR`, `/usr/share/ngspice/scripts/src`) into a shared library
+  with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them).
+- Builds take a few seconds and are cached by the contents of the sources, the arguments and the
+  version of Verilator, in `cuprite_wire-verilator` in the temporary directory (`cache_dir` to
+  change it). A failed build returns `VerilatorError::Command` with the log, and keeps its
+  directory.
+- Ports are taken in the order of their declaration; a port of several bits gives a pin per bit,
+  `<name>_<bit>` from the most significant bit. `model.inputs()` / `model.outputs()` list them, to
+  build a `DCosim` with other characteristics per pin. Inout ports and ports wider than 32 bits are
+  not supported (`VerilatorError::Ports`).
+- Verilator is cycle-based: the design advances on input changes (the shim uses `After_input`),
+  so it needs a clock or other inputs to do anything. Delays (`#10`) need `--timing`, which this
+  build does not support.
+- Icarus Verilog is not used: the `ivlng.so` shim of Debian's ngspice 44.2 exports no symbols
+  (`undefined symbol: Cosim_setup`), and Debian's Icarus Verilog 12 has no `libvvp`.

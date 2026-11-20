@@ -27,7 +27,7 @@
 //! | [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) | [`kicad_part!`] and [`basic`] |
 //! | [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) | [`spice_part!`], the `sim` block, dialects |
 //! | [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md) | test benches and ngspice ([`spice`]) |
-//! | [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md) | microcontroller models driving the circuit (`spice::cosim`, feature `shared-ngspice`) |
+//! | [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md) | microcontroller models driving the circuit (`spice::cosim`, feature `shared-ngspice`), XSPICE `d_cosim` ([`spice::xspice`]) |
 //! | [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md) | [`erc`] |
 
 pub mod basic;

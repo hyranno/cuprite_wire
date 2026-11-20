@@ -12,6 +12,7 @@ pub mod part;
 pub mod shared;
 pub mod simulation;
 pub mod sources;
+pub mod xspice;
 
 pub use deck::SpiceDeck;
 pub use netlist::{GROUND, SpiceNetlist, spice_node_name};
