@@ -34,17 +34,10 @@ impl Ngspice {
     /// If the models need a compatibility mode ([`SpiceNetlist::ngbehavior`](crate::spice::SpiceNetlist::ngbehavior)),
     /// it is set with a `.spiceinit` file in that directory.
     pub fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
-        let dir = create_run_dir()?;
-        let deck_path = dir.join("deck.cir");
-        fs::write(&deck_path, deck.to_string())?;
-        // ngspice reads `.spiceinit` in its working directory before the deck;
-        // the compatibility mode cannot be set from the deck.
-        if let Some(mode) = deck.netlist().ngbehavior() {
-            fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
-        }
+        let dir = prepare_run_dir(deck)?;
         let output = Command::new(&self.program)
             .arg("-b")
-            .arg(&deck_path)
+            .arg(dir.join(DECK_FILE))
             .current_dir(&dir)
             .output()?;
         let log = format!(
@@ -52,15 +45,52 @@ impl Ngspice {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        let reported_error = log
-            .lines()
-            .any(|line| line.trim_start().to_ascii_lowercase().starts_with("error"));
-        if !output.status.success() || reported_error {
-            // The directory is kept for inspection.
-            return Err(SimulationError::Ngspice { log, dir });
-        }
-        Ok(Simulation { dir, log })
+        finish_run(dir, log, output.status.success())
     }
+}
+
+impl Simulator for Ngspice {
+    fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
+        Ngspice::run(self, deck)
+    }
+}
+
+/// A way of running decks with ngspice.
+pub trait Simulator {
+    /// Runs `deck` in a new temporary directory, which the result holds.
+    fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError>;
+}
+
+/// The deck in the run directory, as the CLI runs it: `ngspice -b deck.cir` there reproduces
+/// a run of any backend.
+pub(crate) const DECK_FILE: &str = "deck.cir";
+
+/// Creates a run directory with the deck ([`DECK_FILE`]) and, if the models need a compatibility
+/// mode, a `.spiceinit` setting it (ngspice reads it from its working directory before the deck;
+/// the mode cannot be set from the deck).
+pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<PathBuf> {
+    let dir = create_run_dir()?;
+    fs::write(dir.join(DECK_FILE), deck.to_string())?;
+    if let Some(mode) = deck.netlist().ngbehavior() {
+        fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
+    }
+    Ok(dir)
+}
+
+/// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
+pub(crate) fn finish_run(
+    dir: PathBuf,
+    log: String,
+    succeeded: bool,
+) -> Result<Simulation, SimulationError> {
+    let reported_error = log
+        .lines()
+        .any(|line| line.trim_start().to_ascii_lowercase().starts_with("error"));
+    if !succeeded || reported_error {
+        // The directory is kept for inspection.
+        return Err(SimulationError::Ngspice { log, dir });
+    }
+    Ok(Simulation { dir, log })
 }
 
 fn create_run_dir() -> io::Result<PathBuf> {
@@ -224,6 +254,8 @@ pub enum SimulationError {
         file: String,
         reason: String,
     },
+    /// The ngspice shared library cannot be loaded or used.
+    SharedLibrary(String),
 }
 
 impl fmt::Display for SimulationError {
@@ -238,6 +270,9 @@ impl fmt::Display for SimulationError {
                 )
             }
             SimulationError::Table { file, reason } => write!(f, "cannot read {file}: {reason}"),
+            SimulationError::SharedLibrary(reason) => {
+                write!(f, "cannot use the ngspice shared library: {reason}")
+            }
         }
     }
 }

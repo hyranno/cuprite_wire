@@ -26,9 +26,13 @@ categories = ["simulation", "science"]
 # Development environment and repository tooling; not needed to build or use the crate.
 exclude = [".claude/", ".devcontainer/", ".github/", ".gitattributes", ".gitignore", "tools/"]
 
+[package.metadata.docs.rs]
+features = ["shared-ngspice"]
+
 [dependencies]
 cuprite_wire_macros.workspace = true
 dyn-clone = "1.0.20"
+libloading = { version = "0.9.1", optional = true }
 petgraph = "0.8.3"
 uuid = { version = "1.29.2", features = ["v5"] }
 
@@ -42,6 +46,10 @@ kicad-libraries = []
 
 # Tests with vendor models downloaded into $CUPRITE_VENDOR_MODELS_DIR (they cannot be committed).
 vendor-models = []
+
+# Runs decks in the ngspice shared library (libngspice), loaded at run time: the backend of
+# co-simulation with Rust models.
+shared-ngspice = ["dep:libloading"]
 
 [[test]]
 name = "kicad_libraries"

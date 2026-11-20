@@ -21,6 +21,7 @@ dependencies = [
  "cuprite_wire_macros",
  "dyn-clone",
  "itertools",
+ "libloading",
  "petgraph",
  "trybuild",
  "uuid",
@@ -149,6 +150,16 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "libloading"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1832accd5a4ca2795ace4d05d15c4039be15b62d3b950eff99746a990e3cc10"
+dependencies = [
+ "cfg-if",
+ "windows-link",
 ]
 
 [[package]]
