@@ -33,7 +33,8 @@ c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
   or on a subcircuit alone with its ports given pin types. Violations point to the line of the
   Rust source that made the connection.
 - **SPICE simulation.** A subcircuit is placed in a test bench with simulation-only sources and
-  simulated with ngspice from `cargo test`. Vendor models written for PSpice or LTspice are read
+  simulated with ngspice from `cargo test`. Digital stimuli (UART, PWM, open-drain lines) drive it
+  through the electrical models of the pins. Vendor models written for PSpice or LTspice are read
   as they are, through ngspice's compatibility modes.
 - **KiCad netlist.** The board is exported as a KiCad S-expression netlist (`.net`) that pcbnew
   imports directly. The output is deterministic.

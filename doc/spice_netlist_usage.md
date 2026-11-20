@@ -86,12 +86,53 @@ Analyses and stimuli belong to the test, not to the circuit:
     `.with_ac(magnitude)` and `.with_waveform(Waveform::sin(..) | Waveform::Pulse { .. } | Waveform::Pwl(..))`.
   - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` (`Ammeter::P` / `Ammeter::N`)
     is the vector `i(VM1)`.
+  - Digital stimuli in `cuprite_wire::spice::digital` (see below).
 
   These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
   under test still can.
 - Add analyses to a `SpiceDeck`: `directive(...)` for dot lines (`.options`, `.ic`, `.tran`) and
   `control([...])` for ngspice front-end commands. The `.control` block starts with
   `set filetype=ascii`, `set wr_singlescale` and `set wr_vecnames` and ends with `quit`.
+
+### Digital stimuli
+
+`cuprite_wire::spice::digital` drives a circuit with logic levels through the electrical model
+of a pin, for open-loop tests of the digital inputs of a circuit (UART, PWM, open-drain lines):
+
+```rust
+use cuprite_wire::spice::digital::*;
+
+let tx = DigitalSequence::new(Level::High).uart(10e-6, 115_200.0, b"Hi");
+let driver = bench.instantiate_part(DigitalDriver::new(OutputCharacteristics::cmos(3.3), tx));
+let input = InputCharacteristics::cmos(3.3).with_pull(Pull::up(3.3, 10e3));
+let load = bench.instantiate_part(DigitalLoad::new(input.clone()));
+// ... connect `driver[DigitalDriver::OUT]` / `load[DigitalLoad::IN]`, run a transient analysis ...
+let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
+```
+
+- `DigitalSequence`: an initial `Level` (`Low`, `High`, `HiZ`) and the times it changes
+  (`.at(time, level)`, non-decreasing times). `.uart(start, baud, bytes)` appends 8N1 frames,
+  `.pwm(start, period, duty, cycles)` a PWM signal. `level_at(time)` reads it back.
+- `OutputCharacteristics`: `low` / `high` voltages (`V_OL` / `V_OH`), output `resistance`,
+  `rise_time` / `fall_time`. Edges are linear over the whole swing (0-100 %, 1.25 times a
+  10-90 % datasheet value); an edge cut short by the next change starts from where it was.
+  Resistance and edge times must be positive: ideal steps make the simulation fail to converge.
+  `cmos(vdd)` gives placeholder values (50 ohm, 2 ns); take the real ones from the datasheet.
+- `DigitalDriver::new(output, sequence)` (pins `out`, `gnd`; `XDRV1`) is written as a subcircuit
+  of its own, `cuprite_digital_<hash>`: a PWL source (`VD`) behind the output resistance. If the
+  sequence has `HiZ`, a switch (`SO`, controlled by the PWL `VE`) replaces the resistor and opens
+  to `HIZ_RESISTANCE` (1 Gohm); the source holds its last level meanwhile, so the edge from `HiZ`
+  is set by the output resistance and the load. `sequence.voltage_waveform(&output)` gives the
+  PWL alone, for an `IndependentSource`.
+- `InputCharacteristics`: thresholds `threshold_low` / `threshold_high` (`V_IL` / `V_IH`, with
+  hysteresis between them), `capacitance`, `pull` (`Pull::up(voltage, resistance)` /
+  `Pull::down(resistance)`) and `leakage` (current into the pin). `DigitalLoad::new(input)`
+  (pins `in`, `gnd`) writes the capacitor (`CDL1C`) and the pull resistor and leakage as their
+  Norton equivalent (`RDL1P` to `gnd`, current source `IDL1I` into `in`); without any of them it
+  is left out of the simulation.
+- `input.read(voltage, previous)` gives the level an input reads; `input.decode(time, voltage)`
+  turns the samples of a transient analysis into a `DigitalSequence`, with the times of the
+  changes interpolated at the thresholds.
 
 ## 4. Node names and ground
 
