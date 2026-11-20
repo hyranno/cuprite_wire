@@ -32,8 +32,8 @@ impl Bench {
     /// Adds a source between a new node (returned) and the ground.
     pub fn source(&mut self, name: &str, source: Box<IndependentSource>) -> NodeIndex {
         let pins = self.circuit.instantiate_part_named(name, source);
-        self.circuit.connect(pins["n"], self.gnd);
-        pins["p"]
+        self.circuit.connect(pins[IndependentSource::N], self.gnd);
+        pins[IndependentSource::P]
     }
 
     /// Names a node, so that the deck can refer to it as `v("/<name>")`.
@@ -53,13 +53,6 @@ impl Bench {
         let deck = netlist.deck().control(commands);
         deck.run().unwrap_or_else(|error| panic!("{error}\n{deck}"))
     }
-}
-
-/// A value printed or measured by the simulation, e.g. by `meas`.
-pub fn value(simulation: &Simulation, name: &str) -> f64 {
-    simulation
-        .value(name)
-        .unwrap_or_else(|| panic!("{name} not found:\n{}", simulation.log()))
 }
 
 /// Asserts that `actual` is within `tolerance` of `expected`.

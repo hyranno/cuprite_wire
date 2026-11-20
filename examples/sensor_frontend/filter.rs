@@ -81,7 +81,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::bench::{Bench, assert_near, value};
+    use crate::bench::{Bench, assert_near};
 
     #[test]
     fn erc() {
@@ -125,12 +125,12 @@ mod tests {
             r#"meas ac stop FIND vdb("/OUT") AT=10k"#,
         ]);
         // The output follows the input at DC.
-        assert_near("vout", value(&sim, "vout"), 2.5, 1e-3);
-        assert_near("pass (dB)", value(&sim, "pass"), 0.0, 0.1);
+        assert_near("vout", sim.expect_value("vout"), 2.5, 1e-3);
+        assert_near("pass (dB)", sim.expect_value("pass"), 0.0, 0.1);
         // With Q = 0.74 the -3 dB point is a little above the natural frequency.
-        assert_near("f3db (Hz)", value(&sim, "f3db"), 1120.0, 50.0);
+        assert_near("f3db (Hz)", sim.expect_value("f3db"), 1120.0, 50.0);
         // -40 dB/decade: about -40 dB one decade above the corner.
-        let stop = value(&sim, "stop");
+        let stop = sim.expect_value("stop");
         assert!(stop < -38.0, "stop = {stop} dB");
     }
 
@@ -152,7 +152,7 @@ mod tests {
             r#"meas tran vpeak MAX v("/OUT") FROM=1m TO=5m"#,
             r#"meas tran vfinal FIND v("/OUT") AT=5m"#,
         ]);
-        assert_near("vfinal", value(&sim, "vfinal"), 2.6, 1e-3);
-        assert_near("overshoot", value(&sim, "vpeak") - 2.6, 0.0057, 0.001);
+        assert_near("vfinal", sim.expect_value("vfinal"), 2.6, 1e-3);
+        assert_near("overshoot", sim.expect_value("vpeak") - 2.6, 0.0057, 0.001);
     }
 }

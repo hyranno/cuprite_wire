@@ -98,7 +98,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::bench::{Bench, assert_near, value};
+    use crate::bench::{Bench, assert_near};
 
     #[test]
     fn erc() {
@@ -137,9 +137,14 @@ mod tests {
             r#"meas ac gain FIND vdb("/OUT") AT=1k"#,
             r#"meas ac f_low WHEN vdb("/OUT")=17.8 RISE=1"#,
         ]);
-        assert_near("gain (dB)", value(&sim, "gain"), 20.0 * 11f64.log10(), 0.05);
+        assert_near(
+            "gain (dB)",
+            sim.expect_value("gain"),
+            20.0 * 11f64.log10(),
+            0.05,
+        );
         // 1 / (2 pi 100k 1u) = 1.59 Hz.
-        assert_near("f_low (Hz)", value(&sim, "f_low"), 1.59, 0.1);
+        assert_near("f_low (Hz)", sim.expect_value("f_low"), 1.59, 0.1);
     }
 
     /// A 10 mV amplitude input gives 110 mV around the reference (this also fails if the
@@ -153,8 +158,8 @@ mod tests {
             r#"meas tran vmax MAX v("/OUT")"#,
             r#"meas tran vmin MIN v("/OUT")"#,
         ]);
-        assert_near("vmax", value(&sim, "vmax"), 2.5 + 0.11, 0.003);
-        assert_near("vmin", value(&sim, "vmin"), 2.5 - 0.11, 0.003);
+        assert_near("vmax", sim.expect_value("vmax"), 2.5 + 0.11, 0.003);
+        assert_near("vmin", sim.expect_value("vmin"), 2.5 - 0.11, 0.003);
     }
 
     /// A 0.4 V amplitude input would give 4.4 V; the output clips at the rails.
@@ -167,7 +172,7 @@ mod tests {
             r#"meas tran vmax MAX v("/OUT")"#,
             r#"meas tran vmin MIN v("/OUT")"#,
         ]);
-        assert_near("vmax", value(&sim, "vmax"), 4.99, 0.02);
-        assert_near("vmin", value(&sim, "vmin"), 0.01, 0.02);
+        assert_near("vmax", sim.expect_value("vmax"), 4.99, 0.02);
+        assert_near("vmin", sim.expect_value("vmin"), 0.01, 0.02);
     }
 }
