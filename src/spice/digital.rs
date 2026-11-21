@@ -603,8 +603,10 @@ impl InputCharacteristics {
     #[track_caller]
     pub(crate) fn validate(&self) {
         assert!(
-            self.threshold_low <= self.threshold_high,
-            "the input thresholds must not cross: V_IL {} V, V_IH {} V",
+            self.threshold_low.is_finite()
+                && self.threshold_high.is_finite()
+                && self.threshold_low <= self.threshold_high,
+            "the input thresholds must be finite and not cross: V_IL {} V, V_IH {} V",
             self.threshold_low,
             self.threshold_high
         );
@@ -921,6 +923,16 @@ mod tests {
             OutputCharacteristics::cmos(3.3).with_edges(0.0, 1e-9),
             DigitalSequence::new(Level::Low),
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "the input thresholds must be finite")]
+    fn test_load_infinite_threshold() {
+        let input = InputCharacteristics {
+            threshold_high: f64::INFINITY,
+            ..InputCharacteristics::cmos(3.3)
+        };
+        let _ = DigitalLoad::new(input);
     }
 
     #[test]

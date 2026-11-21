@@ -30,6 +30,7 @@ fn reached(time: f64, target: f64) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Periodic {
     period: f64,
+    start: f64,
     next: f64,
     scheduled: bool,
 }
@@ -49,6 +50,7 @@ impl Periodic {
         );
         Periodic {
             period,
+            start,
             next: start,
             scheduled: false,
         }
@@ -60,8 +62,12 @@ impl Periodic {
 
     /// Whether the task is due at the current time; call it at every step. Asks for a time point
     /// at the next run. Runs missed (when the time points are further apart than the period) are
-    /// dropped.
+    /// dropped. At the first point of a transient analysis, the timer starts over.
     pub fn due(&mut self, io: &mut DeviceIo<'_>) -> bool {
+        if io.is_first_point() {
+            self.next = self.start;
+            self.scheduled = false;
+        }
         let time = io.time();
         let due = reached(time, self.next);
         if due {
@@ -82,9 +88,9 @@ impl Periodic {
 /// (`code = floor(voltage / reference * 2^bits)`, clamped). It samples when it is read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Adc {
-    pub pin: String,
-    pub bits: u32,
-    pub reference: f64,
+    pin: String,
+    bits: u32,
+    reference: f64,
 }
 
 impl Adc {
@@ -105,6 +111,18 @@ impl Adc {
             bits,
             reference,
         }
+    }
+
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+
+    pub fn bits(&self) -> u32 {
+        self.bits
+    }
+
+    pub fn reference(&self) -> f64 {
+        self.reference
     }
 
     /// The largest code.
@@ -163,6 +181,9 @@ impl Pwm {
     /// Drives the pin; call it at every step.
     #[track_caller]
     pub fn update(&mut self, io: &mut DeviceIo<'_>) {
+        if io.is_first_point() {
+            self.fall = None;
+        }
         let time = io.time();
         if let Some(fall) = self.fall
             && reached(time, fall)
@@ -222,6 +243,7 @@ mod tests {
             pins[0].voltage = voltage;
             let io = DeviceIo {
                 time: 0.0,
+                first: false,
                 pins: &mut pins,
                 wakes: &mut wakes,
             };
@@ -241,6 +263,7 @@ mod tests {
             wakes.clear();
             let mut io = DeviceIo {
                 time,
+                first: time == 0.0,
                 pins: &mut pins,
                 wakes: &mut wakes,
             };

@@ -131,6 +131,7 @@ mod sealed {
 /// [`OutputCharacteristics`]: crate::spice::digital::OutputCharacteristics
 pub struct DeviceIo<'a> {
     time: f64,
+    first: bool,
     pins: &'a mut [PinState],
     wakes: &'a mut Vec<f64>,
 }
@@ -139,6 +140,12 @@ impl DeviceIo<'_> {
     /// The time of the accepted point, in seconds.
     pub fn time(&self) -> f64 {
         self.time
+    }
+
+    /// Whether this is the first accepted point of the transient analysis (at time 0). A run
+    /// with several analyses starts over at each: reset the state of the model here.
+    pub fn is_first_point(&self) -> bool {
+        self.first
     }
 
     /// The index of the pin named `name` (case-insensitive), as [`CosimDevice::pin_index`].
@@ -254,6 +261,9 @@ impl DeviceIo<'_> {
 
     /// Drives the output to a voltage between its `low` and `high` levels (e.g. a DAC), changing
     /// at the rate of its edges.
+    ///
+    /// # Panics
+    /// If `voltage` is not between the levels, or as [`DeviceIo::set`].
     #[track_caller]
     pub fn set_voltage(&mut self, pin: impl PinRef, voltage: f64) {
         self.request(pin, Drive::Voltage(voltage));
@@ -263,11 +273,17 @@ impl DeviceIo<'_> {
     fn request(&mut self, pin: impl PinRef, drive: Drive) {
         let index = pin.index_in(self);
         let state = &mut self.pins[index];
-        assert!(
-            state.pin.output.is_some(),
-            "the pin {:?} is not an output",
-            state.pin.name
-        );
+        let Some(output) = &state.pin.output else {
+            panic!("the pin {:?} is not an output", state.pin.name);
+        };
+        if let Drive::Voltage(voltage) = drive {
+            let (low, high) = (output.low.min(output.high), output.low.max(output.high));
+            assert!(
+                (low..=high).contains(&voltage),
+                "the voltage of the pin {:?} must be between {low} V and {high} V: {voltage}",
+                state.pin.name
+            );
+        }
         state.request = Some(drive);
     }
 
@@ -311,7 +327,11 @@ impl SharedNgspice {
     ) -> Result<Simulation, SimulationError> {
         let mut session = CosimSession::new(deck.netlist().cosim_devices(), models.models)
             .map_err(SimulationError::Cosimulation)?;
-        self.run_session(deck, Some(&mut session))
+        let simulation = self.run_session(deck, Some(&mut session))?;
+        match session.take_error() {
+            Some(reason) => Err(SimulationError::Cosimulation(reason)),
+            None => Ok(simulation),
+        }
     }
 }
 

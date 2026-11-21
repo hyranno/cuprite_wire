@@ -86,6 +86,53 @@ fn test_mirror() {
     assert!((fall - 7e-6).abs() < 10e-9, "{fall}");
 }
 
+/// Two transient analyses in one run: the firmware runs from time 0 in each, and the output it
+/// set in the first is driven again in the second.
+#[test]
+fn test_two_transient_analyses() {
+    struct Once<O> {
+        output: O,
+        steps: usize,
+    }
+    fn step<O: OutputPin>(task: &mut Once<O>) {
+        if task.steps == 0 {
+            task.output.set_high().unwrap();
+        }
+        task.steps += 1;
+    }
+    let mut bench = CircuitBuilder::new();
+    let mcu = bench
+        .instantiate_part(CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3)));
+    let load = bench.instantiate_part(DigitalLoad::new(InputCharacteristics::cmos(3.3)));
+    bench.connect(mcu["out"], load[DigitalLoad::IN]);
+    bench.label(mcu["out"], NetLabel::local("OUT"));
+    for gnd in [mcu[CosimDevice::GND], load[DigitalLoad::GND]] {
+        bench.label(gnd, NetLabel::global("GND"));
+    }
+    let deck = bench
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control(["tran 10n 2u", "tran 10n 2u", r#"wrdata out.txt v("/OUT")"#]);
+    let board = Board::new();
+    let once = Once {
+        output: board.output_pin("out"),
+        steps: 0,
+    };
+    let mut firmware = Firmware::new(&board, 1e-6, once, step);
+    let sim = deck
+        .run_with(DeviceModels::new().with("mcu", &mut firmware))
+        .unwrap();
+    // Steps at 0, 1 and 2 us in each analysis.
+    assert_eq!(firmware.task().steps, 6);
+    let table = sim.table("out.txt").unwrap();
+    let out = table.interpolate(r#"v("/OUT")"#, 1e-6).unwrap();
+    assert!((out - 3.3).abs() < 1e-3, "{out}");
+}
+
 /// The pins keep their values outside the steps, and outputs start `Low`.
 #[test]
 fn test_pins_outside_a_run() {
