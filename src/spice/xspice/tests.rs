@@ -1,8 +1,11 @@
 //! Tests with models in C, built with `gcc` against the `cosim.h` of ngspice.
 
-use std::{path::PathBuf, process::Command};
+use std::{
+    path::{Component, Path, PathBuf},
+    process::Command,
+};
 
-use super::{DCosim, Verilator};
+use super::{DCosim, Verilator, VerilatorError};
 use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
@@ -269,15 +272,31 @@ fn test_simulate_verilog_counter() {
     }
 }
 
-/// A design Verilator rejects is reported with its log.
-#[test]
-fn test_verilator_error() {
+/// A new empty temporary directory for a test.
+fn test_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "{}-xspice-{}-broken",
+        "{}-xspice-{}-{name}",
         env!("CARGO_PKG_NAME"),
         std::process::id()
     ));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// The entries of a cache directory that are builds in progress (or kept after a failure).
+fn staging_dirs(cache: &Path) -> Vec<String> {
+    std::fs::read_dir(cache)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("build-"))
+        .collect()
+}
+
+/// A design Verilator rejects is reported with its log, and its build directory is kept.
+#[test]
+fn test_verilator_error() {
+    let dir = test_dir("broken");
     let source = dir.join("broken.v");
     std::fs::write(
         &source,
@@ -289,7 +308,76 @@ fn test_verilator_error() {
         .build()
         .unwrap_err();
     assert!(
-        matches!(&error, super::VerilatorError::Command { log, .. } if log.contains("broken.v:2")),
+        matches!(&error, VerilatorError::Command { log, dir, .. }
+            if log.contains("broken.v:2") && dir.is_dir()),
         "{error}"
     );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A design whose ports cannot be pins is reported, and its build directory is removed.
+#[test]
+fn test_verilator_port_error() {
+    let dir = test_dir("gnd-port");
+    let source = dir.join("buffer.v");
+    std::fs::write(
+        &source,
+        "module buffer(input gnd, input a, output y);\n  assign y = a;\nendmodule\n",
+    )
+    .unwrap();
+    let cache = dir.join("cache");
+    let error = Verilator::new([&source])
+        .cache_dir(&cache)
+        .build()
+        .unwrap_err();
+    assert!(
+        matches!(&error, VerilatorError::Ports(reason) if reason.contains("\"gnd\"")),
+        "{error}"
+    );
+    assert_eq!(staging_dirs(&cache), Vec::<String>::new());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Relative paths are resolved against the current directory: the sources, the cache directory
+/// (the library is absolute) and the include directories in the arguments. A change to an
+/// included file is a new build.
+#[test]
+fn test_verilator_relative_paths_and_includes() {
+    let dir = test_dir("include");
+    std::fs::create_dir(dir.join("inc")).unwrap();
+    std::fs::write(
+        dir.join("top.v"),
+        "`include \"width.vh\"\n\
+         module top(input clk, output reg [W-1:0] q);\n\
+         always @(posedge clk) q <= q + 1;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("inc/width.vh"), "localparam W = 2;\n").unwrap();
+    // The test directory relative to the current directory.
+    let cwd = std::env::current_dir().unwrap();
+    let relative: PathBuf = cwd
+        .components()
+        .skip(1)
+        .map(|_| Component::ParentDir)
+        .chain(dir.components().skip(1))
+        .collect();
+    let build = || {
+        Verilator::new([relative.join("top.v")])
+            .arg(format!("-I{}", relative.join("inc").display()))
+            .cache_dir(relative.join("cache"))
+            .build()
+            .unwrap()
+    };
+    let model = build();
+    assert!(model.library().is_absolute(), "{model:?}");
+    assert_eq!(model.outputs()[0].width(), 2);
+    assert_eq!(build(), model);
+
+    std::fs::write(dir.join("inc/width.vh"), "localparam W = 3 ;\n").unwrap();
+    let changed = build();
+    assert_eq!(changed.library(), model.library());
+    assert_eq!(changed.outputs()[0].width(), 3);
+    assert_eq!(staging_dirs(&dir.join("cache")), Vec::<String>::new());
+    std::fs::remove_dir_all(&dir).unwrap();
 }

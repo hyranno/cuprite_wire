@@ -245,14 +245,20 @@ let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristic
   generated class, and compiles the design with ngspice's `verilator_shim.cpp` and
   `verilator_main.cpp` (`DEFAULT_SHIM_DIR`, `/usr/share/ngspice/scripts/src`) into a shared library
   with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them).
-- Builds take a few seconds and are cached by the contents of the sources, the arguments and the
-  version of Verilator, in `cuprite_wire-verilator` in the temporary directory (`cache_dir` to
-  change it). A failed build returns `VerilatorError::Command` with the log, and keeps its
-  directory.
+- Builds take a few seconds and are cached by the contents of the sources, the arguments, the
+  current directory and the version of Verilator, in `cuprite_wire-verilator` in the temporary
+  directory (`cache_dir` to change it). The files Verilator read in besides the sources
+  (`` `include ``, `-y`, `-v`, `-f`) are recorded with their size and modification time, and a
+  change to them rebuilds the design.
+- Relative paths (the sources, `shim_dir`, `cache_dir` and paths in the arguments) are resolved
+  against the current directory.
+- A failed step returns `VerilatorError::Command` with the log, and keeps its build directory;
+  other errors remove it.
 - Ports are taken in the order of their declaration; a port of several bits gives a pin per bit,
   `<name>_<bit>` from the most significant bit. `model.inputs()` / `model.outputs()` list them, to
-  build a `DCosim` with other characteristics per pin. Inout ports and ports wider than 32 bits are
-  not supported (`VerilatorError::Ports`).
+  build a `DCosim` with other characteristics per pin. Inout ports, ports wider than 32 bits and
+  ports whose pins are not valid pin names of the part (`gnd`, `ref`, or a scalar `q_0` next to a
+  bus `q`) are not supported (`VerilatorError::Ports`).
 - Verilator is cycle-based: the design advances on input changes (the shim uses `After_input`),
   so it needs a clock or other inputs to do anything. Delays (`#10`) need `--timing`, which this
   build does not support.
