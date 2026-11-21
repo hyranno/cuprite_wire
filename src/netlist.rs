@@ -1,9 +1,6 @@
 //! Format-independent netlist, the common input of the KiCad and SPICE exporters.
 
-use std::{
-    cmp::Ordering,
-    collections::{HashMap, HashSet},
-};
+use std::{cmp::Ordering, collections::HashMap};
 
 use petgraph::graph::NodeIndex;
 use uuid::Uuid;
@@ -16,7 +13,7 @@ use crate::{
     },
     kicad::KicadPartInfo,
     naming::{HierPath, NetLabel, NodeLabel, escape_name, natural_cmp},
-    parts::Part,
+    parts::{Part, PartPins},
     trace::Trace,
 };
 
@@ -42,6 +39,8 @@ pub struct Component {
     pub ref_name: String,
     /// The part.
     pub part: Box<dyn Part>,
+    /// The pin structure of the part.
+    pub pins: PartPins,
     /// Path of the subcircuit instance containing the component.
     pub path: HierPath,
     /// Derived from the path and the instance name, so it does not change between builds.
@@ -120,7 +119,7 @@ impl BuiltCircuit {
             .map(|c| {
                 c.part
                     .kicad()
-                    .filter(|info| info.check_pins(&c.part.pin_ids()).is_empty())
+                    .filter(|info| info.check_pins(&c.pins).is_empty())
             })
             .collect();
         let pins_by_node = self.pins_by_node(&component_of_part);
@@ -178,6 +177,7 @@ impl BuiltCircuit {
                 Component {
                     ref_name: ref_names[i].clone(),
                     part: part.part.clone(),
+                    pins: PartPins::of(part.part.as_ref()),
                     path: part.path.clone(),
                     uuid: part.uuid(),
                     trace: part.trace.clone(),
@@ -195,23 +195,18 @@ impl BuiltCircuit {
         ));
         for component in &components {
             let error = |kind| CircuitError::new(kind, component.trace.clone());
-            let pin_ids = component.part.pin_ids();
-            let mut seen = HashSet::new();
-            for pin_id in &pin_ids {
-                if !seen.insert(pin_id) {
-                    errors.push(error(CircuitErrorKind::DuplicatePinId {
-                        ref_name: component.ref_name.clone(),
-                        pin_id: pin_id.clone(),
-                    }));
-                }
+            let ref_name = || component.ref_name.clone();
+            for pin_id in component.pins.duplicate_ids() {
+                errors.push(error(CircuitErrorKind::DuplicatePinId {
+                    ref_name: ref_name(),
+                    pin_id: pin_id.clone(),
+                }));
             }
-            for pin_id in component.part.internal_connections().into_iter().flatten() {
-                if !seen.contains(&pin_id) {
-                    errors.push(error(CircuitErrorKind::UnknownPinId {
-                        ref_name: component.ref_name.clone(),
-                        pin_id,
-                    }));
-                }
+            for pin_id in component.pins.unknown_ids() {
+                errors.push(error(CircuitErrorKind::UnknownPinId {
+                    ref_name: ref_name(),
+                    pin_id: pin_id.clone(),
+                }));
             }
         }
         (components, component_of_part)

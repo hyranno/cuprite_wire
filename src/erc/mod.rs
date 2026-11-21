@@ -489,20 +489,8 @@ impl Netlist {
 
     /// Checks the pins and marks on each net.
     fn check_nets(&self, pin_types: &[BTreeMap<String, PinType>], report: &mut Reporter) {
-        // Pin ID -> index of its internal connection group, for each component.
-        let stack_groups: Vec<HashMap<String, usize>> = self
-            .components
-            .iter()
-            .map(|c| {
-                let groups = c.part.internal_connections().into_iter().enumerate();
-                groups
-                    .flat_map(|(group, pins)| pins.into_iter().map(move |pin| (pin, group)))
-                    .collect()
-            })
-            .collect();
-
         for net in &self.nets {
-            let (pins, net_pins, traces) = self.net_pins(net, pin_types, &stack_groups);
+            let (pins, net_pins, traces) = self.net_pins(net, pin_types);
             let no_connect = net
                 .marks
                 .iter()
@@ -522,7 +510,6 @@ impl Netlist {
         &self,
         net: &Net,
         pin_types: &[BTreeMap<String, PinType>],
-        stack_groups: &[HashMap<String, usize>],
     ) -> (Vec<ErcPin>, Vec<NetPin>, Vec<Trace>) {
         let mut pins = Vec::new();
         let mut net_pins = Vec::new();
@@ -533,11 +520,11 @@ impl Netlist {
                 .copied()
                 .unwrap_or(PinType::Passive);
             // Pins not in an internal connection get their own group, after the real ones.
-            let group = stack_groups[node.component]
-                .get(&node.pin_id)
-                .copied()
-                .unwrap_or(usize::MAX - net_pins.len());
             let component = &self.components[node.component];
+            let group = component
+                .pins
+                .group(&node.pin_id)
+                .unwrap_or(usize::MAX - net_pins.len());
             pins.push(ErcPin::Part {
                 ref_name: component.ref_name.clone(),
                 pin_id: node.pin_id.clone(),

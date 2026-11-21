@@ -259,6 +259,39 @@ fn test_conflicting_outputs() {
     erc(&circuit).assert_clean();
 }
 
+#[test]
+fn test_overlapping_internal_connections() {
+    // Output pins 4, 5 and ep connected inside the part by two overlapping groups.
+    let pins = [
+        ("4", PinType::Output),
+        ("5", PinType::Output),
+        ("ep", PinType::Output),
+        ("in", PinType::Input),
+    ];
+    let part = CustomPart {
+        ref_base_name: "U",
+        pin_ids: pins.iter().map(|pin| pin.0).collect(),
+        internal_connections: vec![vec!["4", "5"], vec!["4", "ep"]],
+        kicad: Some(KicadPartInfo {
+            pins: pins
+                .into_iter()
+                .enumerate()
+                .map(|(i, (id, pin_type))| {
+                    let pad = (i + 1).to_string();
+                    (id.to_string(), KicadPinInfo::new(pad, None, pin_type))
+                })
+                .collect(),
+            ..Default::default()
+        }),
+        spice: None,
+    };
+    let mut circuit = CircuitBuilder::new();
+    let u = circuit.instantiate_part(Box::new(part));
+    circuit.connect(u["in"], u["5"]);
+    // The three pins are one stack, so they neither conflict nor count as several drivers.
+    erc(&circuit).assert_clean();
+}
+
 /// A resistor whose second pin is left open on purpose. Node 0: the first pin.
 #[derive(Debug, Clone)]
 struct OpenResistor;

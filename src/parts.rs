@@ -61,6 +61,130 @@ pub trait Part: Debug + DynClone {
 }
 dyn_clone::clone_trait_object!(Part);
 
+/// The pin structure of a part: its pin IDs and which of them are connected inside the part.
+///
+/// Overlapping internal connection groups (e.g. the stacked pins `["4", "5"]` and `["4", "ep"]`)
+/// are merged into one group, as the pins are connected when the part is instantiated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartPins {
+    /// Pin IDs in the order of [`Part::pin_ids`], without duplicates.
+    ids: Vec<String>,
+    /// Index into `ids` of each pin ID.
+    index: HashMap<String, usize>,
+    /// The merged internal connection group of each pin, or `None` if it is in none.
+    groups: Vec<Option<usize>>,
+    /// Pin IDs listed more than once by [`Part::pin_ids`].
+    duplicate_ids: Vec<String>,
+    /// Pin IDs in the internal connections that are not pin IDs of the part.
+    unknown_ids: Vec<String>,
+}
+
+impl PartPins {
+    /// The pins of `part`, from [`Part::pin_ids`] and [`Part::internal_connections`].
+    pub fn of(part: &dyn Part) -> Self {
+        PartPins::new(part.pin_ids(), &part.internal_connections())
+    }
+
+    /// Pins with the IDs `pin_ids`, connected inside the part by the groups `internal_connections`.
+    /// A duplicate pin ID is kept once, and unknown pin IDs in the groups are ignored.
+    pub fn new(
+        pin_ids: impl IntoIterator<Item = String>,
+        internal_connections: &[Vec<String>],
+    ) -> Self {
+        let mut ids = Vec::new();
+        let mut index = HashMap::new();
+        let mut duplicate_ids = Vec::new();
+        for id in pin_ids {
+            if index.contains_key(&id) {
+                duplicate_ids.push(id);
+            } else {
+                index.insert(id.clone(), ids.len());
+                ids.push(id);
+            }
+        }
+
+        // Union-find over the pin indices; `None` for pins in no group.
+        let mut parent: Vec<Option<usize>> = vec![None; ids.len()];
+        fn root(parent: &mut [Option<usize>], mut pin: usize) -> usize {
+            while let Some(next) = parent[pin].filter(|&next| next != pin) {
+                parent[pin] = parent[next];
+                pin = next;
+            }
+            pin
+        }
+        let mut unknown_ids = Vec::new();
+        for group in internal_connections {
+            let mut first = None;
+            for id in group {
+                let Some(&pin) = index.get(id) else {
+                    unknown_ids.push(id.clone());
+                    continue;
+                };
+                parent[pin].get_or_insert(pin);
+                let pin_root = root(&mut parent, pin);
+                match first {
+                    None => first = Some(pin_root),
+                    Some(first) => parent[pin_root] = Some(first),
+                }
+            }
+        }
+        // Number the groups in the order of their first pins.
+        let mut number: HashMap<usize, usize> = HashMap::new();
+        let groups = (0..ids.len())
+            .map(|pin| {
+                parent[pin]?;
+                let pin_root = root(&mut parent, pin);
+                let next = number.len();
+                Some(*number.entry(pin_root).or_insert(next))
+            })
+            .collect();
+        PartPins {
+            ids,
+            index,
+            groups,
+            duplicate_ids,
+            unknown_ids,
+        }
+    }
+
+    /// The pin IDs in the order of [`Part::pin_ids`], without duplicates.
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    /// Whether `pin_id` is a pin ID of the part.
+    pub fn contains(&self, pin_id: &str) -> bool {
+        self.index.contains_key(pin_id)
+    }
+
+    /// The internal connection group of `pin_id`, numbered from 0 in the order of the pins, or
+    /// `None` if the pin is in no group (or is not a pin of the part).
+    pub fn group(&self, pin_id: &str) -> Option<usize> {
+        self.groups[*self.index.get(pin_id)?]
+    }
+
+    /// Whether `pin_id` is connected inside the part to a pin for which `f` holds.
+    pub fn is_connected_to(&self, pin_id: &str, mut f: impl FnMut(&str) -> bool) -> bool {
+        let Some(group) = self.group(pin_id) else {
+            return false;
+        };
+        self.ids
+            .iter()
+            .zip(&self.groups)
+            .any(|(other, &other_group)| other_group == Some(group) && f(other))
+    }
+
+    /// Pin IDs listed more than once by [`Part::pin_ids`].
+    pub(crate) fn duplicate_ids(&self) -> &[String] {
+        &self.duplicate_ids
+    }
+
+    /// Pin IDs in the internal connections that are not pin IDs of the part.
+    pub(crate) fn unknown_ids(&self) -> &[String] {
+        &self.unknown_ids
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
@@ -160,5 +284,37 @@ impl PinType {
 impl fmt::Display for PinType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strings(ids: &[&str]) -> Vec<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn test_part_pins() {
+        let pins = PartPins::new(
+            strings(&["1", "2", "3", "4", "5", "ep", "2"]),
+            &[
+                strings(&["4", "5"]),
+                strings(&["2", "x"]),
+                strings(&["ep", "4"]),
+            ],
+        );
+        assert_eq!(pins.ids(), strings(&["1", "2", "3", "4", "5", "ep"]));
+        assert_eq!(pins.duplicate_ids(), strings(&["2"]));
+        assert_eq!(pins.unknown_ids(), strings(&["x"]));
+        // Overlapping groups are merged, and groups are numbered in the order of the pins.
+        let groups: Vec<_> = pins.ids().iter().map(|id| pins.group(id)).collect();
+        assert_eq!(groups, [None, Some(0), None, Some(1), Some(1), Some(1)]);
+        assert_eq!(pins.group("x"), None);
+        assert!(pins.contains("ep") && !pins.contains("x"));
+        assert!(pins.is_connected_to("5", |id| id == "ep"));
+        assert!(!pins.is_connected_to("1", |_| true));
+        assert!(!pins.is_connected_to("2", |id| id == "3"));
     }
 }

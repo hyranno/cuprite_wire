@@ -332,10 +332,7 @@ impl Netlist {
 /// Returns the SPICE information of a component if it can be exported.
 fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Option<SpicePartInfo> {
     let check = |info: &SpicePartInfo| {
-        let problems = info.check(
-            &component.part.pin_ids(),
-            &component.part.internal_connections(),
-        );
+        let problems = info.check(&component.pins);
         problems
             .into_iter()
             .map(|problem| problem_kind(problem, component.ref_name.clone()))

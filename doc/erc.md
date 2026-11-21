@@ -65,6 +65,7 @@ Notes:
   power pin with a ground name on another net is reported.
 - Pins of one part in the same group of `Part::internal_connections` and of the same type are
   treated like KiCad's stacked pins: they never conflict with each other and count as one pin.
+  Groups sharing a pin count as one group (`PartPins`).
 - A lone `input` pin is reported both as not connected and as not driven, as KiCad does.
 
 `PinMap` (the pin conflict matrix) gives the severity of connecting two pin types; the default is

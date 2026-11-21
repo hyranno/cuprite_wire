@@ -73,7 +73,8 @@ fn spice(&self) -> Option<SpicePartInfo> {
 - A part may have **several elements** (`SpicePartInfo::elements`), e.g. the units of a dual op-amp.
   Each gets a distinct suffix (`with_suffix("A")` -> `XU1A`). Use a `.subckt` for a model with
   internal nodes.
-- `SpicePartInfo::check` checks the information against the part's pins without building a circuit.
+- `SpicePartInfo::check` checks the information against the part's pins (`PartPins::of(&part)`)
+  without building a circuit.
 
 ## 3. Test benches and simulation-only parts
 
