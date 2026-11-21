@@ -14,6 +14,8 @@ Usage: python3 tools/generate_basic_library.py
 
 from pathlib import Path
 
+from kicad_netlist import quote
+
 ROOT = Path(__file__).resolve().parent.parent / "libs"
 LIB = "cuprite_basic"
 GENERATOR = "cuprite_wire_generate_basic_library"
@@ -21,20 +23,16 @@ FONT = "(effects (font (size 1.27 1.27)))"
 HIDDEN = "(effects (font (size 1.27 1.27)) (hide yes))"
 
 
-def q(text):
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
 # --- Symbols -------------------------------------------------------------------------------
 
 def prop(name, value, at=(0, 0), hidden=True):
-    return f"\t\t(property {q(name)} {q(value)} (at {at[0]} {at[1]} 0) {HIDDEN if hidden else FONT})"
+    return f"\t\t(property {quote(name)} {quote(value)} (at {at[0]} {at[1]} 0) {HIDDEN if hidden else FONT})"
 
 
 def pin(kind, number, name, at, angle, length=2.54, hidden=False):
     hide = " (hide yes)" if hidden else ""
     return (f"\t\t\t(pin {kind} line (at {at[0]} {at[1]} {angle}) (length {length}){hide} "
-            f"(name {q(name)} {FONT}) (number {q(number)} {FONT}))")
+            f"(name {quote(name)} {FONT}) (number {quote(number)} {FONT}))")
 
 
 def rect(x1, y1, x2, y2):
@@ -49,7 +47,7 @@ def poly(*points, fill="none"):
 
 def symbol(name, reference, value, footprint, description, units, sim=(), pin_names=True):
     """`units`: {(unit, style): [lines]}."""
-    out = [f"\t(symbol {q(name)}"]
+    out = [f"\t(symbol {quote(name)}"]
     if not pin_names:
         out.append("\t\t(pin_names (offset 0) (hide yes))")
     out.append("\t\t(exclude_from_sim no) (in_bom yes) (on_board yes)")
@@ -61,7 +59,7 @@ def symbol(name, reference, value, footprint, description, units, sim=(), pin_na
     for key, text in sim:
         out.append(prop(key, text))
     for (unit, style), lines in units.items():
-        out.append(f"\t\t(symbol {q(f'{name}_{unit}_{style}')}")
+        out.append(f"\t\t(symbol {quote(f'{name}_{unit}_{style}')}")
         out.extend(lines)
         out.append("\t\t)")
     out.append("\t)")
@@ -99,7 +97,7 @@ SP = "${KICAD9_SYMBOL_DIR}/cuprite_basic.sp"
 
 
 def symbols():
-    out = [f"(kicad_symbol_lib (version 20241209) (generator {q(GENERATOR)}) (generator_version \"9.0\")"]
+    out = [f"(kicad_symbol_lib (version 20241209) (generator {quote(GENERATOR)}) (generator_version \"9.0\")"]
     out += two_pin("R", "R", "R_0603", "Resistor (cuprite_wire basic library)", [rect(-1.016, -2.54, 1.016, 2.54)])
     out += two_pin("C", "C", "C_0603", "Capacitor (cuprite_wire basic library)",
                    [poly((-2.032, 0.762), (2.032, 0.762)), poly((-2.032, -0.762), (2.032, -0.762)),
@@ -130,18 +128,18 @@ def symbols():
 
 def footprint(name, description, pads, body, courtyard):
     """`pads`: [(number, x, y, w, h)]; `body` and `courtyard`: half sizes (x, y)."""
-    out = [f"(footprint {q(name)}", "\t(version 20241229)", f"\t(generator {q(GENERATOR)})",
-           '\t(layer "F.Cu")', f"\t(descr {q(description)})",
+    out = [f"(footprint {quote(name)}", "\t(version 20241229)", f"\t(generator {quote(GENERATOR)})",
+           '\t(layer "F.Cu")', f"\t(descr {quote(description)})",
            f'\t(property "Reference" "REF**" (at 0 {-courtyard[1] - 1} 0) (layer "F.SilkS") '
            "(effects (font (size 1 1) (thickness 0.15))))",
-           f'\t(property "Value" {q(name)} (at 0 {courtyard[1] + 1} 0) (layer "F.Fab") '
+           f'\t(property "Value" {quote(name)} (at 0 {courtyard[1] + 1} 0) (layer "F.Fab") '
            "(effects (font (size 1 1) (thickness 0.15))))",
            "\t(attr smd)"]
     for layer, (x, y), width in (("F.Fab", body, 0.1), ("F.CrtYd", courtyard, 0.05)):
         out.append(f"\t(fp_rect (start {-x} {-y}) (end {x} {y}) (stroke (width {width}) (type solid)) "
-                   f"(fill no) (layer {q(layer)}))")
+                   f"(fill no) (layer {quote(layer)}))")
     for number, x, y, w, h in pads:
-        out.append(f"\t(pad {q(number)} smd roundrect (at {x} {y}) (size {w} {h}) "
+        out.append(f"\t(pad {quote(number)} smd roundrect (at {x} {y}) (size {w} {h}) "
                    '(layers "F.Cu" "F.Mask" "F.Paste") (roundrect_rratio 0.25))')
     out.append(")")
     return "\n".join(out) + "\n"

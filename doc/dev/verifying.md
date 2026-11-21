@@ -26,6 +26,8 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
   (`doc/spice_part_macro.md` section 6).
 - **Compile errors of the macros**: `tests/kicad_part_errors.rs` (trybuild); regenerate the
   messages with `TRYBUILD=overwrite cargo test --test kicad_part_errors`.
+- **S-expression helpers of the tools**: `python3 -m doctest tools/kicad_netlist.py` checks the
+  quoting and unescaping shared by the scripts in `tools/` (not run by CI).
 
 ## 2. Footprints and pads
 

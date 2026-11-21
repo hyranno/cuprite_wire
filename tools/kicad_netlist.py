@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-TOKEN = re.compile(r'\(|\)|"(?:\\.|[^"\\])*"|[^\s()"]+')
+TOKEN = re.compile(r'\(|\)|"(?:\\.|[^"\\])*"|[^\s()"]+', re.S)
 
 
 KICAD_FOOTPRINT_DIR = Path("/usr/share/kicad/footprints")
@@ -44,8 +44,36 @@ def symbol_lib_path(library):
     return project_symbol_libs().get(library, KICAD_SYMBOL_DIR / f"{library}.kicad_sym")
 
 
-def parse(text):
-    """Parse an S-expression into nested lists of strings."""
+# The escapes in quoted strings, as {escaped character: character it stands for}; the same as
+# `ESCAPES` in crates/kicad_lib/src/sexpr.rs. Unknown escapes stand for the character itself.
+ESCAPES = {'"': '"', "\\": "\\", "n": "\n", "r": "\r", "t": "\t"}
+_QUOTES = {char: "\\" + escaped for escaped, char in ESCAPES.items()}
+
+
+def quote(text):
+    """`text` as a quoted string atom."""
+    return '"' + "".join(_QUOTES.get(c, c) for c in text) + '"'
+
+
+def unquote(atom):
+    """The text of a quoted string atom as written (see `parse(raw=True)`); other atoms as they are."""
+    if not atom.startswith('"'):
+        return atom
+    return re.sub(r"\\(.)", lambda m: ESCAPES.get(m.group(1), m.group(1)), atom[1:-1], flags=re.S)
+
+
+def parse(text, raw=False):
+    """Parse an S-expression into nested lists of strings.
+
+    Quoted strings are unescaped, or kept as written (quotes included) with `raw`.
+
+    >>> parse(r'(field "a\\n\\tb \\"c\\" \\\\ \\x")')
+    ['field', 'a\\n\\tb "c" \\\\ x']
+    >>> parse(r'(field "a\\nb")', raw=True)
+    ['field', '"a\\\\nb"']
+    >>> parse(quote("a\\r\\nb\\t\\\\ \\"c\\""))
+    'a\\r\\nb\\t\\\\ "c"'
+    """
     stack = [[]]
     for token in TOKEN.findall(text):
         if token == "(":
@@ -53,15 +81,20 @@ def parse(text):
         elif token == ")":
             done = stack.pop()
             stack[-1].append(done)
-        elif token.startswith('"'):
-            stack[-1].append(re.sub(r"\\(.)", r"\1", token[1:-1]))
         else:
-            stack[-1].append(token)
+            stack[-1].append(token if raw else unquote(token))
     return stack[0][0]
 
 
+def dump(tree):
+    """Writes a tree of `parse(raw=True)` back (atoms as they were written)."""
+    if not isinstance(tree, list):
+        return tree
+    return "(" + " ".join(dump(item) for item in tree) + ")"
+
+
 def children(node, name):
-    return [child for child in node[1:] if isinstance(child, list) and child[0] == name]
+    return [child for child in node[1:] if isinstance(child, list) and child and child[0] == name]
 
 
 def value(node, name):
