@@ -319,6 +319,11 @@ impl SharedNgspice {
     /// Runs the deck with the models of its [`CosimDevice`]s. Every device needs a model and
     /// every model a device.
     ///
+    /// # Errors
+    /// [`SimulationError::Cosimulation`] if the models do not match the devices or the results
+    /// lack the node of a device's pin (a `save` leaving it out), and the errors of
+    /// [`SharedNgspice::run`].
+    ///
     /// # Panics
     /// Resumes a panic of a model after the run.
     pub fn run_with(
@@ -338,7 +343,13 @@ impl SharedNgspice {
 
 impl SpiceDeck {
     /// Runs the deck with the models of its [`CosimDevice`]s in the ngspice shared library
-    /// ([`SharedNgspice::default`]); see [`SharedNgspice::run_with`].
+    /// ([`SharedNgspice::default`]).
+    ///
+    /// # Errors
+    /// See [`SharedNgspice::run_with`].
+    ///
+    /// # Panics
+    /// See [`SharedNgspice::run_with`].
     pub fn run_with(&self, models: DeviceModels<'_>) -> Result<Simulation, SimulationError> {
         SharedNgspice::default().run_with(self, models)
     }

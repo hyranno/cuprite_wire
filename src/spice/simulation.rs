@@ -30,10 +30,14 @@ impl Default for Ngspice {
 
 impl Ngspice {
     /// Writes the deck into a new temporary directory and runs it there, so that relative
-    /// `wrdata` paths land in that directory. Fails if ngspice reports an error.
+    /// `wrdata` paths land in that directory.
     ///
     /// If the models need a compatibility mode ([`SpiceNetlist::ngbehavior`](crate::spice::SpiceNetlist::ngbehavior)),
     /// it is set with a `.spiceinit` file in that directory.
+    ///
+    /// # Errors
+    /// [`SimulationError::Io`] if the program cannot be run or the run directory cannot be
+    /// prepared, and [`SimulationError::Ngspice`] if ngspice fails or prints an error.
     pub fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
         let dir = prepare_run_dir(deck)?;
         let output = Command::new(&self.program)
@@ -59,6 +63,9 @@ impl Simulator for Ngspice {
 /// A way of running decks with ngspice.
 pub trait Simulator {
     /// Runs `deck` in a new temporary directory, which the result holds.
+    ///
+    /// # Errors
+    /// The variants of [`SimulationError`] the backend can fail with; see the implementations.
     fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError>;
 }
 
@@ -176,6 +183,10 @@ impl Simulation {
     }
 
     /// Reads a file written by `wrdata` in the control block.
+    ///
+    /// # Errors
+    /// [`SimulationError::Io`] if the file cannot be read, and [`SimulationError::Table`] if it
+    /// is not a `wrdata` table.
     pub fn table(&self, file: &str) -> Result<Table, SimulationError> {
         let text = fs::read_to_string(self.dir.join(file))?;
         Table::parse(&text).map_err(|reason| SimulationError::Table {
@@ -195,7 +206,10 @@ impl Simulation {
         })
     }
 
-    /// [`Self::value`] for tests: panics with the log of ngspice if the value is not found.
+    /// [`Self::value`] for tests.
+    ///
+    /// # Panics
+    /// If the value is not found, with the log of ngspice in the message.
     #[track_caller]
     pub fn expect_value(&self, name: &str) -> f64 {
         self.value(name)

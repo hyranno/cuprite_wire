@@ -100,8 +100,12 @@ pub struct NetNode {
 impl BuiltCircuit {
     /// Resolves nets and their names, and checks the circuit independently of the output format.
     ///
-    /// All errors are collected, including those found while describing the circuit.
     /// Warnings are reported and also kept in [`Netlist::warnings`].
+    ///
+    /// # Errors
+    /// The problems that prevent a netlist (duplicate reference designators or net names,
+    /// invalid names, ...). All errors are collected, including those found while describing the
+    /// circuit ([`BuiltCircuit::errors`]).
     pub fn to_netlist(&self) -> Result<Netlist, CircuitErrors> {
         let mut errors = self.errors.clone();
         let mut warnings = Vec::new();

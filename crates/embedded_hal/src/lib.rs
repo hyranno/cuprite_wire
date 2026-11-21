@@ -35,7 +35,7 @@
 //!
 //! See the guide [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md).
 
-#![warn(missing_docs)]
+#![warn(missing_docs, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
 

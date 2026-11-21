@@ -14,7 +14,9 @@ use crate::{
 /// driven from outside, [`PinType::Input`] for one read from outside, and [`PinType::PowerOut`] for
 /// a supply. Nodes given `None` are checked as if nothing were connected to them.
 ///
-/// Fails if the subcircuit cannot be converted to a netlist.
+/// # Errors
+/// The errors of the netlist conversion ([`BuiltCircuit::to_netlist`](crate::circuit::BuiltCircuit::to_netlist))
+/// if the subcircuit cannot be converted.
 #[track_caller]
 pub fn check_subcircuit<G: SubcircuitGenerator>(
     generator: &G,

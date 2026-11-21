@@ -51,7 +51,11 @@ struct KicadNode {
 
 impl Netlist {
     /// Resolves the KiCad information of every component and checks it.
-    /// All errors are collected, each with the trace of the component.
+    ///
+    /// # Errors
+    /// The problems found in the KiCad information (a part without KiCad information or without
+    /// a footprint, a pin without KiCad pin information, pins sharing a pad, ...). All errors are collected, each with
+    /// the trace of the component.
     pub fn to_kicad(&self) -> Result<KicadNetlist, CircuitErrors> {
         let mut errors = Vec::new();
         let infos: Vec<Option<KicadPartInfo>> = self
@@ -197,6 +201,9 @@ impl KicadNetlist {
     }
 
     /// Writes the netlist to `writer` as a `.net` file, followed by a newline.
+    ///
+    /// # Errors
+    /// The error of `writer`.
     pub fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
         writeln!(writer, "{self}")
     }

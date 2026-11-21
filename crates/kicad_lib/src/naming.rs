@@ -38,8 +38,10 @@ impl From<LibIdError> for crate::Error {
 }
 
 impl LibId {
-    /// Makes an identifier from the library and item names, which must be non-empty and contain
-    /// neither `:` nor control characters.
+    /// Makes an identifier from the library and item names.
+    ///
+    /// # Errors
+    /// If a name is empty or contains `:` or a control character.
     pub fn new(library: impl Into<String>, name: impl Into<String>) -> Result<Self, LibIdError> {
         let library = library.into();
         let name = name.into();
