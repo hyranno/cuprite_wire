@@ -3,13 +3,15 @@
 //! The electrical types of pins come from [`Part::pin_types`](crate::parts::Part::pin_types).
 //! Marks attached to nodes stand for the schematic items KiCad uses: a no-connect flag
 //! ([`CircuitBuilder::no_connect`]), a `PWR_FLAG` ([`CircuitBuilder::power_flag`]), and pins outside the
-//! circuit ([`CircuitBuilder::virtual_pin`]). [`check_subcircuit`] checks a subcircuit alone.
+//! circuit ([`CircuitBuilder::virtual_pin`]). A violation is excluded on one net with
+//! [`CircuitBuilder::erc_allow`]. [`check_subcircuit`] checks a subcircuit alone.
 //!
 //! See the guide [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md).
 //!
 //! [`CircuitBuilder::no_connect`]: crate::circuit::CircuitBuilder::no_connect
 //! [`CircuitBuilder::power_flag`]: crate::circuit::CircuitBuilder::power_flag
 //! [`CircuitBuilder::virtual_pin`]: crate::circuit::CircuitBuilder::virtual_pin
+//! [`CircuitBuilder::erc_allow`]: crate::circuit::CircuitBuilder::erc_allow
 
 mod rules;
 mod subcircuit;
@@ -34,6 +36,7 @@ use rules::{NetFinding, NetPin, check_net};
 
 /// A mark attached to a node for ERC.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ErcMark {
     /// The net is intentionally unconnected (KiCad's no-connect flag).
     NoConnect,
@@ -44,6 +47,8 @@ pub enum ErcMark {
         /// The name shown in ERC messages.
         name: String,
     },
+    /// The violations of the rule on this net are not reported (like an excluded KiCad ERC marker).
+    Allow(ErcRule),
 }
 
 /// A mark with the location where it was attached.
@@ -125,10 +130,14 @@ impl Default for PinMap {
     }
 }
 
-/// The rules other than pin conflicts, whose severities are given by [`PinMap`].
+/// The rules ERC checks, each with its severity in [`ErcSettings`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ErcRule {
+    /// Two connected pins whose types conflict (`pin_to_pin`). The severity of a conflict is given
+    /// by [`PinMap`], and that of this rule is the highest it can be: [`Severity::Warning`] reports
+    /// the errors of the pin map as warnings, and [`Severity::Ignore`] turns pin conflicts off.
+    PinToPin,
     /// A pin is not connected to anything (`pin_not_connected`).
     PinNotConnected,
     /// An input pin has no driver on its net (`pin_not_driven`).
@@ -153,9 +162,10 @@ impl ErcRule {
     /// The default severity, KiCad's except for [`ErcRule::LabelOnlyNet`] (an error in KiCad).
     pub fn default_severity(self) -> Severity {
         match self {
-            ErcRule::PinNotConnected | ErcRule::PinNotDriven | ErcRule::PowerPinNotDriven => {
-                Severity::Error
-            }
+            ErcRule::PinToPin
+            | ErcRule::PinNotConnected
+            | ErcRule::PinNotDriven
+            | ErcRule::PowerPinNotDriven => Severity::Error,
             ErcRule::NoConnectConnected
             | ErcRule::NoConnectDangling
             | ErcRule::VirtualPinDangling
@@ -234,12 +244,13 @@ impl fmt::Display for ErcPin {
     }
 }
 
-/// What an ERC violation is about. Each variant but [`ErcViolationKind::PinToPin`] corresponds to
+/// What an ERC violation is about. Each variant but [`ErcViolationKind::Netlist`] corresponds to
 /// the [`ErcRule`] of the same name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErcViolationKind {
-    /// Two pins whose types conflict in the [`PinMap`]. Traced to `pin`, with a note at `other`.
+    /// [`ErcRule::PinToPin`]: two pins whose types conflict in the [`PinMap`]. Traced to `pin`,
+    /// with a note at `other`.
     PinToPin {
         /// The name of the net.
         net: String,
@@ -290,7 +301,7 @@ pub enum ErcViolationKind {
         /// The first net name that differs from it only in case.
         other: String,
     },
-    /// A warning of the netlist conversion.
+    /// A warning of the netlist conversion ([`ErcRule::MultipleNetNames`] or [`ErcRule::LabelOnlyNet`]).
     Netlist(CircuitWarningKind),
 }
 
@@ -427,7 +438,8 @@ impl fmt::Display for ErcReport {
 
 impl Netlist {
     /// Checks the netlist. Its warnings are included in the report (as [`ErcRule::MultipleNetNames`]
-    /// and [`ErcRule::LabelOnlyNet`]).
+    /// and [`ErcRule::LabelOnlyNet`]). The violations of the rules a net allows
+    /// ([`ErcMark::Allow`]) are left out.
     pub fn erc(&self, settings: &ErcSettings) -> ErcReport {
         let mut report = Reporter {
             settings,
@@ -522,6 +534,8 @@ impl Netlist {
     fn check_pinless_marks(&self, report: &mut Reporter) {
         for mark in &self.pinless_marks {
             let (rule, kind) = match &mark.mark {
+                // Nothing to allow on a net without part pins.
+                ErcMark::Allow(_) => continue,
                 ErcMark::NoConnect => (
                     ErcRule::NoConnectDangling,
                     ErcViolationKind::NoConnectDangling,
@@ -543,6 +557,9 @@ impl Netlist {
         for (i, first) in case_insensitive_duplicates(self.nets.iter().map(|net| net.name.as_str()))
         {
             let (net, other) = (&self.nets[i], &self.nets[first]);
+            if net.allows(ErcRule::SimilarNetNames) || other.allows(ErcRule::SimilarNetNames) {
+                continue;
+            }
             let kind = ErcViolationKind::SimilarNetNames {
                 name: net.name.clone(),
                 other: other.name.clone(),
@@ -558,8 +575,14 @@ impl Netlist {
     /// Reports the warnings of the netlist conversion.
     fn report_warnings(&self, report: &mut Reporter) {
         for warning in &self.warnings {
-            let rule = match warning.kind {
-                CircuitWarningKind::MultipleNetNames { .. } => ErcRule::MultipleNetNames,
+            let rule = match &warning.kind {
+                CircuitWarningKind::MultipleNetNames { used, .. } => {
+                    let net = self.nets.iter().find(|net| &net.name == used);
+                    if net.is_some_and(|net| net.allows(ErcRule::MultipleNetNames)) {
+                        continue;
+                    }
+                    ErcRule::MultipleNetNames
+                }
                 CircuitWarningKind::LabelOnlyNet { .. } => ErcRule::LabelOnlyNet,
             };
             let diagnostic = Diagnostic {
@@ -587,6 +610,7 @@ impl Reporter<'_> {
         }
     }
 
+    /// Reports a finding on `net`, unless the net allows its rule.
     fn net_finding(
         &mut self,
         net: &Net,
@@ -596,12 +620,15 @@ impl Reporter<'_> {
         no_connect: Option<&NodeMark>,
     ) {
         let name = net.name.clone();
-        let (severity, diagnostic) = match finding {
+        // The severity given by the pin map, for pin conflicts.
+        let mut map_severity = None;
+        let (rule, diagnostic) = match finding {
             NetFinding::PinToPin {
                 pin,
                 other,
                 severity,
             } => {
+                map_severity = Some(severity);
                 let kind = ErcViolationKind::PinToPin {
                     net: name,
                     pin: pins[pin].clone(),
@@ -609,7 +636,7 @@ impl Reporter<'_> {
                 };
                 let note = format!("{} is here", pins[other]);
                 (
-                    severity,
+                    ErcRule::PinToPin,
                     Diagnostic::new(kind, traces[pin].clone())
                         .with_note(note, traces[other].clone()),
                 )
@@ -620,7 +647,7 @@ impl Reporter<'_> {
                     pin: pins[pin].clone(),
                 };
                 (
-                    self.settings.severity(ErcRule::PinNotConnected),
+                    ErcRule::PinNotConnected,
                     Diagnostic::new(kind, traces[pin].clone()),
                 )
             }
@@ -630,7 +657,7 @@ impl Reporter<'_> {
                     pin: pins[pin].clone(),
                 };
                 (
-                    self.settings.severity(ErcRule::PinNotDriven),
+                    ErcRule::PinNotDriven,
                     Diagnostic::new(kind, traces[pin].clone()),
                 )
             }
@@ -640,7 +667,7 @@ impl Reporter<'_> {
                     pin: pins[pin].clone(),
                 };
                 (
-                    self.settings.severity(ErcRule::PowerPinNotDriven),
+                    ErcRule::PowerPinNotDriven,
                     Diagnostic::new(kind, traces[pin].clone()),
                 )
             }
@@ -657,12 +684,25 @@ impl Reporter<'_> {
                     diagnostic =
                         diagnostic.with_note(format!("{} is here", pins[pin]), traces[pin].clone());
                 }
-                (
-                    self.settings.severity(ErcRule::NoConnectConnected),
-                    diagnostic,
-                )
+                (ErcRule::NoConnectConnected, diagnostic)
             }
         };
-        self.push(severity, diagnostic);
+        if net.allows(rule) {
+            return;
+        }
+        let severity = self.settings.severity(rule);
+        self.push(
+            map_severity.map_or(severity, |s| s.min(severity)),
+            diagnostic,
+        );
+    }
+}
+
+impl Net {
+    /// Whether the net has an [`ErcMark::Allow`] mark for `rule`.
+    fn allows(&self, rule: ErcRule) -> bool {
+        self.marks
+            .iter()
+            .any(|mark| mark.mark == ErcMark::Allow(rule))
     }
 }
