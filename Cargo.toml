@@ -31,6 +31,7 @@ exclude = [".claude/", ".devcontainer/", ".github/", ".gitattributes", ".gitigno
 features = ["shared-ngspice"]
 
 [dependencies]
+cuprite_wire_kicad_lib.workspace = true
 cuprite_wire_macros.workspace = true
 dyn-clone = "1.0.20"
 libloading = { version = "0.9.1", optional = true }

@@ -207,82 +207,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         Some(value) => value.clone(),
         None => sim::Value::Fixed(symbol.property("Value").unwrap_or_default().to_string()),
     };
-
-    // Footprint and pads.
-    let footprint_text = match &options.footprint {
-        FootprintOption::Given(text) => Some(text.clone()),
-        FootprintOption::FromSymbol => match symbol.property("Footprint").filter(|f| !f.is_empty())
-        {
-            Some(text) => Some(text.to_string()),
-            None => {
-                return err(
-                    Footprint,
-                    format!(
-                        "symbol {symbol_id} has no footprint; give one with `footprint: \"Library:Name\"`"
-                    ),
-                );
-            }
-        },
-        FootprintOption::None => None,
-    };
-    let footprint = match footprint_text {
-        None => {
-            if !options.extra_pads.is_empty() {
-                return err(ExtraPads, "extra pads need a footprint");
-            }
-            None
-        }
-        Some(text) => {
-            let id = LibId::parse(&text).map_err(at(Footprint))?;
-            let pads = resolver
-                .footprint(&id.library, &id.name)
-                .map_err(at(Footprint))?;
-            let missing: Vec<&str> = symbol
-                .pins
-                .iter()
-                .map(|pin| pin.number.as_str())
-                .filter(|number| !pads.has_pad(number))
-                .collect();
-            if !missing.is_empty() {
-                return err(
-                    Footprint,
-                    format!(
-                        "footprint {id} has no pads for the symbol pins {}",
-                        missing.join(", ")
-                    ),
-                );
-            }
-            let symbol_numbers: BTreeSet<&str> =
-                symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
-            for pad in &options.extra_pads {
-                if symbol_numbers.contains(pad.as_str()) {
-                    return err(ExtraPads, format!("pad {pad:?} is a pin of the symbol"));
-                }
-                if !pads.has_pad(pad) {
-                    return err(ExtraPads, format!("footprint {id} has no pad {pad:?}"));
-                }
-            }
-            let unlisted: Vec<&str> = pads
-                .pad_numbers
-                .iter()
-                .map(String::as_str)
-                .filter(|pad| {
-                    !symbol_numbers.contains(pad) && !options.extra_pads.iter().any(|p| p == pad)
-                })
-                .collect();
-            if !unlisted.is_empty() {
-                return err(
-                    Footprint,
-                    format!(
-                        "footprint {id} has pads without a symbol pin: {}; list them in `extra_pads` \
-                         (and connect them, e.g. with `internal_connections`)",
-                        unlisted.join(", ")
-                    ),
-                );
-            }
-            Some(id)
-        }
-    };
+    let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
 
     // Pins: symbol pins, then extra pads; IDs default to the numbers.
     let mut pins: Vec<PinDef> = symbol
@@ -304,20 +229,11 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         unit: 0,
     }));
     rename_pins(&mut pins, &common.pins, "pin")?;
-    let id_of: BTreeMap<&str, &str> = pins
-        .iter()
-        .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
-        .collect();
-    let to_ids = |numbers: &[String]| -> Vec<String> {
-        numbers
-            .iter()
-            .map(|n| id_of[n.as_str()].to_string())
-            .collect()
-    };
+    let ids = PinIds::new(&pins);
     let mut internal_connections: Vec<Vec<String>> = symbol
         .stacked_pins()
         .iter()
-        .map(|group| to_ids(group))
+        .map(|group| ids.of(group))
         .collect();
     internal_connections.extend(check_internal_connections(
         &common.internal_connections,
@@ -335,43 +251,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         (SpiceOption::None, true) => SpiceDef::Unsupported,
         (SpiceOption::Excluded, true) => SpiceDef::Excluded,
         (SpiceOption::Auto, false) => {
-            // The pins in pad numbers, connected as the part connects them.
-            let pad_of: BTreeMap<&str, &str> = pins
-                .iter()
-                .map(|pin| (pin.id.as_str(), pin.pad.as_str()))
-                .collect();
-            let groups: Vec<Vec<String>> = internal_connections
-                .iter()
-                .map(|group| {
-                    group
-                        .iter()
-                        .map(|id| pad_of[id.as_str()].to_string())
-                        .collect()
-                })
-                .collect();
-            let part_pins: Vec<PartPin> = pins
-                .iter()
-                .map(|pin| PartPin {
-                    id: pin.pad.clone(),
-                    name: pin.name.clone(),
-                })
-                .collect();
-            let bind_options = BindOptions {
-                pins: PartPins::Given(&part_pins),
-                strict: true,
-                internal_connections: &groups,
-                mode: common.sim_model,
-            };
-            let (mut elements, unused_pins) =
-                binding::bind(&options.sim, &bind_options, resolver).map_err(model_error)?;
+            let (elements, unused_pins) = sim_block(
+                &options.sim,
+                common.sim_model,
+                &pins,
+                &internal_connections,
+                resolver,
+            )?;
             fields.extend(sim_fields(&options.sim, &elements));
-            for element in &mut elements {
-                element.nodes = to_ids(&element.nodes);
-            }
-            SpiceDef::Elements {
-                elements,
-                unused_pins: to_ids(&unused_pins),
-            }
+            ids.elements(elements, unused_pins)
         }
         (SpiceOption::Auto, true) => {
             let input = SimInput {
@@ -389,24 +277,12 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             })?;
             match def {
                 SpiceDef::Elements {
-                    mut elements,
-                    unused_pins,
+                    elements,
+                    mut unused_pins,
                 } => {
-                    for element in &mut elements {
-                        element.nodes = to_ids(&element.nodes);
-                    }
-                    let mut unused_pins = to_ids(&unused_pins);
                     // Extra pads are not part of the model.
-                    unused_pins.extend(
-                        options
-                            .extra_pads
-                            .iter()
-                            .map(|pad| id_of[pad.as_str()].to_string()),
-                    );
-                    SpiceDef::Elements {
-                        elements,
-                        unused_pins,
-                    }
+                    unused_pins.extend(options.extra_pads.iter().cloned());
+                    ids.elements(elements, unused_pins)
                 }
                 other => other,
             }
@@ -437,6 +313,152 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     })
 }
 
+/// Pin IDs by pad number.
+struct PinIds<'a>(BTreeMap<&'a str, &'a str>);
+
+impl<'a> PinIds<'a> {
+    fn new(pins: &'a [PinDef]) -> Self {
+        PinIds(
+            pins.iter()
+                .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
+                .collect(),
+        )
+    }
+
+    fn of(&self, numbers: &[String]) -> Vec<String> {
+        numbers
+            .iter()
+            .map(|n| self.0[n.as_str()].to_string())
+            .collect()
+    }
+
+    /// The SPICE description with pin IDs, from one with pad numbers.
+    fn elements(&self, mut elements: Vec<sim::ElementDef>, unused_pins: Vec<String>) -> SpiceDef {
+        for element in &mut elements {
+            element.nodes = self.of(&element.nodes);
+        }
+        SpiceDef::Elements {
+            elements,
+            unused_pins: self.of(&unused_pins),
+        }
+    }
+}
+
+/// The footprint of the part, checked against the symbol pins and the extra pads.
+fn footprint(
+    options: &PartOptions,
+    symbol: &Symbol,
+    symbol_id: &LibId,
+    resolver: &mut Resolver,
+) -> Result<Option<LibId>, PartError> {
+    use OptionKey::{ExtraPads, Footprint};
+    let text = match &options.footprint {
+        FootprintOption::Given(text) => text.clone(),
+        FootprintOption::FromSymbol => match symbol.property("Footprint").filter(|f| !f.is_empty())
+        {
+            Some(text) => text.to_string(),
+            None => {
+                return err(
+                    Footprint,
+                    format!(
+                        "symbol {symbol_id} has no footprint; give one with `footprint: \"Library:Name\"`"
+                    ),
+                );
+            }
+        },
+        FootprintOption::None => {
+            if !options.extra_pads.is_empty() {
+                return err(ExtraPads, "extra pads need a footprint");
+            }
+            return Ok(None);
+        }
+    };
+    let id = LibId::parse(&text).map_err(at(Footprint))?;
+    let pads = resolver
+        .footprint(&id.library, &id.name)
+        .map_err(at(Footprint))?;
+    let missing: Vec<&str> = symbol
+        .pins
+        .iter()
+        .map(|pin| pin.number.as_str())
+        .filter(|number| !pads.has_pad(number))
+        .collect();
+    if !missing.is_empty() {
+        return err(
+            Footprint,
+            format!(
+                "footprint {id} has no pads for the symbol pins {}",
+                missing.join(", ")
+            ),
+        );
+    }
+    let symbol_numbers: BTreeSet<&str> =
+        symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
+    for pad in &options.extra_pads {
+        if symbol_numbers.contains(pad.as_str()) {
+            return err(ExtraPads, format!("pad {pad:?} is a pin of the symbol"));
+        }
+        if !pads.has_pad(pad) {
+            return err(ExtraPads, format!("footprint {id} has no pad {pad:?}"));
+        }
+    }
+    let unlisted: Vec<&str> = pads
+        .pad_numbers
+        .iter()
+        .map(String::as_str)
+        .filter(|pad| !symbol_numbers.contains(pad) && !options.extra_pads.iter().any(|p| p == pad))
+        .collect();
+    if !unlisted.is_empty() {
+        return err(
+            Footprint,
+            format!(
+                "footprint {id} has pads without a symbol pin: {}; list them in `extra_pads` \
+                 (and connect them, e.g. with `internal_connections`)",
+                unlisted.join(", ")
+            ),
+        );
+    }
+    Ok(Some(id))
+}
+
+/// Binds the models of the `sim` block, with pad numbers.
+fn sim_block(
+    bindings: &[ModelBinding],
+    mode: ModelMode,
+    pins: &[PinDef],
+    internal_connections: &[Vec<String>],
+    resolver: &mut Resolver,
+) -> Result<binding::Bound, PartError> {
+    // The pins in pad numbers, connected as the part connects them.
+    let pad_of: BTreeMap<&str, &str> = pins
+        .iter()
+        .map(|pin| (pin.id.as_str(), pin.pad.as_str()))
+        .collect();
+    let groups: Vec<Vec<String>> = internal_connections
+        .iter()
+        .map(|group| {
+            group
+                .iter()
+                .map(|id| pad_of[id.as_str()].to_string())
+                .collect()
+        })
+        .collect();
+    let part_pins: Vec<PartPin> = pins
+        .iter()
+        .map(|pin| PartPin {
+            id: pin.pad.clone(),
+            name: pin.name.clone(),
+        })
+        .collect();
+    let options = BindOptions {
+        pins: PartPins::Given(&part_pins),
+        strict: true,
+        internal_connections: &groups,
+        mode,
+    };
+    binding::bind(bindings, &options, resolver).map_err(model_error)
+}
+
 /// The `Sim.*` fields KiCad would have for a model of the `sim` block (with a single model), so that
 /// the netlist carries the mapping as KiCad writes it.
 fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(String, String)> {
@@ -446,22 +468,6 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
     let Some(info) = &element.info else {
         return Vec::new();
     };
-    let device = match info
-        .model_type
-        .as_deref()
-        .map(|t| t.split_whitespace().next().unwrap_or_default())
-    {
-        None => "SUBCKT",
-        Some("d") => "D",
-        Some("npn") => "NPN",
-        Some("pnp") => "PNP",
-        Some("nmos") => "NMOS",
-        Some("pmos") => "PMOS",
-        Some("njf") => "NJFET",
-        Some("pjf") => "PJFET",
-        // VDMOS: the channel is in the parameters, which are not read.
-        Some(_) => return Vec::new(),
-    };
     let pins: Vec<String> = element
         .nodes
         .iter()
@@ -469,7 +475,7 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
         .map(|(pin, port)| format!("{pin}={port}"))
         .collect();
     let mut fields = vec![
-        ("Sim.Device".to_string(), device.to_string()),
+        ("Sim.Device".to_string(), info.sim_device.to_string()),
         (
             "Sim.Library".to_string(),
             info.path.to_string_lossy().into_owned(),

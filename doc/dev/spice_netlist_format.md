@@ -130,9 +130,12 @@ Forms observed in the KiCad 9 output:
 | subcircuit with params | `XU1 a b c d e kicad_builtin_opamp POLE=30 GAIN=100k VOFF=10u ROUT=10` |
 | behavioral R | `Rload1 a GND R = 'TIME > 350m ? 8 : 89'` |
 
-Note: KiCad copies the `Value` text as is when no `Sim.*` fields exist, so values like
-`100uF;16V` appear in its output. ngspice happens to accept them (`;16V` is an inline comment and
-the `F` after the suffix is ignored), but cuprite_wire should emit clean numeric values.
+Note: KiCad converts values from its notation (SI prefixes with `M` for mega, the RKM code) when
+it writes the netlist: `4k7` -> `4.7k`, `2R2` -> `2.2`, `1M` -> `1Meg`, `1e3` -> `1k`, `100nF` -> `100n`
+(checked with kicad-cli 9). `Sim.Params` values get the prefixes converted (`r=1M` -> `1Meg`) but not
+the RKM code (`r=4k7` stays `4k7`, which ngspice reads as 4k). Text it cannot parse is copied as is,
+so values like `100uF;16V` appear in its output; ngspice happens to accept them (`;16V` is an inline
+comment and the `F` after the suffix is ignored), but cuprite_wire emits clean numeric values.
 
 ## 4. Nodes (nets)
 

@@ -1,4 +1,4 @@
-error: cannot simulate test:R (use `spice: none` or `spice: excluded` to skip): the value "R" is not a number; use `value: param` or a numeric value
+error: cannot simulate test:R (use `spice: none` or `spice: excluded` to skip): the value "R" is not a number (like 10k, 4k7 or 1M for mega); use `value: param` or a numeric value
  --> tests/ui/spice.rs:4:17
   |
 4 |         symbol: "test:R",

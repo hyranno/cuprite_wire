@@ -11,14 +11,18 @@
 //!
 //! Anything else is an error: the macro user decides with `spice: none` / `spice: excluded`.
 
-use std::{collections::BTreeSet, path::PathBuf};
+use std::path::PathBuf;
 
 use crate::{
     Error,
-    binding::{BindOptions, ModelBinding, ModelInfo, PartPin, PartPins, bind},
+    binding::{
+        BindOptions, Bound, ModelBinding, ModelInfo, PartPin, PartPins, bind, check_param_value,
+        map_ports, model_device,
+    },
     resolve::Resolver,
     spice_lib::Dialect,
     symbol::Symbol,
+    value,
 };
 
 /// The value of a part: fixed at compile time or given when the part is created.
@@ -104,141 +108,168 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
     let Some(device) = symbol.property("Sim.Device").filter(|d| !d.is_empty()) else {
         return inferred(input);
     };
-    let device = device.to_ascii_uppercase();
-    let sim_type = symbol
-        .property("Sim.Type")
-        .filter(|t| !t.is_empty())
-        .map(str::to_ascii_uppercase);
-    let params = parse_params(symbol.property("Sim.Params").unwrap_or_default())?;
-    let library = symbol.property("Sim.Library").filter(|l| !l.is_empty());
-    let model_name = symbol.property("Sim.Name").filter(|n| !n.is_empty());
-    let unsupported_type = || {
-        Error::new(format!(
-            "Sim.Type {:?} of Sim.Device {device} is not supported",
-            sim_type.as_deref().unwrap_or_default()
-        ))
+    let fields = SimFields {
+        device: device.to_ascii_uppercase(),
+        sim_type: symbol
+            .property("Sim.Type")
+            .filter(|t| !t.is_empty())
+            .map(str::to_ascii_uppercase),
+        params: parse_params(symbol.property("Sim.Params").unwrap_or_default())?,
+        library: symbol.property("Sim.Library").filter(|l| !l.is_empty()),
+        model_name: symbol.property("Sim.Name").filter(|n| !n.is_empty()),
     };
-
-    match device.as_str() {
-        "R" | "C" | "L" | "V" | "I" => {
-            let letter = device.chars().next().unwrap();
-            let source = matches!(letter, 'V' | 'I');
-            if library.is_some() {
-                return Err(Error::new(format!(
-                    "Sim.Library for Sim.Device {device} is not supported"
-                )));
-            }
-            if source && sim_type.as_deref().is_some_and(|t| t != "DC") {
-                return Err(unsupported_type());
-            }
-            if !source && sim_type.is_some() {
-                return Err(unsupported_type());
-            }
-            let key = if source {
-                "dc"
-            } else {
-                &device.to_ascii_lowercase()
-            };
-            let prefix = if source { "DC " } else { "" };
-            let args = match params.as_slice() {
-                [] => value_args(input.value, prefix)?,
-                [(name, value)] if name.eq_ignore_ascii_case(key) => {
-                    Args::Fixed(format!("{prefix}{value}"))
-                }
-                _ => {
-                    return Err(Error::new(format!(
-                        "Sim.Params {:?} of Sim.Device {device} is not supported (only {key}=...)",
-                        symbol.property("Sim.Params").unwrap_or_default()
-                    )));
-                }
-            };
-            let nodes = map_pins(symbol, &["+", "-"])?;
-            Ok(element(letter, nodes, args, Vec::new()))
-        }
+    let (elements, unused_pins) = match fields.device.as_str() {
+        "R" | "C" | "L" | "V" | "I" => passive_or_source(input, &fields)?,
         "D" | "NPN" | "PNP" | "NMOS" | "PMOS" | "NJFET" | "PJFET" => {
-            let (letter, model) = match (library, model_name) {
-                (Some(library), Some(name)) => {
-                    if !params.is_empty() {
-                        return Err(Error::new(
-                            "Sim.Params together with Sim.Library is not supported",
-                        ));
-                    }
-                    let def = library_model(input, library, name, Vec::new(), resolver)?;
-                    let SpiceDef::Elements { elements, .. } = &def else {
-                        unreachable!()
-                    };
-                    let Some(model_type) = elements[0]
-                        .info
-                        .as_ref()
-                        .and_then(|info| info.model_type.as_ref())
-                    else {
-                        return Err(Error::new(format!(
-                            "{name:?} in {library:?} is a subcircuit, not a .model"
-                        )));
-                    };
-                    if device_letter(&device, model_type).is_none() {
-                        return Err(Error::new(format!(
-                            "model {name:?} has type {model_type:?}, which does not match Sim.Device {device}"
-                        )));
-                    }
-                    return Ok(def);
-                }
-                (None, None) => {
-                    let model_type = builtin_model_type(&device, sim_type.as_deref())
-                        .ok_or_else(unsupported_type)?;
-                    let letter = device_letter(&device, &model_type.to_ascii_lowercase()).unwrap();
-                    let name = input.builtin_model_name.to_string();
-                    let mut text = format!(".model {name} {model_type}");
-                    for (key, value) in &params {
-                        text.push_str(&format!(" {key}={value}"));
-                    }
-                    text.push('\n');
-                    let models = vec![ModelDef::Inline {
-                        name: name.clone(),
-                        text,
-                    }];
-                    (letter, (name, model_type.to_ascii_lowercase(), models))
-                }
-                _ => {
-                    return Err(Error::new(
-                        "Sim.Library and Sim.Name must be given together",
-                    ));
-                }
-            };
-            let (name, model_type, models) = model;
-            let model_pins: &[&str] = match letter {
-                'D' => &["A", "K"],
-                'Q' => &["C", "B", "E"],
-                'M' if model_type.starts_with("vdmos") => &["D", "G", "S"],
-                'M' => &["D", "G", "S", "B"],
-                'J' => &["D", "G", "S"],
-                _ => unreachable!(),
-            };
-            let nodes = map_pins(symbol, model_pins)?;
-            Ok(element(letter, nodes, Args::Fixed(name), models))
+            semiconductor(input, &fields, resolver)?
         }
-        "SUBCKT" => {
-            if sim_type.is_some() {
-                return Err(unsupported_type());
-            }
-            let (Some(library), Some(name)) = (library, model_name) else {
-                return Err(Error::new(
-                    "Sim.Device SUBCKT needs Sim.Library and Sim.Name",
-                ));
-            };
-            let def = library_model(input, library, name, params, resolver)?;
-            let SpiceDef::Elements { elements, .. } = &def else {
-                unreachable!()
-            };
-            if elements[0].device != 'X' {
-                return Err(Error::new(format!(
-                    "{name:?} in {library:?} is a .model, not a subcircuit"
-                )));
-            }
-            Ok(def)
-        }
-        _ => Err(Error::new(format!("Sim.Device {device} is not supported"))),
+        "SUBCKT" => subcircuit(input, &fields, resolver)?,
+        device => return Err(Error::new(format!("Sim.Device {device} is not supported"))),
+    };
+    Ok(SpiceDef::Elements {
+        elements,
+        unused_pins,
+    })
+}
+
+/// The `Sim.*` fields of a symbol with a `Sim.Device`.
+struct SimFields<'a> {
+    /// Uppercase.
+    device: String,
+    /// Uppercase.
+    sim_type: Option<String>,
+    params: Vec<(String, String)>,
+    library: Option<&'a str>,
+    model_name: Option<&'a str>,
+}
+
+impl SimFields<'_> {
+    fn unsupported_type(&self) -> Error {
+        Error::new(format!(
+            "Sim.Type {:?} of Sim.Device {} is not supported",
+            self.sim_type.as_deref().unwrap_or_default(),
+            self.device
+        ))
     }
+}
+
+/// `Sim.Device` `R` `C` `L`, and `V` `I` with `Sim.Type DC`: the value, or the one parameter.
+fn passive_or_source(input: &SimInput, fields: &SimFields) -> Result<Bound, Error> {
+    let device = &fields.device;
+    let letter = device.chars().next().unwrap();
+    let source = matches!(letter, 'V' | 'I');
+    if fields.library.is_some() {
+        return Err(Error::new(format!(
+            "Sim.Library for Sim.Device {device} is not supported"
+        )));
+    }
+    match fields.sim_type.as_deref() {
+        None => {}
+        Some("DC") if source => {}
+        Some(_) => return Err(fields.unsupported_type()),
+    }
+    let key = if source {
+        "dc"
+    } else {
+        &device.to_ascii_lowercase()
+    };
+    let prefix = if source { "DC " } else { "" };
+    let args = match fields.params.as_slice() {
+        [] => value_args(input.value, letter, prefix)?,
+        [(name, value)] if name.eq_ignore_ascii_case(key) => {
+            let value = value::to_spice(value, letter)
+                .ok_or_else(|| Error::new(format!("Sim.Params {name}={value} is not a number")))?;
+            Args::Fixed(format!("{prefix}{value}"))
+        }
+        _ => {
+            return Err(Error::new(format!(
+                "Sim.Params {:?} of Sim.Device {device} is not supported (only {key}=...)",
+                input.symbol.property("Sim.Params").unwrap_or_default()
+            )));
+        }
+    };
+    let (nodes, unused) = map_pins(input.symbol, &["+", "-"])?;
+    Ok(element(letter, nodes, args, Vec::new(), unused))
+}
+
+/// Diodes and transistors: a built-in model with `Sim.Params`, or a library model.
+fn semiconductor(
+    input: &SimInput,
+    fields: &SimFields,
+    resolver: &mut Resolver,
+) -> Result<Bound, Error> {
+    let device = &fields.device;
+    match (fields.library, fields.model_name) {
+        (Some(library), Some(name)) => {
+            if !fields.params.is_empty() {
+                return Err(Error::new(
+                    "Sim.Params together with Sim.Library is not supported",
+                ));
+            }
+            let bound = library_model(input, library, name, Vec::new(), resolver)?;
+            let info = bound.0[0].info.as_ref().expect("a library model");
+            match (&info.model_type, info.sim_device) {
+                (None, _) => Err(Error::new(format!(
+                    "{name:?} in {library:?} is a subcircuit, not a .model"
+                ))),
+                (Some(model_type), sim_device) if sim_device != device => Err(Error::new(format!(
+                    "model {name:?} has type {model_type:?} (a {sim_device}), which does not match Sim.Device {device}"
+                ))),
+                _ => Ok(bound),
+            }
+        }
+        (None, None) => {
+            let model_type = builtin_model_type(device, fields.sim_type.as_deref())
+                .ok_or_else(|| fields.unsupported_type())?;
+            let name = input.builtin_model_name.to_string();
+            let mut text = format!(".model {name} {model_type}");
+            for (key, value) in &fields.params {
+                text.push_str(&format!(" {key}={}", value::param_to_spice(value)));
+            }
+            text.push('\n');
+            let first = model_type.split(' ').next().unwrap().to_ascii_lowercase();
+            let model = model_device(&first, &text).expect("a built-in model type");
+            debug_assert_eq!(model.sim_device, device);
+            let (nodes, unused) = map_pins(input.symbol, model.terminals)?;
+            let models = vec![ModelDef::Inline {
+                name: name.clone(),
+                text,
+            }];
+            Ok(element(
+                model.letter,
+                nodes,
+                Args::Fixed(name),
+                models,
+                unused,
+            ))
+        }
+        _ => Err(Error::new(
+            "Sim.Library and Sim.Name must be given together",
+        )),
+    }
+}
+
+/// `Sim.Device SUBCKT`: a library subcircuit with its parameters.
+fn subcircuit(
+    input: &SimInput,
+    fields: &SimFields,
+    resolver: &mut Resolver,
+) -> Result<Bound, Error> {
+    if fields.sim_type.is_some() {
+        return Err(fields.unsupported_type());
+    }
+    let (Some(library), Some(name)) = (fields.library, fields.model_name) else {
+        return Err(Error::new(
+            "Sim.Device SUBCKT needs Sim.Library and Sim.Name",
+        ));
+    };
+    let bound = library_model(input, library, name, fields.params.clone(), resolver)?;
+    if bound.0[0].device != 'X' {
+        return Err(Error::new(format!(
+            "{name:?} in {library:?} is a .model, not a subcircuit"
+        )));
+    }
+    Ok(bound)
 }
 
 /// No `Sim.*` fields: KiCad infers R, C and L from the reference prefix and the value.
@@ -255,50 +286,65 @@ fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
     if input.symbol.pins.len() != 2 {
         return Ok(SpiceDef::Unsupported);
     }
-    let args = value_args(input.value, "")?;
+    let args = value_args(input.value, letter, "")?;
     let nodes = input
         .symbol
         .pins
         .iter()
         .map(|pin| pin.number.clone())
         .collect();
-    Ok(element(letter, (nodes, Vec::new()), args, Vec::new()))
+    let (elements, unused_pins) = element(letter, nodes, args, Vec::new(), Vec::new());
+    Ok(SpiceDef::Elements {
+        elements,
+        unused_pins,
+    })
 }
 
-fn value_args(value: &Value, prefix: &str) -> Result<Args, Error> {
+/// The arguments for the value of the part (in KiCad's notation, converted to SPICE).
+fn value_args(value: &Value, device: char, prefix: &str) -> Result<Args, Error> {
     match value {
         Value::Param => Ok(Args::Value {
             prefix: prefix.to_string(),
         }),
-        Value::Fixed(value)
-            if value.starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '-') =>
-        {
-            Ok(Args::Fixed(format!("{prefix}{value}")))
-        }
-        Value::Fixed(value) => Err(Error::new(format!(
-            "the value {value:?} is not a number; use `value: param` or a numeric value"
-        ))),
+        Value::Fixed(value) => match value::to_spice(value, device) {
+            Some(spice) => Ok(Args::Fixed(format!("{prefix}{spice}"))),
+            None => Err(Error::new(format!(
+                "the value {value:?} is not a number (like 10k, 4k7 or 1M for mega); \
+                 use `value: param` or a numeric value"
+            ))),
+        },
     }
 }
 
 fn element(
     device: char,
-    (nodes, unused_pins): (Vec<String>, Vec<String>),
+    nodes: Vec<String>,
     args: Args,
     models: Vec<ModelDef>,
-) -> SpiceDef {
-    SpiceDef::Elements {
-        elements: vec![ElementDef {
-            device,
-            suffix: String::new(),
-            nodes,
-            args,
-            models,
-            dialect: Dialect::Ngspice,
-            info: None,
-        }],
-        unused_pins,
-    }
+    unused_pins: Vec<String>,
+) -> Bound {
+    let element = ElementDef {
+        device,
+        suffix: String::new(),
+        nodes,
+        args,
+        models,
+        dialect: Dialect::Ngspice,
+        info: None,
+    };
+    (vec![element], unused_pins)
+}
+
+/// The pins of a symbol, for binding them to a model.
+fn part_pins(symbol: &Symbol) -> Vec<PartPin> {
+    symbol
+        .pins
+        .iter()
+        .map(|pin| PartPin {
+            id: pin.number.clone(),
+            name: pin.name.clone(),
+        })
+        .collect()
 }
 
 /// A library model given by `Sim.Library` and `Sim.Name`, connected with `Sim.Pins` like KiCad:
@@ -309,7 +355,7 @@ fn library_model(
     name: &str,
     params: Vec<(String, String)>,
     resolver: &mut Resolver,
-) -> Result<SpiceDef, Error> {
+) -> Result<Bound, Error> {
     let symbol = input.symbol;
     let pins = parse_sim_pins(symbol.property("Sim.Pins").unwrap_or_default())?;
     let binding = ModelBinding {
@@ -319,25 +365,14 @@ fn library_model(
         params,
         ..Default::default()
     };
-    let part_pins: Vec<PartPin> = symbol
-        .pins
-        .iter()
-        .map(|pin| PartPin {
-            id: pin.number.clone(),
-            name: pin.name.clone(),
-        })
-        .collect();
+    let part_pins = part_pins(symbol);
     let options = BindOptions {
         pins: PartPins::Given(&part_pins),
         strict: false,
         internal_connections: &[],
         mode: input.model_mode,
     };
-    let (elements, unused_pins) = bind(&[binding], &options, resolver).map_err(|e| e.error)?;
-    Ok(SpiceDef::Elements {
-        elements,
-        unused_pins,
-    })
+    bind(&[binding], &options, resolver).map_err(|e| e.error)
 }
 
 /// Parses `Sim.Pins` (`1=K 2=A`).
@@ -367,86 +402,21 @@ fn builtin_model_type(device: &str, sim_type: Option<&str>) -> Option<&'static s
     })
 }
 
-/// The element letter for a device whose model has `model_type` (lowercase), if they match.
-fn device_letter(device: &str, model_type: &str) -> Option<char> {
-    let first = model_type.split_whitespace().next().unwrap_or_default();
-    match (device, first) {
-        ("D", "d") => Some('D'),
-        ("NPN", "npn") | ("PNP", "pnp") => Some('Q'),
-        ("NMOS", "nmos" | "vdmos") | ("PMOS", "pmos" | "vdmos") => Some('M'),
-        ("NJFET", "njf") | ("PJFET", "pjf") => Some('J'),
-        _ => None,
-    }
-}
-
-/// Maps the symbol pins to the model pins with `Sim.Pins` (`1=K 2=A`), or in pin order without
-/// it. Returns the pin numbers in model order and the pins not used by the model.
-fn map_pins(symbol: &Symbol, model_pins: &[&str]) -> Result<(Vec<String>, Vec<String>), Error> {
-    let mut nodes: Vec<Option<String>> = vec![None; model_pins.len()];
-    match symbol.property("Sim.Pins").filter(|p| !p.trim().is_empty()) {
-        None => {
-            if symbol.pins.len() != model_pins.len() {
-                return Err(Error::new(format!(
-                    "the symbol has {} pins but the model has {} ({}); add Sim.Pins",
-                    symbol.pins.len(),
-                    model_pins.len(),
-                    model_pins.join(" ")
-                )));
-            }
-            for (node, pin) in nodes.iter_mut().zip(&symbol.pins) {
-                *node = Some(pin.number.clone());
-            }
-        }
-        Some(mapping) => {
-            for (number, model_pin) in parse_sim_pins(mapping)? {
-                if !symbol.pins.iter().any(|pin| pin.number == number) {
-                    return Err(Error::new(format!(
-                        "Sim.Pins refers to pin {number:?}, which the symbol does not have"
-                    )));
-                }
-                let index = model_pins
-                    .iter()
-                    .position(|p| p.eq_ignore_ascii_case(&model_pin))
-                    .ok_or_else(|| {
-                        Error::new(format!(
-                            "Sim.Pins refers to model pin {model_pin:?}; the model has {}",
-                            model_pins.join(" ")
-                        ))
-                    })?;
-                if nodes[index].replace(number).is_some() {
-                    return Err(Error::new(format!(
-                        "Sim.Pins maps model pin {model_pin:?} twice"
-                    )));
-                }
-            }
-        }
-    }
-    let missing: Vec<&str> = model_pins
-        .iter()
-        .zip(&nodes)
-        .filter(|(_, node)| node.is_none())
-        .map(|(pin, _)| *pin)
-        .collect();
-    if !missing.is_empty() {
-        return Err(Error::new(format!(
-            "Sim.Pins does not map model pins {}",
-            missing.join(" ")
-        )));
-    }
-    let nodes: Vec<String> = nodes.into_iter().map(Option::unwrap).collect();
-    let used: BTreeSet<&String> = nodes.iter().collect();
-    if used.len() != nodes.len() {
-        return Err(Error::new(
-            "Sim.Pins maps a symbol pin to several model pins",
-        ));
-    }
-    let unused = symbol
-        .pins
-        .iter()
-        .filter(|pin| !used.contains(&pin.number))
-        .map(|pin| pin.number.clone())
-        .collect();
-    Ok((nodes, unused))
+/// Maps the symbol pins to the terminals of a built-in model with `Sim.Pins` (`1=K 2=A`), or in
+/// pin order without it, as for library models. Returns the pin numbers in terminal order and the
+/// pins not used by the model.
+fn map_pins(symbol: &Symbol, terminals: &[&str]) -> Result<(Vec<String>, Vec<String>), Error> {
+    let mapping = parse_sim_pins(symbol.property("Sim.Pins").unwrap_or_default())?;
+    let terminals: Vec<String> = terminals.iter().map(|t| t.to_string()).collect();
+    map_ports(
+        &part_pins(symbol),
+        &mapping,
+        &[],
+        &terminals,
+        false,
+        "the model",
+    )
+    .map_err(|(_, e)| e)
 }
 
 /// Parses `Sim.Params` (`name=value` separated by spaces; values may be double-quoted).
@@ -487,11 +457,6 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
                     }
                 }
             }
-            if value.chars().any(char::is_whitespace) {
-                return Err(Error::new(format!(
-                    "Sim.Params value {value:?} with spaces is not supported"
-                )));
-            }
         } else {
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() {
@@ -501,11 +466,7 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
                 chars.next();
             }
         }
-        if value.is_empty() || value.contains(['\\', '\'', '{', '}', ';', '$']) {
-            return Err(Error::new(format!(
-                "Sim.Params value {value:?} of {name} is not supported"
-            )));
-        }
+        check_param_value(&name, &value)?;
         params.push((name, value));
     }
 }
@@ -658,15 +619,91 @@ mod tests {
         );
         assert_eq!(
             error(&[("Sim.Device", "NPN"), ("Sim.Pins", "1=C 2=B 3=X")]),
-            "Sim.Pins refers to model pin \"X\"; the model has C B E"
+            "the model has no port \"X\"; its ports are C B E"
+        );
+        let message = error(&[("Sim.Device", "NPN"), ("Sim.Pins", "1=C 2=B")]);
+        assert!(
+            message.starts_with("no pin is mapped to the ports E of the model\npins and ports:"),
+            "{message}"
         );
         assert_eq!(
-            error(&[("Sim.Device", "NPN"), ("Sim.Pins", "1=C 2=B")]),
-            "Sim.Pins does not map model pins E"
+            error(&[("Sim.Device", "NPN"), ("Sim.Pins", "1=C 4=B 3=E")]),
+            "the part has no pin \"4\""
         );
         assert_eq!(
             error(&[("Sim.Device", "D")]),
             "the symbol has 3 pins but the model has 2 (A K); add Sim.Pins"
+        );
+        assert_eq!(
+            error(&[("Sim.Device", "D"), ("Sim.Params", "rs=1;x")]),
+            "the value \"1;x\" of rs cannot be written in a deck"
+        );
+    }
+
+    #[test]
+    fn test_values_in_kicad_notation() {
+        let r = symbol("", &[("1", "~"), ("2", "~")]);
+        let args = |symbol: &Symbol, value: &str| {
+            single(convert(symbol, "R", Value::Fixed(value.into()), &mut resolver()).unwrap())
+                .0
+                .args
+        };
+        // RKM and `M` (mega), which ngspice would read as 4k and milli.
+        assert_eq!(args(&r, "4k7"), Args::Fixed("4.7k".into()));
+        assert_eq!(args(&r, "1M"), Args::Fixed("1Meg".into()));
+        let message = convert(&r, "R", Value::Fixed("R47".into()), &mut resolver())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.starts_with("the value \"R47\" is not a number"),
+            "{message}"
+        );
+
+        let fixed = symbol(
+            &props(&[("Sim.Device", "R"), ("Sim.Params", "r=2M2")]),
+            &[("1", "~"), ("2", "~")],
+        );
+        assert_eq!(args(&fixed, "x"), Args::Fixed("2.2Meg".into()));
+        let d = symbol(
+            &props(&[("Sim.Device", "D"), ("Sim.Params", "bv=1M rs={x}")]),
+            &[("1", "A"), ("2", "K")],
+        );
+        let (element, _) = single(convert(&d, "D", Value::Param, &mut resolver()).unwrap());
+        assert_eq!(
+            element.models,
+            vec![ModelDef::Inline {
+                name: "__S".into(),
+                text: ".model __S D bv=1Meg rs={x}\n".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn test_library_model_must_match_the_device() {
+        let mos = |device: &str, name: &str| {
+            let s = symbol(
+                &props(&[
+                    ("Sim.Device", device),
+                    ("Sim.Library", "models/mos.lib"),
+                    ("Sim.Name", name),
+                ]),
+                &[("1", "D"), ("2", "G"), ("3", "S")],
+            );
+            convert(&s, "Q", Value::Param, &mut resolver())
+        };
+        let (element, _) = single(mos("PMOS", "PVD").unwrap());
+        assert_eq!(
+            (element.device, element.nodes),
+            ('M', strings(&["1", "2", "3"]))
+        );
+        assert!(mos("NMOS", "NVD").is_ok());
+        assert_eq!(
+            mos("NMOS", "PVD").unwrap_err().to_string(),
+            "model \"PVD\" has type \"vdmos\" (a PMOS), which does not match Sim.Device NMOS"
+        );
+        assert_eq!(
+            mos("PMOS", "NVD").unwrap_err().to_string(),
+            "model \"NVD\" has type \"vdmos\" (a NMOS), which does not match Sim.Device PMOS"
         );
     }
 
