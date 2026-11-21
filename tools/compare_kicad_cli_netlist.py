@@ -8,8 +8,8 @@ connected by wires, with a global label for every global net name and a local
 label (in its sheet) for every local one. Unnamed nets get no label, so KiCad names them itself.
 `kicad-cli sch export netlist --format kicadsexpr` then exports the schematic, and
 both netlists are compared after removing what cuprite_wire intentionally omits
-(see KNOWN_DIFFERENCES). The remaining differences in element order, quoting and
-omission rules are printed as a diff.
+(see KNOWN_DIFFERENCES, and KICAD10_KNOWN_DIFFERENCES with KiCad 10). The remaining
+differences in element order, quoting and omission rules are printed as a diff.
 
 Every sheet path becomes a sheet file, with the sheet's unique id from the
 netlist; sheets are numbered as pages in the order they appear in the netlist.
@@ -57,7 +57,8 @@ from pathlib import Path
 
 import kicad_netlist
 from kicad_netlist import (
-    children, dump, parse, project_symbol_libs, quote, read, symbol_lib_path, unquote, value,
+    children, dump, kicad_version, parse, project_symbol_libs, quote, read, symbol_lib_path, unquote,
+    value,
 )
 
 # Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_usage.md section 4).
@@ -79,6 +80,13 @@ LIBRARY_KNOWN_DIFFERENCES = {
     "datasheet / description of components, ki_* fields": "not written",
 }
 SIM_PROPERTY = re.compile(r'"Sim[._][^"]*"')
+# KiCad 10 writes a newer form of the format; cuprite_wire writes the KiCad 9 form, which KiCad 10 reads.
+KICAD10_KNOWN_DIFFERENCES = {
+    "units of components": "not written (KiCad 10)",
+    "empty groups / variants": "not written (KiCad 10)",
+    "pin number suffix of pinfunction": "the pin name only, as KiCad 9 writes it (KiCad 10 appends `_<pin>`)",
+}
+SYMBOL_DIR_VARIABLE = re.compile(r"\$\{KICAD\d+_SYMBOL_DIR\}")
 
 PIN_PITCH = 2.54
 COMPONENT_PITCH = 60.96
@@ -318,8 +326,18 @@ def normalize(tree, ours, library_symbols=False):
     `library_symbols`) from KiCad's netlist (`tree`)."""
     our_comps = {value(c, "ref"): c for c in children(children(ours, "components")[0], "comp")}
     has_libsource = {ref: bool(children(c, "libsource")) for ref, c in our_comps.items()}
+    kicad10 = kicad_version()[0] >= 10
     tree = [item for item in tree
-            if not (isinstance(item, list) and item[0] in ("design", "libparts", "libraries"))]
+            if not (isinstance(item, list) and (item[0] in ("design", "libparts", "libraries")
+                                                or kicad10 and item[0] in ("groups", "variants")
+                                                and len(item) == 1))]
+    if kicad10:
+        for net in children(children(tree, "nets")[0], "net"):
+            for node in children(net, "node"):
+                for item in children(node, "pinfunction"):
+                    suffix = "_" + unquote(value(node, "pin"))
+                    if unquote(item[1]).endswith(suffix):
+                        item[1] = quote(unquote(item[1])[:-len(suffix)])
     for comp in children(children(tree, "components")[0], "comp"):
         ref = value(comp, "ref")
         field_names = {value(f, "name") for fields in children(comp, "fields") for f in fields[1:]}
@@ -345,6 +363,8 @@ def normalize(tree, ours, library_symbols=False):
                 mine = ours_tstamps[0][1] if ours_tstamps else None
                 kept.append([item[0], mine if mine in item[1:] else item[1]])
             elif library_symbols and item[0] in ("datasheet", "description"):
+                pass
+            elif kicad10 and item[0] == "units":
                 pass
             elif item[0] == "property" and library_symbols and SIM_PROPERTY.fullmatch(value(item, "name") or ""):
                 pass
@@ -593,8 +613,8 @@ def synthesize_library(path, project, sim_excluded=None):
         properties.update(netlist.components[ref].fields)
         if lib_id[0] in project_libs and "Sim.Library" in properties:
             # The project's models are next to its symbol library, not in KiCad's symbol directory.
-            properties["Sim.Library"] = properties["Sim.Library"].replace(
-                "${KICAD9_SYMBOL_DIR}", str(project_libs[lib_id[0]].parent))
+            properties["Sim.Library"] = SYMBOL_DIR_VARIABLE.sub(
+                lambda _: str(project_libs[lib_id[0]].parent), properties["Sim.Library"])
         flags = netlist.components[ref].properties
         sim_flag = "yes" if sim_excluded is not None and ref in sim_excluded else "no"
         if sim_excluded is None:
@@ -656,7 +676,8 @@ def main():
     env = kicad_env(root / "kicad")
     if not args.spice:
         print("Ignored (intentional differences):")
-        known = {**KNOWN_DIFFERENCES, **(LIBRARY_KNOWN_DIFFERENCES if args.library_symbols else {})}
+        known = {**KNOWN_DIFFERENCES, **(LIBRARY_KNOWN_DIFFERENCES if args.library_symbols else {}),
+                 **(KICAD10_KNOWN_DIFFERENCES if kicad_version()[0] >= 10 else {})}
         for what, why in known.items():
             print(f"  {what}: {why}")
     failed = False

@@ -9,7 +9,8 @@ description (JSON) from the file named by `NETLIST_IMPORT_JOB`:
 
 and then, through the normal wx event handlers of the dialog:
 
-1. waits until pcbnew has loaded `board`, then opens File -> Import -> Netlist...,
+1. waits until pcbnew has loaded `board` and its libraries, then opens
+   File -> Import -> Netlist...,
 2. enters the netlist path and selects linking by unique ids (tstamps),
 3. clicks "Update PCB" and records the report (full text, and only
    errors/warnings),
@@ -125,7 +126,13 @@ class Driver:
     def editor_with_board(self):
         frame = top_level(lambda w: w.GetName() == "PcbFrame")
         board = pcbnew.GetBoard()
-        return frame if frame and board and board.GetFileName() == self.job["board"] else None
+        if not (frame and board and board.GetFileName() == self.job["board"]):
+            return None
+        # KiCad 10 loads the libraries in the background, showing a progress bar in the status
+        # bar; footprints are "not found in any libraries" until it is done.
+        status = frame.GetStatusBar()
+        loading = status and any(isinstance(w, wx.Gauge) and w.IsShown() for w in walk(status))
+        return None if loading else frame
 
     def open_dialog(self, frame):
         self.frame = frame

@@ -17,9 +17,10 @@ redistribution (see [Licenses](#licenses)). Refer to them by name and where to d
 ## Development environment
 
 Using the devcontainer in `.devcontainer/` is recommended. It has everything needed to build and
-test: Rust, the KiCad 9 libraries and pcbnew, and ngspice. CI uses the same base image
-(`rust:trixie`). You may use your own environment or a customized devcontainer instead, as long as
-the checks below pass.
+test: Rust, KiCad 10 (its libraries, `kicad-cli` and pcbnew), and ngspice. It is based on the
+`kicad/kicad:10.0` image. CI runs the tests with KiCad 10 on the same image and with KiCad 9 on
+`rust:trixie` (Debian's KiCad libraries). You may use your own environment or a customized
+devcontainer instead, as long as the checks below pass.
 
 If a change needs a new tool on the machine, adding it to the devcontainer is recommended, so that
 others get the same environment.
