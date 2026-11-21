@@ -20,10 +20,15 @@ pub struct Ngspice {
 }
 
 impl Default for Ngspice {
-    /// `ngspice` from `PATH`.
+    /// `ngspice` from `PATH` (`ngspice_con` on Windows, where `ngspice` is the GUI program).
     fn default() -> Self {
         Ngspice {
-            program: "ngspice".into(),
+            program: if cfg!(windows) {
+                "ngspice_con"
+            } else {
+                "ngspice"
+            }
+            .into(),
         }
     }
 }

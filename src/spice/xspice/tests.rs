@@ -137,6 +137,10 @@ fn test_quote_in_argument() {
 /// The C inverter between a driver and a load, with the device's `gnd` 1 V above the ground:
 /// the output follows the inverted input, relative to `gnd`.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+)]
 fn test_simulate_inverter() {
     let (_dir, library) = build_library("inverter");
     let cmos = OutputCharacteristics::cmos(3.3);
@@ -183,6 +187,10 @@ fn test_simulate_inverter() {
 
 /// A model without inputs, configured by its simulation argument: a 250 kHz oscillator.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+)]
 fn test_simulate_oscillator() {
     let (_dir, library) = build_library("oscillator");
     let mut bench = CircuitBuilder::new();
@@ -214,6 +222,10 @@ fn test_simulate_oscillator() {
 /// A 2-bit counter in Verilog, built with Verilator: clocked every 1 us after a reset, it counts
 /// 1, 2, 3, 0 with the carry at 3. The second build comes from the cache.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_simulate_verilog_counter() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice/counter.v");
     let model = Verilator::new([&source]).build().unwrap();
@@ -290,6 +302,10 @@ fn staging_dirs(cache: &Path) -> Vec<String> {
 
 /// A design Verilator rejects is reported with its log, and its build directory is kept.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_error() {
     let dir = TestDir::new("broken");
     let source = dir.join("broken.v");
@@ -311,6 +327,10 @@ fn test_verilator_error() {
 
 /// A design whose ports cannot be pins is reported, and its build directory is removed.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_port_error() {
     let dir = TestDir::new("gnd-port");
     let source = dir.join("buffer.v");
@@ -335,6 +355,10 @@ fn test_verilator_port_error() {
 /// (the library is absolute) and the include directories in the arguments. A change to an
 /// included file is a new build.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_relative_paths_and_includes() {
     let dir = TestDir::new("include");
     std::fs::create_dir(dir.join("inc")).unwrap();

@@ -3,9 +3,13 @@
 use std::path::Path;
 
 /// Compares `actual` with `tests/golden/<name>`, with the crate directory written as
-/// `${CARGO_MANIFEST_DIR}`. Run the tests with `UPDATE_GOLDEN=1` to (re)generate the files.
+/// `${CARGO_MANIFEST_DIR}` (SPICE netlists write it with `/` on Windows). Run the tests with
+/// `UPDATE_GOLDEN=1` to (re)generate the files.
 pub fn check_golden(name: &str, actual: &str) {
-    let actual = actual.replace(env!("CARGO_MANIFEST_DIR"), "${CARGO_MANIFEST_DIR}");
+    let dir = env!("CARGO_MANIFEST_DIR");
+    let actual = actual
+        .replace(dir, "${CARGO_MANIFEST_DIR}")
+        .replace(&dir.replace('\\', "/"), "${CARGO_MANIFEST_DIR}");
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
         .join(name);

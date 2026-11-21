@@ -201,8 +201,8 @@ may report a plausible-looking result instead of failing. ERC (`doc/erc.md`) cat
 pins but not a missing DC path; check results against what the circuit can do.
 
 **Shared library.** With the `shared-ngspice` feature, `SharedNgspice::default().run(&deck)` runs
-the same deck in the ngspice shared library (`libngspice.so.0`, loaded at run time; another file
-with `SharedNgspice { library }`) and returns the same `Simulation`. It is the backend for
+the same deck in the ngspice shared library (`libngspice.so.0`, `libngspice.0.dylib` on macOS and
+`ngspice.dll` on Windows, loaded at run time; another file with `SharedNgspice { library }`) and returns the same `Simulation`. It is the backend for
 co-simulation with Rust models; plain runs should keep using the CLI:
 
 - The library has global state, so it runs one deck at a time in the process (other threads wait),
@@ -225,7 +225,14 @@ see `doc/cosimulation.md`.
 `Ngspice` and `SharedNgspice` implement the `Simulator` trait (`run(&deck)`), so a test can run on
 either. The simulation tests of the library run on both when the feature is enabled.
 
-The devcontainer provides `ngspice` and `libngspice0`; the simulation tests need them. The output is
+The devcontainer provides `ngspice` and `libngspice0`; the simulation tests need them.
+
+On Windows, `Ngspice::default()` runs `ngspice_con`, the console program of the Windows builds
+(`ngspice` there is the GUI). The shared library of the official build is `ngspice.dll`; MSYS2's is
+`libngspice-0.dll`, set with `SharedNgspice { library }`. On macOS, Homebrew puts
+`libngspice.0.dylib` in `/opt/homebrew/lib`, which the dynamic loader does not search by default:
+give the path, or add the directory to `DYLD_FALLBACK_LIBRARY_PATH`. Paths are written into decks
+with `/` on Windows, since ngspice reads `\` in commands as an escape. The output is
 checked against KiCad's SPICE export as described in `doc/dev/verifying.md`.
 
 ## 6. Output

@@ -12,7 +12,7 @@ use crate::{
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     naming::{case_insensitive_duplicates, unescape_name},
     netlist::{Component, Netlist},
-    spice::{ModelSource, SpiceDeck, SpiceDialect, SpicePartInfo, SpiceProblem},
+    spice::{ModelSource, SpiceDeck, SpiceDialect, SpicePartInfo, SpiceProblem, spice_path},
     trace::Trace,
 };
 
@@ -434,7 +434,7 @@ impl SpiceNetlist {
             writeln!(f, "* requires: set ngbehavior={mode} (.spiceinit)")?;
         }
         for path in &self.includes {
-            writeln!(f, ".include \"{}\"", path.display())?;
+            writeln!(f, ".include \"{}\"", spice_path(path))?;
         }
         for model in &self.models {
             writeln!(f, "{model}")?;

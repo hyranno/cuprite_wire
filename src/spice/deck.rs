@@ -5,6 +5,9 @@ use std::{borrow::Cow, fmt};
 #[cfg(feature = "shared-ngspice")]
 use std::path::Path;
 
+#[cfg(feature = "shared-ngspice")]
+use crate::spice::spice_path;
+
 use crate::spice::{Ngspice, Simulation, SimulationError, SpiceNetlist};
 
 /// Front-end settings written at the start of the control block, so that `wrdata` writes
@@ -137,7 +140,7 @@ fn output_in<'a>(command: &'a str, dir: &Path) -> Cow<'a, str> {
         file if Path::new(file).is_absolute() => return Cow::Borrowed(command),
         file => file,
     };
-    Cow::Owned(format!("{name} {}{rest}", dir.join(file).display()))
+    Cow::Owned(format!("{name} {}{rest}", spice_path(&dir.join(file))))
 }
 
 impl fmt::Display for SpiceDeck {
