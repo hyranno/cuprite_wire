@@ -332,12 +332,12 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let kicad = part.kicad.as_ref()?;
     let footprint = match &kicad.footprint {
         Some(id) => {
-            let (library, name) = (&id.library, &id.name);
+            let (library, name) = (id.library(), id.name());
             quote!(Some(#krate::kicad::LibId::new(#library, #name).unwrap()))
         }
         None => quote!(None),
     };
-    let (symbol_library, symbol_name) = (&kicad.symbol.library, &kicad.symbol.name);
+    let (symbol_library, symbol_name) = (kicad.symbol.library(), kicad.symbol.name());
     let pin_entries = part.pins.iter().map(|pin| {
         let id = &pin.id;
         let pad = &pin.pad;

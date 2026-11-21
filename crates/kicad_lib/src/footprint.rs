@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::{Error, sexpr, symbol::natural_cmp};
+use crate::{Error, naming::natural_cmp, sexpr};
 
 /// The pads of a footprint that matter for a netlist.
 #[derive(Debug, Clone, PartialEq, Eq)]

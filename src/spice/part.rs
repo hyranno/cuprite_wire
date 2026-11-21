@@ -159,15 +159,8 @@ impl SpiceElement {
                 self.device
             ));
         }
-        if !self
-            .suffix
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            invalid(format!(
-                "suffix {:?} may only contain ASCII letters, digits and '_'",
-                self.suffix
-            ));
+        if let Err(reason) = cuprite_wire_kicad_lib::naming::check_element_suffix(&self.suffix) {
+            invalid(reason);
         }
         if let Some(reason) = check_args(&self.args) {
             invalid(format!("arguments {:?} {reason}", self.args));
@@ -291,49 +284,7 @@ impl ModelSource {
     }
 }
 
-/// The SPICE dialect a model is written in. Models in another dialect than ngspice's make
-/// ngspice run in a compatibility mode (`set ngbehavior=...`; see [`SpiceDialect::ngbehavior`]).
-///
-/// ngspice 44 translates PSpice's `IF(...)`, `&`, `|`, `STP(...)`, `LIMIT(...)` and `.LIB file`
-/// in its PSpice mode, and LTspice's `uplim(...)` / `dnlim(...)` in its LTspice mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub enum SpiceDialect {
-    #[default]
-    Ngspice,
-    Pspice,
-    Ltspice,
-}
-
-impl SpiceDialect {
-    /// The value of ngspice's `ngbehavior` for models in these dialects, each with whether it is
-    /// written into the deck (inline) rather than included: `None` (the default mode) for ngspice's
-    /// own dialect, else `ps`, `lt` or `ltps`, followed by `a` if a model is inline.
-    ///
-    /// Without `a`, ngspice translates only the included files, which keeps the rest of the deck
-    /// in its own dialect (e.g. a `$` after whitespace starts a comment only in the default mode).
-    pub fn ngbehavior(
-        models: impl IntoIterator<Item = (SpiceDialect, bool)>,
-    ) -> Option<&'static str> {
-        let (mut pspice, mut ltspice, mut all) = (false, false, false);
-        for (dialect, inline) in models {
-            match dialect {
-                SpiceDialect::Ngspice => continue,
-                SpiceDialect::Pspice => pspice = true,
-                SpiceDialect::Ltspice => ltspice = true,
-            }
-            all |= inline;
-        }
-        Some(match (pspice, ltspice, all) {
-            (false, false, _) => return None,
-            (true, false, false) => "ps",
-            (true, false, true) => "psa",
-            (false, true, false) => "lt",
-            (false, true, true) => "lta",
-            (true, true, false) => "ltps",
-            (true, true, true) => "ltpsa",
-        })
-    }
-}
+pub use cuprite_wire_kicad_lib::spice_lib::Dialect as SpiceDialect;
 
 /// A problem in the SPICE information of a part.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -418,21 +369,6 @@ mod tests {
         assert_eq!(
             ModelSource::inline("m", ".model m D").dialect(),
             SpiceDialect::Ngspice
-        );
-        use SpiceDialect::*;
-        assert_eq!(
-            SpiceDialect::ngbehavior([(Ngspice, false), (Ngspice, true)]),
-            None
-        );
-        assert_eq!(
-            SpiceDialect::ngbehavior([(Ngspice, true), (Pspice, false)]),
-            Some("ps")
-        );
-        assert_eq!(SpiceDialect::ngbehavior([(Pspice, true)]), Some("psa"));
-        assert_eq!(SpiceDialect::ngbehavior([(Ltspice, false)]), Some("lt"));
-        assert_eq!(
-            SpiceDialect::ngbehavior([(Ltspice, false), (Pspice, true), (Ngspice, false)]),
-            Some("ltpsa")
         );
     }
 }

@@ -5,6 +5,16 @@
 
 use std::fmt;
 
+/// The escapes in quoted strings, as (escaped character, character it stands for). They are
+/// shared with the writer of `cuprite_wire`.
+pub const ESCAPES: [(char, char); 5] = [
+    ('"', '"'),
+    ('\\', '\\'),
+    ('n', '\n'),
+    ('r', '\r'),
+    ('t', '\t'),
+];
+
 /// A position in the source text (1-based).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pos {
@@ -193,10 +203,13 @@ impl Parser<'_> {
                         }
                         Some('"') => return Ok(Sexpr::Str(text, start)),
                         Some('\\') => match self.bump() {
-                            Some('n') => text.push('\n'),
-                            Some('r') => text.push('\r'),
-                            Some('t') => text.push('\t'),
-                            Some(c) => text.push(c),
+                            // Unknown escapes stand for the character itself.
+                            Some(c) => text.push(
+                                ESCAPES
+                                    .iter()
+                                    .find(|(escaped, _)| *escaped == c)
+                                    .map_or(c, |&(_, unescaped)| unescaped),
+                            ),
                             None => return Err(self.error("unterminated escape")),
                         },
                         Some(c) => text.push(c),
