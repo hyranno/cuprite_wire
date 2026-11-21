@@ -16,5 +16,5 @@ cuprite_wire runs external programs and loads native code on behalf of the user:
 command line, the ngspice shared library (feature `shared-ngspice`), Verilator and the C++ compiler,
 and the shared libraries of XSPICE `d_cosim` models. SPICE decks, SPICE models and Verilog sources
 are trusted input, like the source code of a program: running a simulation of an untrusted model
-is not expected to be safe. Problems in that area are still welcome as reports, for example a
-deck that escapes the run directory although its models are not malicious.
+is not expected to be safe. Reports are still welcome when ordinary input has unexpected effects,
+for example files written outside the run directory.
