@@ -43,6 +43,23 @@ struct SpiceLine {
     args: String,
 }
 
+/// Writes the line of an element: its name, its nodes and the arguments, if any.
+pub(crate) fn write_element_line(
+    f: &mut impl fmt::Write,
+    name: &str,
+    nodes: &[String],
+    args: &str,
+) -> fmt::Result {
+    write!(f, "{name}")?;
+    for node in nodes {
+        write!(f, " {node}")?;
+    }
+    if !args.is_empty() {
+        write!(f, " {args}")?;
+    }
+    writeln!(f)
+}
+
 /// Converts a net name to a SPICE node name like KiCad: escapes are undone,
 /// `% ( ) , [ ] < > ~` and whitespace become `_` (`Net-(R1-Pad2)` -> `Net-_R1-Pad2_`),
 /// a leading `//` (a comment in ngspice) becomes `/root/`, and the ground net (`GND` in any case, or `0`)
@@ -402,14 +419,7 @@ impl SpiceNetlist {
             writeln!(f, "{model}")?;
         }
         for element in &self.elements {
-            write!(f, "{}", element.name)?;
-            for node in &element.nodes {
-                write!(f, " {node}")?;
-            }
-            if !element.args.is_empty() {
-                write!(f, " {}", element.args)?;
-            }
-            writeln!(f)?;
+            write_element_line(f, &element.name, &element.nodes, &element.args)?;
         }
         Ok(())
     }

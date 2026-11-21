@@ -38,7 +38,8 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
 - `CosimDevice::new(name)` is a simulation-only part standing for the device. Its pins are added
   with `.output(pin, OutputCharacteristics)`, `.input(pin, InputCharacteristics)` and
   `.bidirectional(pin, output, input)`, plus `gnd` (`CosimDevice::GND`), the reference of the pin
-  voltages. Names are ASCII letters, digits and `_`.
+  voltages. Names are ASCII letters, digits and `_`; pin names are unique case-insensitively and
+  cannot be `gnd`, `ref` or `0` (nodes of the generated subcircuit).
 - A `DeviceModel` is the behavior: `step(&mut self, io)` is called at every accepted time point of
   the transient analysis, from time 0 on.
 - `deck.run_with(DeviceModels::new().with(name, &mut model))` runs the deck in the shared library
@@ -171,15 +172,16 @@ shows what ngspice simulates:
 ```text
 .subckt cuprite_cosim_mcu button led ref
 CC_button button ref 5e-12
-VD_led d_led ref DC 0 EXTERNAL
-VE_led e_led ref DC 0 EXTERNAL
-SO_led d_led led e_led ref hiz_led
+VD_led led#d ref DC 0 EXTERNAL
+VE_led led#e ref DC 0 EXTERNAL
+SO_led led#d led led#e ref hiz_led
 .model hiz_led SW( vt=0.5 vh=0 ron=50 roff=1e9 )
 .ends cuprite_cosim_mcu
 ```
 
 The `gnd` pin is the port `ref` (ngspice reads a node named `gnd` as the ground, even inside a
-subcircuit). An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
+subcircuit). The internal nodes of a pin are named `<pin>#<role>`, which no pin name can be.
+An output pin is the `EXTERNAL` source `VD_<pin>` (its voltage) behind a switch with the output
 resistance, closed by the `EXTERNAL` source `VE_<pin>` (1 while driving, 0 in `HiZ`). An input pin
 has the elements of `DigitalLoad` (capacitance, pull resistor, leakage). The values of the
 `EXTERNAL` sources come from the models through the callbacks of the shared library, so the deck
@@ -211,7 +213,7 @@ let counter = bench.instantiate_part_named("counter", counter);
 ```
 
 - The ports of the model are the inputs and the outputs in the order they are added; a model
-  without inputs gets `NULL`. Bidirectional ports and high impedance are not supported.
+  without inputs gets `NULL`. Pin names follow the rules of `CosimDevice` (section 1). Bidirectional ports and high impedance are not supported.
 - Each input has the load of its `InputCharacteristics` and an `adc_bridge` at its thresholds
   (`in_low` = `threshold_low`, `in_high` = `threshold_high`; between them the model sees the unknown
   state, without hysteresis). Each output has a `dac_bridge` from `low` to `high` with the rise and

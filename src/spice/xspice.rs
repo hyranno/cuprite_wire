@@ -11,8 +11,11 @@ use std::path::PathBuf;
 use crate::{
     parts::Part,
     spice::{
-        ModelSource, SpiceElement, SpicePartInfo,
-        digital::{InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE, fnv1a},
+        SpicePartInfo,
+        digital::{
+            InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE,
+            assert_subcircuit_pin, hashed_subcircuit, internal_node, subcircuit_part,
+        },
         sources::spice_number,
     },
 };
@@ -28,7 +31,8 @@ use crate::{
 ///
 /// It is written as a subcircuit `cuprite_dcosim_<hash>` of its own, whose node `ref` is the
 /// `gnd` pin. The bridges work against the ground, so they are connected through unity-gain
-/// sources relative to `ref`.
+/// sources relative to `ref`. The internal nodes of a pin `p` are named `p#<role>` (`p#ai`,
+/// `p#di`, `p#do`, `p#ao`, `p#d`), so they never meet a pin's node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DCosim {
     simulation: PathBuf,
@@ -37,11 +41,6 @@ pub struct DCosim {
     delay: Option<f64>,
     inputs: Vec<(String, InputCharacteristics)>,
     outputs: Vec<(String, OutputCharacteristics)>,
-}
-
-/// Names written into the subcircuit: ASCII letters, digits and `_`.
-fn is_identifier(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// An argument written as a quoted string of the model.
@@ -126,8 +125,8 @@ impl DCosim {
     /// Adds an input pin: the next input port of the model.
     ///
     /// # Panics
-    /// If the name is not made of ASCII letters, digits and `_`, is `gnd` or another pin's name
-    /// (case-insensitively), or the characteristics are invalid.
+    /// If the name is not made of ASCII letters, digits and `_`, is `gnd`, `ref`, `0` or another
+    /// pin's name (case-insensitively), or the characteristics are invalid.
     #[track_caller]
     pub fn input(mut self: Box<Self>, pin: &str, input: InputCharacteristics) -> Box<Self> {
         self.check_pin(pin);
@@ -150,46 +149,25 @@ impl DCosim {
 
     #[track_caller]
     fn check_pin(&self, pin: &str) {
-        assert!(
-            is_identifier(pin),
-            "a pin name may only contain ASCII letters, digits and '_': {pin:?}"
-        );
-        let names = self
-            .inputs
-            .iter()
-            .map(|p| &p.0)
-            .chain(self.outputs.iter().map(|p| &p.0));
-        assert!(
-            !pin.eq_ignore_ascii_case(Self::GND)
-                && !names.into_iter().any(|name| name.eq_ignore_ascii_case(pin)),
-            "the part already has a pin {pin:?}"
-        );
+        assert_subcircuit_pin(pin, self.pin_names(), "the part");
     }
 
-    /// The subcircuit name and definition. The name is derived from the definition, so equal
-    /// parts share one definition.
+    /// The subcircuit name and definition ([`hashed_subcircuit`]).
     fn subcircuit(&self) -> (String, String) {
         let mut body = String::new();
         for (pin, input) in &self.inputs {
+            let (analog, digital) = (internal_node(pin, "ai"), internal_node(pin, "di"));
             body.push_str(&format!(
-                "EI_{pin} ai_{pin} 0 {pin} {SUBCIRCUIT_REFERENCE} 1\n\
-                 AI_{pin} [ai_{pin}] [di_{pin}] adc_{pin}\n\
+                "EI_{pin} {analog} 0 {pin} {SUBCIRCUIT_REFERENCE} 1\n\
+                 AI_{pin} [{analog}] [{digital}] adc_{pin}\n\
                  .model adc_{pin} adc_bridge( in_low={} in_high={} )\n",
                 spice_number(input.threshold_low),
                 spice_number(input.threshold_high)
             ));
-            for element in input.load_elements(pin, SUBCIRCUIT_REFERENCE) {
-                body.push_str(&format!(
-                    "{}{}_{pin} {} {}\n",
-                    element.device,
-                    element.suffix,
-                    element.nodes.join(" "),
-                    element.args
-                ));
-            }
+            body.push_str(&input.load_lines(pin));
         }
-        let ports = |prefix: &str, pins: &mut dyn Iterator<Item = &String>| {
-            let nodes: Vec<String> = pins.map(|pin| format!("{prefix}_{pin}")).collect();
+        let ports = |role: &str, pins: &mut dyn Iterator<Item = &String>| {
+            let nodes: Vec<String> = pins.map(|pin| internal_node(pin, role)).collect();
             if nodes.is_empty() {
                 "NULL".to_string()
             } else {
@@ -221,11 +199,16 @@ impl DCosim {
         body.push_str(&model);
         body.push_str(" )\n");
         for (pin, output) in &self.outputs {
+            let (digital, analog, drive) = (
+                internal_node(pin, "do"),
+                internal_node(pin, "ao"),
+                internal_node(pin, "d"),
+            );
             body.push_str(&format!(
-                "AO_{pin} [do_{pin}] [ao_{pin}] dac_{pin}\n\
+                "AO_{pin} [{digital}] [{analog}] dac_{pin}\n\
                  .model dac_{pin} dac_bridge( out_low={} out_high={} out_undef={} t_rise={} t_fall={} )\n\
-                 EO_{pin} d_{pin} {SUBCIRCUIT_REFERENCE} ao_{pin} 0 1\n\
-                 RO_{pin} d_{pin} {pin} {}\n",
+                 EO_{pin} {drive} {SUBCIRCUIT_REFERENCE} {analog} 0 1\n\
+                 RO_{pin} {drive} {pin} {}\n",
                 spice_number(output.low),
                 spice_number(output.high),
                 spice_number((output.low + output.high) / 2.0),
@@ -234,19 +217,14 @@ impl DCosim {
                 spice_number(output.resistance)
             ));
         }
-        let name = format!("cuprite_dcosim_{:016x}", fnv1a(body.as_bytes()));
-        let text = format!(
-            ".subckt {name} {} {SUBCIRCUIT_REFERENCE}\n{body}.ends {name}\n",
-            self.pin_names().join(" ")
-        );
-        (name, text)
+        hashed_subcircuit("dcosim", &self.pin_names(), &body)
     }
 
-    fn pin_names(&self) -> Vec<String> {
+    fn pin_names(&self) -> Vec<&str> {
         self.inputs
             .iter()
-            .map(|p| p.0.clone())
-            .chain(self.outputs.iter().map(|p| p.0.clone()))
+            .map(|p| p.0.as_str())
+            .chain(self.outputs.iter().map(|p| p.0.as_str()))
             .collect()
     }
 }
@@ -256,7 +234,7 @@ impl Part for DCosim {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
-        let mut pins = self.pin_names();
+        let mut pins: Vec<String> = self.pin_names().into_iter().map(Into::into).collect();
         pins.push(Self::GND.into());
         pins
     }
@@ -265,10 +243,7 @@ impl Part for DCosim {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let (name, text) = self.subcircuit();
-        Some(SpicePartInfo::element(
-            SpiceElement::new('X', self.pin_ids(), name.clone())
-                .with_model(ModelSource::inline(name, text)),
-        ))
+        Some(subcircuit_part(self.pin_ids(), name, text))
     }
 }
 
