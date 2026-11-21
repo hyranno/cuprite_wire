@@ -180,5 +180,7 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 Errors specific to a format are listed in `doc/kicad_netlist_usage.md` section 5 and
 `doc/spice_netlist_usage.md` section 4.
 
-Warnings (`MultipleNetNames`, `LabelOnlyNet`) are printed to stderr and kept in `Netlist::warnings`.
+Warnings (`MultipleNetNames`, `LabelOnlyNet`) are kept in `Netlist::warnings` and in the ERC report,
+and are also emitted with `log::warn!` (target `cuprite_wire::error`); nothing is printed unless
+the program installs a logger such as `env_logger`.
 Checks based on the electrical types of pins (ERC) are a separate step, `Netlist::erc`; see `doc/erc.md`.
