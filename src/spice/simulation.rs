@@ -282,6 +282,7 @@ impl Table {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SimulationError {
     /// ngspice cannot be run. The run directory, if any, is removed.
     Io(io::Error),

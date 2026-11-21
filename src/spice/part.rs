@@ -288,6 +288,7 @@ pub use cuprite_wire_kicad_lib::spice_lib::Dialect as SpiceDialect;
 
 /// A problem in the SPICE information of a part.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SpiceProblem {
     /// `Elements` without any element (use `Excluded` to leave a part out).
     NoElements,

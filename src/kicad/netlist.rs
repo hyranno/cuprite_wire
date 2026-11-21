@@ -173,7 +173,7 @@ impl KicadNetlist {
         self
     }
 
-    pub fn to_sexpr(&self) -> SExpr {
+    pub(crate) fn to_sexpr(&self) -> SExpr {
         let mut design = Vec::new();
         if let Some(source) = &self.source {
             design.push(SExpr::kv("source", source));

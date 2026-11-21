@@ -17,12 +17,12 @@ pub(crate) const AUTO_NAME_SEPARATOR: char = '#';
 const ESCAPE_START: char = '{';
 
 /// Escapes characters that have a special meaning in KiCad net names and sheet paths.
-pub fn escape_name(name: &str) -> String {
+pub(crate) fn escape_name(name: &str) -> String {
     name.replace('/', "{slash}")
 }
 
 /// Reverses [`escape_name`].
-pub fn unescape_name(name: &str) -> String {
+pub(crate) fn unescape_name(name: &str) -> String {
     name.replace("{slash}", "/")
 }
 
@@ -81,7 +81,7 @@ impl fmt::Display for HierPath {
     }
 }
 
-pub use cuprite_wire_kicad_lib::naming::natural_cmp;
+pub(crate) use cuprite_wire_kicad_lib::naming::natural_cmp;
 
 /// Checks an explicit instance name.
 pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
