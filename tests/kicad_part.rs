@@ -204,3 +204,76 @@ fn test_export() {
     // The amplifier has no SPICE model.
     assert!(netlist.to_spice().is_err());
 }
+
+/// The generated code names everything by its full path, so it compiles where the user's names
+/// shadow the prelude.
+mod hygiene {
+    #![allow(dead_code, non_snake_case, non_upper_case_globals, unused_macros)]
+
+    struct String;
+    struct Vec;
+    struct Option;
+    fn Some() {}
+    const None: () = ();
+    macro_rules! vec {
+        ($($tt:tt)*) => {
+            compile_error!("the user's `vec!`")
+        };
+    }
+    macro_rules! format {
+        ($($tt:tt)*) => {
+            compile_error!("the user's `format!`")
+        };
+    }
+    macro_rules! include_bytes {
+        ($($tt:tt)*) => {
+            compile_error!("the user's `include_bytes!`")
+        };
+    }
+    macro_rules! option_env {
+        ($($tt:tt)*) => {
+            compile_error!("the user's `option_env!`")
+        };
+    }
+
+    cuprite_wire::kicad_part! {
+        pub struct Resistor {
+            symbol: "test:R",
+            footprint: "test:R_0603",
+            value: param,
+            symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+            footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
+        }
+    }
+
+    cuprite_wire::kicad_part! {
+        pub struct DualAmp {
+            symbol: "test:DUAL_AMP",
+            footprint: "test:SOIC-8-EP",
+            pins: { "9" => "ep" },
+            extra_pads: ["9"],
+            internal_connections: [["4", "ep"]],
+            fields: { "MPN" => "DA-1" },
+            symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+            footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
+        }
+    }
+
+    cuprite_wire::spice_part! {
+        pub struct Clamp {
+            library: "crates/kicad_lib/tests/fixtures/models/clamp.lib",
+            name: "clamp",
+        }
+    }
+}
+
+#[test]
+fn test_hygiene() {
+    let resistor = hygiene::Resistor::new("10k");
+    assert_eq!(resistor.value(), "10k");
+    assert!(resistor.spice().is_some());
+    let amp = hygiene::DualAmp::new();
+    assert_eq!(amp.internal_connections(), [strings(&["4", "ep"])]);
+    assert_eq!(amp.kicad().unwrap().fields, [("MPN".into(), "DA-1".into())]);
+    assert_eq!(hygiene::Clamp::new().value(), "clamp");
+}
