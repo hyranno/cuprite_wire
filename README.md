@@ -93,6 +93,7 @@ The devcontainer in `.devcontainer/` has all of them.
 
 The API reference is on [docs.rs](https://docs.rs/cuprite_wire).
 Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`.
+The changes in each release are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contributing
 

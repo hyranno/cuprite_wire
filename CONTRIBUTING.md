@@ -28,7 +28,8 @@ others get the same environment.
 
 1. `main` is protected. Create a topic branch and open a pull request.
 2. Keep a pull request focused on one topic. Update the documentation (`README.md`, `doc/`) together
-   with the behavior it describes.
+   with the behavior it describes, and add user-visible changes to the `[Unreleased]` section of
+   [`CHANGELOG.md`](CHANGELOG.md) (mark breaking changes with **Breaking:**).
 3. Run the same checks as CI before opening the pull request:
 
    ```sh
