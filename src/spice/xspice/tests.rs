@@ -51,6 +51,13 @@ impl Drop for TestDir {
     }
 }
 
+/// An absolute library path, for the tests not loading it.
+const LIBRARY: &str = if cfg!(windows) {
+    "C:/lib/libx.so"
+} else {
+    "/lib/libx.so"
+};
+
 /// Builds `tests/fixtures/xspice/<name>.c` into a shared library in a new temporary directory.
 /// Returns the directory, to be kept while the library is used, and the library.
 fn build_library(name: &str) -> (TestDir, PathBuf) {
@@ -69,7 +76,7 @@ fn build_library(name: &str) -> (TestDir, PathBuf) {
 
 #[test]
 fn test_subcircuit() {
-    let part = DCosim::new("/lib/libx.so")
+    let part = DCosim::new(LIBRARY)
         .with_sim_args(["design.vvp"])
         .with_delay(2e-9)
         .input(
@@ -91,7 +98,7 @@ fn test_subcircuit() {
              AI_clk [clk#ai] [clk#di] adc_clk\n\
              .model adc_clk adc_bridge( in_low=1 in_high=2 )\n\
              AC [clk#di] [q#do] cosim\n\
-             .model cosim d_cosim( simulation=\"/lib/libx.so\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
+             .model cosim d_cosim( simulation=\"{LIBRARY}\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
              AO_q [q#do] [q#ao] dac_q\n\
              .model dac_q dac_bridge( out_low=0 out_high=3.3 out_undef=1.65 t_rise=2e-9 t_fall=2e-9 )\n\
              EO_q q#d ref q#ao 0 1\n\
@@ -99,7 +106,7 @@ fn test_subcircuit() {
              .ends {name}\n"
         )
     );
-    let no_inputs = DCosim::new("/lib/libx.so").output("q", OutputCharacteristics::cmos(3.3));
+    let no_inputs = DCosim::new(LIBRARY).output("q", OutputCharacteristics::cmos(3.3));
     assert!(no_inputs.subcircuit().1.contains("AC NULL [q#do] cosim\n"));
     assert!(matches!(part.spice(), Some(SpicePartInfo::Elements { .. })));
 }
@@ -108,7 +115,7 @@ fn test_subcircuit() {
 /// of the input `a` and the node of the output `ai_a`).
 #[test]
 fn test_internal_nodes_apart_from_pins() {
-    let part = DCosim::new("/lib/libx.so")
+    let part = DCosim::new(LIBRARY)
         .input("a", InputCharacteristics::cmos(3.3))
         .output("ai_a", OutputCharacteristics::cmos(3.3));
     let (_, text) = part.subcircuit();
@@ -119,7 +126,7 @@ fn test_internal_nodes_apart_from_pins() {
 #[test]
 #[should_panic(expected = "the pin name \"REF\" is reserved")]
 fn test_pin_named_ref() {
-    let _ = DCosim::new("/lib/libx.so").input("REF", InputCharacteristics::cmos(3.3));
+    let _ = DCosim::new(LIBRARY).input("REF", InputCharacteristics::cmos(3.3));
 }
 
 #[test]
@@ -131,7 +138,7 @@ fn test_relative_library() {
 #[test]
 #[should_panic(expected = "cannot be written in a model")]
 fn test_quote_in_argument() {
-    let _ = DCosim::new("/lib/libx.so").with_sim_args(["a\"b"]);
+    let _ = DCosim::new(LIBRARY).with_sim_args(["a\"b"]);
 }
 
 /// The C inverter between a driver and a load, with the device's `gnd` 1 V above the ground:
