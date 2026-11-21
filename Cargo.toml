@@ -5,6 +5,8 @@ members = ["crates/embedded_hal", "crates/kicad_lib", "crates/macros"]
 # The crates are released together, with the same version (see .github/workflows/release.yml).
 version = "0.1.0"
 edition = "2024"
+# The lowest version CI checks (the msrv job); uuid needs 1.89.
+rust-version = "1.89"
 license = "MIT"
 repository = "https://github.com/hyranno/cuprite_wire"
 
@@ -18,6 +20,7 @@ cuprite_wire_macros = { version = "0.1.0", path = "crates/macros" }
 name = "cuprite_wire"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to the KiCad PCB editor (pcbnew) as a netlist"
