@@ -66,10 +66,15 @@ impl Default for SharedNgspice {
 }
 
 impl SharedNgspice {
-    /// Runs the deck in a new temporary directory. Fails if ngspice reports an error.
+    /// Runs the deck in a new temporary directory.
     ///
     /// After an error ngspice cannot recover from, the library is unloaded and loaded again for
     /// the next run.
+    ///
+    /// # Errors
+    /// [`SimulationError::SharedLibrary`] if the library cannot be loaded or used,
+    /// [`SimulationError::Ngspice`] if ngspice reports an error, and [`SimulationError::Io`] if
+    /// the run directory cannot be prepared.
     pub fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
         self.run_session(deck, None)
     }

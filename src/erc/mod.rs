@@ -394,13 +394,19 @@ impl ErcReport {
         self.violations.is_empty()
     }
 
-    /// Panics with all violations if there is an error.
+    /// Fails a test if there is an error.
+    ///
+    /// # Panics
+    /// If any violation is an error, with all violations (warnings included) in the message.
     #[track_caller]
     pub fn assert_no_errors(&self) {
         assert!(!self.has_errors(), "ERC found errors:\n{self}");
     }
 
-    /// Panics with all violations if there is any.
+    /// Fails a test if there is any violation.
+    ///
+    /// # Panics
+    /// If there is any violation, warnings included, with all violations in the message.
     #[track_caller]
     pub fn assert_clean(&self) {
         assert!(self.is_clean(), "ERC found violations:\n{self}");

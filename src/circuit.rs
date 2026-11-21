@@ -4,7 +4,7 @@
 
 use std::{collections::HashMap, fmt::Debug, panic::Location};
 
-use petgraph::{graph::UnGraph, unionfind::UnionFind};
+use petgraph::{graph::UnGraph, unionfind::UnionFind, visit::EdgeRef};
 
 /// A node of a circuit, returned by [`CircuitBuilder`] and held in subcircuit interfaces.
 /// Re-exported from `petgraph` so that users do not need to depend on it.
@@ -548,9 +548,8 @@ impl BuiltCircuit {
     /// Each group is sorted, and groups are sorted by their first node.
     pub fn connected_nodes(&self) -> Vec<Vec<NodeIndex>> {
         let mut union_find = UnionFind::<usize>::new(self.nets.node_count());
-        for edge in self.nets.edge_indices() {
-            let (a, b) = self.nets.edge_endpoints(edge).unwrap();
-            union_find.union(a.index(), b.index());
+        for edge in self.nets.edge_references() {
+            union_find.union(edge.source().index(), edge.target().index());
         }
         let mut first_node_by_name = HashMap::<(bool, String), NodeIndex>::new();
         for node in self.nets.node_indices() {

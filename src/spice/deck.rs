@@ -61,6 +61,9 @@ impl SpiceDeck {
     }
 
     /// Runs the deck with `ngspice` from `PATH` ([`Ngspice::default`]).
+    ///
+    /// # Errors
+    /// See [`Ngspice::run`].
     pub fn run(&self) -> Result<Simulation, SimulationError> {
         Ngspice::default().run(self)
     }

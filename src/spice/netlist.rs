@@ -176,7 +176,16 @@ fn element_name(device: char, ref_name: &str, suffix: &str) -> String {
 
 impl Netlist {
     /// Resolves the SPICE information of every component and checks it.
-    /// All errors are collected, each with the trace of the component or the net.
+    ///
+    /// # Errors
+    /// The problems found in the SPICE information (a part without SPICE information, an unused
+    /// pin not declared unused, colliding node or element names, conflicting models, no ground,
+    /// ...). All errors are collected, each with the trace of the
+    /// component or the net.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "panics only if the netlist breaks its invariant that every pin is on a net"
+    )]
     pub fn to_spice(&self) -> Result<SpiceNetlist, CircuitErrors> {
         let mut errors = Vec::new();
         let net_of_pin: HashMap<(usize, &str), usize> = self
@@ -437,6 +446,9 @@ impl SpiceNetlist {
     }
 
     /// Writes the netlist (as [`Display`](fmt::Display) formats it, ending with `.end`) to `writer`.
+    ///
+    /// # Errors
+    /// The error of `writer`.
     pub fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
         write!(writer, "{self}")
     }

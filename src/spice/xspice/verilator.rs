@@ -84,6 +84,11 @@ impl Verilator {
     ///
     /// Relative paths (the sources, the shim and cache directories, and the paths in the
     /// arguments) are resolved against the current directory, which is part of the cache key.
+    ///
+    /// # Errors
+    /// [`VerilatorError::Command`] if a step of the build fails, [`VerilatorError::Ports`] if the
+    /// ports of the top module cannot be used, and [`VerilatorError::Io`] if a file operation
+    /// fails or a program cannot be run.
     pub fn build(&self) -> Result<VerilatedModel, VerilatorError> {
         let this = self.absolute()?;
         let dir = this.cache_dir.join(format!("{:016x}", this.key()?));

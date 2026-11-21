@@ -31,7 +31,7 @@
 //! | [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md) | [`erc`] |
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![warn(missing_docs)]
+#![warn(missing_docs, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod basic;
 pub mod circuit;

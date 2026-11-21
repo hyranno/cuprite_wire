@@ -14,6 +14,8 @@ break the API).
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
+- The API documentation has `# Errors` and `# Panics` sections for the functions that return a
+  `Result` or may panic.
 
 ## [0.2.0] - 2026-11-21
 

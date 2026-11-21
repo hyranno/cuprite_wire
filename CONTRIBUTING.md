@@ -30,6 +30,8 @@ others get the same environment.
 2. Keep a pull request focused on one topic. Update the documentation (`README.md`, `doc/`) together
    with the behavior it describes, and add user-visible changes to the `[Unreleased]` section of
    [`CHANGELOG.md`](CHANGELOG.md) (mark breaking changes with **Breaking:**).
+   Public items of `cuprite_wire` and `cuprite_wire_embedded_hal` need doc comments, with
+   `# Errors` / `# Panics` sections where they apply (clippy checks this).
 3. Run the same checks as CI before opening the pull request:
 
    ```sh

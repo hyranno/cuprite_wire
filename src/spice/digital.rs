@@ -163,6 +163,9 @@ impl DigitalSequence {
     }
 
     /// Like [`DigitalSequence::at`], in place.
+    ///
+    /// # Panics
+    /// If `time` is negative, not finite, or before the last change.
     #[track_caller]
     pub fn push(&mut self, time: f64, level: Level) {
         assert!(
@@ -210,6 +213,10 @@ impl DigitalSequence {
 
     /// Appends UART frames (8 data bits, LSB first, no parity, 1 stop bit) sent back to back from
     /// `start`, at `baud` bits per second. The line should be idle (`High`) before `start`.
+    ///
+    /// # Panics
+    /// If `baud` is not positive and finite, or `start` is negative, not finite, or before the
+    /// last change.
     #[track_caller]
     pub fn uart(mut self, start: f64, baud: f64, bytes: &[u8]) -> Self {
         assert!(
@@ -231,6 +238,10 @@ impl DigitalSequence {
 
     /// Appends `cycles` periods of a PWM signal from `start`: `High` for `duty * period`, then
     /// `Low`. The sequence is `Low` at the end.
+    ///
+    /// # Panics
+    /// If `period` is not positive and finite, `duty` is not in `0..=1`, or `start` is negative,
+    /// not finite, or before the last change.
     #[track_caller]
     pub fn pwm(mut self, start: f64, period: f64, duty: f64, cycles: usize) -> Self {
         assert!(
