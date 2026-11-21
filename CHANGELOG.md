@@ -10,6 +10,11 @@ break the API).
 
 ## [Unreleased]
 
+### Changed
+
+- Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
+  (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
+
 ## [0.2.0] - 2026-11-21
 
 ### Added

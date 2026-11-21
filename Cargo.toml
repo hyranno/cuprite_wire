@@ -54,6 +54,7 @@ cuprite_wire_kicad_lib.workspace = true
 cuprite_wire_macros.workspace = true
 dyn-clone = "1.0.20"
 libloading = { version = "0.9.1", optional = true }
+log = "0.4.35"
 petgraph = "0.8.3"
 uuid = { version = "1.29.2", features = ["v5"] }
 

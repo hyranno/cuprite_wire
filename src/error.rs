@@ -355,9 +355,9 @@ impl fmt::Display for CircuitWarning {
     }
 }
 
-/// Reports a warning. All warnings go through this function.
+/// Reports a warning through the `log` crate. All warnings go through this function.
 pub(crate) fn warn(warning: &CircuitWarning) {
-    eprintln!("{warning}");
+    log::warn!("{warning}");
 }
 
 #[cfg(test)]
