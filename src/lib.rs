@@ -30,6 +30,7 @@
 //! | [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md) | microcontroller models driving the circuit (`spice::cosim`, feature `shared-ngspice`), XSPICE `d_cosim` ([`spice::xspice`]) |
 //! | [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md) | [`erc`] |
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 pub mod basic;
 pub mod circuit;
 pub mod erc;
