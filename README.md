@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/crates/l/cuprite_wire.svg)](LICENSE)
 
 Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to
-the KiCad 9 PCB editor (pcbnew) as a netlist.
+the KiCad PCB editor (pcbnew) as a netlist.
 
 ```rust
 use cuprite_wire::{basic::{Capacitor0603, OpAmpSot23, Resistor0603}, circuit::CircuitBuilder};
@@ -74,7 +74,8 @@ fits your project and your team.
 ## Requirements
 
 - Rust 1.89 or later
-- KiCad 9: pcbnew to import the netlist, and its libraries if parts are generated from them
+- KiCad 9 or 10: pcbnew to import the netlist, and its libraries if parts are generated from them
+  (the netlist is written in KiCad 9's format, which KiCad 10 reads)
 - ngspice (44 or later) for the simulations
 
 The devcontainer in `.devcontainer/` has all of them.

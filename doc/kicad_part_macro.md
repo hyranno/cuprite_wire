@@ -1,6 +1,6 @@
 # Generating Parts from KiCad Libraries
 
-`kicad_part!` generates a part type (a struct implementing `Part`) from a KiCad 9 symbol and
+`kicad_part!` generates a part type (a struct implementing `Part`) from a KiCad (9 or 10) symbol and
 footprint. The libraries are read at compile time, and their contents are written into the
 generated code, so programs using the parts do not read the libraries at run time.
 
@@ -48,7 +48,7 @@ Only `symbol` is required. Options are separated by commas.
 | `sim` | a library model mapped to the pins by hand, replacing the symbol's `Sim.*` fields (section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
 | `fields` | `{ "MPN" => "..." }`: fields written to the footprint | none |
-| `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD9_SYMBOL_DIR` / `$KICAD9_FOOTPRINT_DIR`, else `/usr/share/kicad/symbols` / `footprints` |
+| `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD10_SYMBOL_DIR`, else `$KICAD9_SYMBOL_DIR`, else `/usr/share/kicad/symbols` (and `FOOTPRINT` / `footprints`) |
 | `sim_library_dir` | base of relative `Sim.Library` / `sim` library paths, relative to the crate | the crate |
 
 A library nickname is the file name: `Library:Name` is the symbol `Name` in
@@ -79,6 +79,11 @@ with the same nickname.
   (an error if their names or types differ). Only body style 1 is read (De Morgan styles repeat the pins).
 - **Stacked pins** (several pins at the same position of a unit) are connected inside the part,
   as KiCad connects them in a schematic.
+- A pin number in **KiCad 10's stacked pin notation** (`[2,13]`, `[1-4]`, `[A1-A3,B2]`) stands for
+  several pads: the part gets a pin for each pad (pin IDs `"2"`, `"13"`), in the order of the
+  notation, connected inside the part, and the netlist has a node for each of them, as KiCad 10
+  writes it. An invalid notation (such as `[1-` or `[A1-B2]`) is an error, where KiCad keeps it as
+  one pad number and warns in ERC.
 - Symbols derived with `extends` take the pins of their base symbol and its properties overridden
   by their own.
 - Every pin number must be a pad of the footprint. **Footprint pads without a symbol pin** (exposed
@@ -94,7 +99,7 @@ with the same nickname.
 
 ## 4. Simulation (`spice()`)
 
-With `spice: auto`, the SPICE description is derived from the symbol, following KiCad 9:
+With `spice: auto`, the SPICE description is derived from the symbol, following KiCad (9 and 10 derive the same elements):
 
 | Symbol | Element |
 |---|---|
@@ -117,7 +122,10 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
 - Nodes follow the model's pin order (D: A K, Q: C B E, M: D G S [B], J: D G S, two-terminal: + -,
   a subcircuit: its `.subckt` line), mapped from the symbol pins by `Sim.Pins` (`1=K 2=A`), or in pin
   order without it. Symbol pins not in `Sim.Pins` (and extra pads) are declared unused.
-- `Sim.Library` paths: `${KICAD9_SYMBOL_DIR}` (and `${KICAD<n>_SYMBOL_DIR}`) is the symbol directory
+  A pin in stacked pin notation is one pin of the model (`Sim.Pins` `[4,6]=vee`), connected
+  through its first pad; its other pads, connected inside the part, are unused. (KiCad 10.0.8's
+  SPICE export leaves such a pin unconnected, `NC-<ref>-<n>`.)
+- `Sim.Library` paths: `${KICAD<n>_SYMBOL_DIR}` of any version (`${KICAD9_SYMBOL_DIR}`, `${KICAD10_SYMBOL_DIR}`) is the symbol directory
   used, other `${VAR}` are environment variables, and relative paths are relative to
   `sim_library_dir`. The library is read (with the files it `.include`s) to find the model and to
   check the pin mapping against the `.subckt` ports and the model type against `Sim.Device`.
@@ -159,7 +167,7 @@ the dialects, and for `spice_part!`, which makes a part from a model alone.
 ## 5. Rebuilds and errors
 
 - Every file read and environment variable consulted is tracked (`include_bytes!` / `option_env!`
-  in the generated code), so changing a library or `KICAD9_SYMBOL_DIR` rebuilds the parts.
+  in the generated code), so changing a library or `KICAD10_SYMBOL_DIR` rebuilds the parts.
 - Errors are compile errors pointing at the option concerned, e.g.:
 
   ```

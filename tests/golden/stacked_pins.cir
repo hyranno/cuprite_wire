@@ -1,0 +1,12 @@
+.title stacked_pins
+.subckt amp in+ in- vcc vee out params: GAIN=10
+E1 int 0 in+ in- {GAIN}
+R1 int out 10
+D1 out vcc clamp
+D2 vee out clamp
+.ends amp
+.model clamp D N=0.01
+R1 /OUT Net-_U1--_ 10k
+R2 Net-_U1--_ 0 1k
+XU1 /IN Net-_U1--_ VCC 0 /OUT amp
+.end

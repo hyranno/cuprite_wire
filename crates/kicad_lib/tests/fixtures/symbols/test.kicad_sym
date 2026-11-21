@@ -63,6 +63,21 @@
 			(pin power_in line (at -2.54 -7.62 90) (length 3.81) (name "V-") (number "4"))
 			(pin power_in line (at -2.54 7.62 270) (length 3.81) (name "V+") (number "5"))
 			(pin no_connect line (at 2.54 7.62 270) (length 3.81) (name "NC") (number "6"))))
+	(symbol "STACKED_AMP"
+		(exclude_from_sim no) (in_bom yes) (on_board yes)
+		(property "Reference" "U" (at 0 0 0))
+		(property "Value" "STACKED_AMP" (at 0 0 0))
+		(property "Footprint" "test:SOT-23-6" (at 0 0 0))
+		(property "Sim.Device" "SUBCKT" (at 0 0 0))
+		(property "Sim.Library" "models/amp.lib" (at 0 0 0))
+		(property "Sim.Name" "amp" (at 0 0 0))
+		(property "Sim.Pins" "1=out 2=in- 3=in+ 5=vcc [4,6]=vee" (at 0 0 0))
+		(symbol "STACKED_AMP_1_1"
+			(pin output line (at 7.62 0 180) (length 2.54) (name "~") (number "1"))
+			(pin input line (at -7.62 -2.54 0) (length 2.54) (name "-") (number "2"))
+			(pin input line (at -7.62 2.54 0) (length 2.54) (name "+") (number "3"))
+			(pin power_in line (at -2.54 -7.62 90) (length 3.81) (name "V-") (number "[4,6]"))
+			(pin power_in line (at -2.54 7.62 270) (length 3.81) (name "V+") (number "5"))))
 	(symbol "VSUP"
 		(exclude_from_sim no) (in_bom yes) (on_board yes)
 		(property "Reference" "U" (at 0 0 0))

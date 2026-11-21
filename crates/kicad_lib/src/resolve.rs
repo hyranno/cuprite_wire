@@ -15,8 +15,10 @@ use crate::{
     symbol::SymbolLib,
 };
 
-pub const SYMBOL_DIR_ENV: &str = "KICAD9_SYMBOL_DIR";
-pub const FOOTPRINT_DIR_ENV: &str = "KICAD9_FOOTPRINT_DIR";
+/// The environment variables naming the library directories, in the order they are looked up
+/// (the variables of KiCad 10, then of KiCad 9).
+pub const SYMBOL_DIR_ENVS: [&str; 2] = ["KICAD10_SYMBOL_DIR", "KICAD9_SYMBOL_DIR"];
+pub const FOOTPRINT_DIR_ENVS: [&str; 2] = ["KICAD10_FOOTPRINT_DIR", "KICAD9_FOOTPRINT_DIR"];
 pub const DEFAULT_SYMBOL_DIR: &str = "/usr/share/kicad/symbols";
 pub const DEFAULT_FOOTPRINT_DIR: &str = "/usr/share/kicad/footprints";
 
@@ -62,23 +64,28 @@ impl Resolver {
         (self.env)(name).filter(|value| !value.is_empty())
     }
 
-    fn dir(&mut self, overridden: Option<PathBuf>, env: &str, default: &str) -> PathBuf {
+    fn dir(&mut self, overridden: Option<PathBuf>, envs: &[&str], default: &str) -> PathBuf {
         match overridden {
             Some(dir) => self.manifest_dir.join(dir),
-            None => self
-                .var(env)
+            None => envs
+                .iter()
+                .find_map(|env| self.var(env))
                 .map_or_else(|| PathBuf::from(default), PathBuf::from),
         }
     }
 
     pub fn symbol_dir(&mut self) -> PathBuf {
-        self.dir(self.symbol_dir.clone(), SYMBOL_DIR_ENV, DEFAULT_SYMBOL_DIR)
+        self.dir(
+            self.symbol_dir.clone(),
+            &SYMBOL_DIR_ENVS,
+            DEFAULT_SYMBOL_DIR,
+        )
     }
 
     pub fn footprint_dir(&mut self) -> PathBuf {
         self.dir(
             self.footprint_dir.clone(),
-            FOOTPRINT_DIR_ENV,
+            &FOOTPRINT_DIR_ENVS,
             DEFAULT_FOOTPRINT_DIR,
         )
     }
@@ -249,7 +256,10 @@ mod tests {
             PathBuf::from("/crate/spice/d.lib")
         );
         assert!(resolver.sim_library_path("${NONE}/d.lib").is_err());
-        assert_eq!(resolver.env_vars, ["KICAD9_SYMBOL_DIR", "MODELS", "NONE"]);
+        assert_eq!(
+            resolver.env_vars,
+            ["KICAD10_SYMBOL_DIR", "KICAD9_SYMBOL_DIR", "MODELS", "NONE"]
+        );
     }
 
     #[test]
@@ -258,7 +268,13 @@ mod tests {
         assert_eq!(resolver.symbol_dir(), PathBuf::from(DEFAULT_SYMBOL_DIR));
         resolver.footprint_dir = Some("libs/fp".into());
         assert_eq!(resolver.footprint_dir(), PathBuf::from("/crate/libs/fp"));
-        let mut resolver = Resolver::new("/crate", |_| Some("/sym".into()));
-        assert_eq!(resolver.symbol_dir(), PathBuf::from("/sym"));
+        let mut resolver = Resolver::new("/crate", |name| match name {
+            "KICAD9_SYMBOL_DIR" => Some("/sym9".into()),
+            "KICAD10_FOOTPRINT_DIR" => Some("/fp10".into()),
+            "KICAD9_FOOTPRINT_DIR" => Some("/fp9".into()),
+            _ => None,
+        });
+        assert_eq!(resolver.symbol_dir(), PathBuf::from("/sym9"));
+        assert_eq!(resolver.footprint_dir(), PathBuf::from("/fp10"));
     }
 }

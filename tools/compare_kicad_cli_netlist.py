@@ -557,6 +557,23 @@ def library_symbol(library, name):
     return symbol
 
 
+def expand_stacked_pin(number):
+    """The pads of a pin number: KiCad 10's stacked pin notation (`[1,3]`, `[1-4]`, `[A1-A3]`)
+    expanded, else the number itself."""
+    if not (number.startswith("[") and number.endswith("]")):
+        return [number]
+    pads = []
+    for part in filter(None, (p.strip() for p in number[1:-1].split(","))):
+        if "-" not in part:
+            pads.append(part)
+            continue
+        ends = [re.fullmatch(r"(.*?)(\d+)", e.strip()) for e in part.split("-", 1)]
+        if not all(ends) or ends[0][1] != ends[1][1] or int(ends[0][2]) > int(ends[1][2]):
+            return [number]
+        pads += [f"{ends[0][1]}{n}" for n in range(int(ends[0][2]), int(ends[1][2]) + 1)]
+    return pads or [number]
+
+
 def symbol_units(symbol):
     """{unit: [(pin number, x, y)]} of body style 1; unit 0 holds the pins shared by all units."""
     name = unquote(symbol[1]).split(":", 1)[1]
@@ -635,7 +652,8 @@ def synthesize_library(path, project, sim_excluded=None):
             # A label on every pin end (schematic y grows downwards).
             pins = units.get(unit, []) + (shared if unit == min(units, default=1) else [])
             for number, px, py in pins:
-                node = netlist.nodes.get((ref, number))
+                # The pads of a stacked pin (KiCad 10) are connected; the first one has the net.
+                node = netlist.nodes.get((ref, expand_stacked_pin(number)[0]))
                 if node is None:
                     raise ValueError(f"{ref}: pin {number} of the symbol is not in the netlist")
                 net = node.net

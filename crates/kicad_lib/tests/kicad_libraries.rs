@@ -1,4 +1,4 @@
-//! Reads parts from the KiCad 9 libraries installed in the devcontainer.
+//! Reads parts from the KiCad (9 or 10) libraries installed in the devcontainer.
 //! Run with `cargo test -p cuprite_wire_kicad_lib -- --ignored`.
 
 use cuprite_wire_kicad_lib::{
@@ -24,7 +24,7 @@ fn options(symbol: &str, footprint: Option<&str>) -> PartOptions {
 }
 
 #[test]
-#[ignore = "needs the KiCad 9 libraries in /usr/share/kicad"]
+#[ignore = "needs the KiCad libraries in /usr/share/kicad"]
 fn test_kicad_parts() {
     let mut r = resolver();
     let mut opts = options("Device:R", Some("Resistor_SMD:R_0603_1608Metric"));

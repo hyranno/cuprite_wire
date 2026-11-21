@@ -7,10 +7,10 @@ C1 Net-_Q2-G_ 0 100n
 D1 /OUT +5V __Diode
 Q1 /OUT Net-_Q1-B_ 0 __Npn
 MQ2 /OUT Net-_Q2-G_ 0 __Nmos
-R1 /AMP Net-_R1-Pad2_ 10k
-R2 Net-_R1-Pad2_ 0 1k
+R1 /AMP Net-_U1--_ 10k
+R2 Net-_U1--_ 0 1k
 R3 /AMP Net-_Q1-B_ 4.7k
 R4 +5V /OUT 1k
 R5 Net-_Q2-G_ 0 100k
-XU1 /AMP Net-_R1-Pad2_ /IN 0 0 Net-_U1---Pad6_ Net-_U1---Pad6_ +5V kicad_builtin_opamp_dual
+XU1 /IN Net-_U1--_ +5V 0 /AMP kicad_builtin_opamp
 .end

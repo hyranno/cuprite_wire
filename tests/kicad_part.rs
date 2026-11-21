@@ -4,7 +4,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::strings;
+use common::{check_golden, strings};
 use cuprite_wire::{
     circuit::CircuitBuilder,
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags, PinType},
@@ -54,6 +54,18 @@ kicad_part! {
         footprint: none,
         sim_model: inline,
         symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+        sim_library_dir: "crates/kicad_lib/tests/fixtures",
+    }
+}
+
+kicad_part! {
+    /// An amplifier whose V- is a stacked pin of KiCad 10 (`[4,6]`).
+    struct StackedAmp {
+        symbol: "test:STACKED_AMP",
+        pins: { "6" => "vee2" },
+        sim_model: inline,
+        symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+        footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
         sim_library_dir: "crates/kicad_lib/tests/fixtures",
     }
 }
@@ -169,6 +181,66 @@ fn test_inline_subcircuit() {
         })
         .collect();
     assert_eq!(names, ["amp", "clamp"]);
+}
+
+#[test]
+fn test_stacked_pin_notation() {
+    let amp = StackedAmp;
+    // A pin per pad, connected inside the part.
+    assert_eq!(StackedAmp::PINS, ["1", "2", "3", "5", "4", "vee2"]);
+    assert_eq!(amp.internal_connections(), vec![strings(&["4", "vee2"])]);
+    let pins = amp.kicad().unwrap().pins;
+    assert_eq!(
+        pins["vee2"],
+        KicadPinInfo::new("6", Some("V-"), PinType::PowerIn)
+    );
+    // The model connects the stacked pin once, through its first pad.
+    let Some(SpicePartInfo::Elements {
+        elements,
+        unused_pins,
+    }) = amp.spice()
+    else {
+        panic!("{:?}", amp.spice())
+    };
+    assert_eq!(elements[0].nodes, strings(&["3", "2", "5", "4", "1"]));
+    assert_eq!(unused_pins, strings(&["vee2"]));
+}
+
+/// The golden netlists of a circuit with a stacked pin: every pad of it is a node of the net, as
+/// KiCad 10 writes them (`python3 tools/compare_kicad_cli_netlist.py --library-symbols
+/// --symbol-dir crates/kicad_lib/tests/fixtures/symbols tests/golden/stacked_pins.net` with
+/// KiCad 10). Run with `UPDATE_GOLDEN=1` to (re)generate them.
+#[test]
+fn test_stacked_pin_golden() {
+    let mut circuit = CircuitBuilder::new();
+    let amp = circuit.instantiate_part_named("amp", Box::new(StackedAmp));
+    let r1 = circuit.instantiate_part_named("r1", Box::new(Resistor::new("10k")));
+    let r2 = circuit.instantiate_part_named("r2", Box::new(Resistor::new("1k")));
+    circuit.connect(amp["1"], r1["1"]);
+    circuit.connect(r1["2"], amp["2"]);
+    circuit.connect(amp["2"], r2["1"]);
+    circuit.label(r2["2"], NetLabel::global("GND"));
+    circuit.label(amp["4"], NetLabel::global("GND"));
+    circuit.label(amp["5"], NetLabel::global("VCC"));
+    circuit.label(amp["3"], NetLabel::local("IN"));
+    circuit.label(amp["1"], NetLabel::local("OUT"));
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    let mut out = Vec::new();
+    netlist
+        .to_kicad()
+        .unwrap()
+        .with_source("tests/kicad_part.rs")
+        .write(&mut out)
+        .unwrap();
+    check_golden("stacked_pins.net", &String::from_utf8(out).unwrap());
+    check_golden(
+        "stacked_pins.cir",
+        &netlist
+            .to_spice()
+            .unwrap()
+            .with_title("stacked_pins")
+            .to_string(),
+    );
 }
 
 /// The generated parts work in a circuit exported to KiCad and SPICE.

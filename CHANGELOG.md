@@ -20,6 +20,10 @@ break the API).
   `ErcRule::GroundPinNotGround` (a power pin named like a ground, such as `GND`, not on a ground
   net while another power pin of the part is), both warnings by default.
 - `Net::labeled`: whether the net name is given by a label.
+- Parts from the KiCad 10 libraries: `kicad_part!` reads KiCad 10's stacked pin notation
+  (`[2,13]`, `[1-4]`) as a pin per pad, connected inside the part, and looks up the library
+  directories in `KICAD10_SYMBOL_DIR` / `KICAD10_FOOTPRINT_DIR` before the `KICAD9_` ones. The
+  netlist stays in KiCad 9's format, which KiCad 10 reads.
 
 ### Changed
 
