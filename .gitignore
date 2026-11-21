@@ -4,6 +4,9 @@
 *_local.*
 *.local/
 
+# Personal secrets, such as a GitHub token loaded by hand
+.env
+
 # Personal devcontainer configuration
 /.devcontainer/local/
 
