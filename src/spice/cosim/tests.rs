@@ -261,6 +261,7 @@ fn test_buses() {
     let mut wakes = Vec::new();
     let mut io = DeviceIo {
         time: 0.0,
+        first: false,
         pins: &mut pins,
         wakes: &mut wakes,
     };
@@ -286,10 +287,28 @@ fn test_bus_overflow() {
     let mut wakes = Vec::new();
     let mut io = DeviceIo {
         time: 0.0,
+        first: false,
         pins: &mut pins,
         wakes: &mut wakes,
     };
     io.set_bus(["q0", "q1"], 4);
+}
+
+#[test]
+#[should_panic(expected = "the voltage of the pin \"q0\" must be between 0 V and 3.3 V: NaN")]
+fn test_set_voltage_out_of_range() {
+    let device = CosimDevice::new("mcu").output("q0", OutputCharacteristics::cmos(3.3));
+    let mut pins: Vec<PinState> = device.pins().iter().cloned().map(PinState::new).collect();
+    let mut wakes = Vec::new();
+    let mut io = DeviceIo {
+        time: 0.0,
+        first: false,
+        pins: &mut pins,
+        wakes: &mut wakes,
+    };
+    io.set_voltage("q0", 3.3);
+    io.set_voltage("q0", 0.0);
+    io.set_voltage("q0", f64::NAN);
 }
 
 #[test]
@@ -408,4 +427,81 @@ fn test_reference_above_ground() {
     let end = *table.scale().last().unwrap();
     let out = table.interpolate(LINE, end).unwrap();
     assert!((out - 4.3).abs() < 1e-3, "{out}");
+}
+
+/// Two transient analyses in one run: the time goes back to 0 at the second one, and a periodic
+/// task starts over.
+#[test]
+fn test_two_transient_analyses() {
+    struct Tick {
+        timer: super::peripherals::Periodic,
+        runs: Vec<f64>,
+        firsts: usize,
+    }
+    impl DeviceModel for Tick {
+        fn step(&mut self, io: &mut DeviceIo<'_>) {
+            if io.is_first_point() {
+                self.firsts += 1;
+            }
+            if self.timer.due(io) {
+                self.runs.push(io.time());
+            }
+        }
+    }
+    let device = CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3));
+    let deck = line_deck(
+        device,
+        "out",
+        DigitalLoad::new(InputCharacteristics::cmos(3.3)),
+        1e-6,
+    )
+    .control(["tran 10n 1u"]);
+    let mut tick = Tick {
+        timer: super::peripherals::Periodic::new(0.4e-6, 0.0),
+        runs: Vec::new(),
+        firsts: 0,
+    };
+    deck.run_with(DeviceModels::new().with("mcu", &mut tick))
+        .unwrap();
+    assert_eq!(tick.firsts, 2);
+    let [0.0, a, b, 0.0, c, d] = tick.runs[..] else {
+        panic!("{:?}", tick.runs);
+    };
+    for (run, expected) in [(a, 0.4e-6), (b, 0.8e-6), (c, 0.4e-6), (d, 0.8e-6)] {
+        assert!((run - expected).abs() < 1e-12, "{:?}", tick.runs);
+    }
+}
+
+/// With `save` leaving out the node of a pin, the pin cannot be read: an error, not 0 V.
+#[test]
+fn test_pin_not_saved() {
+    let mut circuit = CircuitBuilder::new();
+    let device = circuit
+        .instantiate_part(CosimDevice::new("mcu").input("sense", InputCharacteristics::cmos(3.3)));
+    let sense = circuit.instantiate_part(IndependentSource::voltage(2.5));
+    circuit.connect(device["sense"], sense[IndependentSource::P]);
+    circuit.label(device["sense"], NetLabel::local("SENSE"));
+    for gnd in [device[CosimDevice::GND], sense[IndependentSource::N]] {
+        circuit.label(gnd, NetLabel::global("GND"));
+    }
+    let deck = circuit
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control([r#"save i(V1)"#, "tran 10n 1u"]);
+    struct Probe;
+    impl DeviceModel for Probe {
+        fn step(&mut self, io: &mut DeviceIo<'_>) {
+            panic!("called with {} V", io.voltage("sense"));
+        }
+    }
+    match deck.run_with(DeviceModels::new().with("mcu", &mut Probe)) {
+        Err(SimulationError::Cosimulation(reason)) => {
+            assert!(reason.contains("/sense"), "{reason}")
+        }
+        other => panic!("{other:?}"),
+    }
 }

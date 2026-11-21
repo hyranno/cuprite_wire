@@ -9,7 +9,12 @@ use crate::{
 };
 
 /// Formats a number for SPICE: plain decimal for moderate magnitudes, exponent form otherwise.
+///
+/// # Panics
+/// If `value` is NaN or infinite, which ngspice cannot read.
+#[track_caller]
 pub fn spice_number(value: f64) -> String {
+    assert!(value.is_finite(), "a SPICE number must be finite: {value}");
     let magnitude = value.abs();
     if value == 0.0 || (1e-3..1e6).contains(&magnitude) {
         format!("{value}")
@@ -54,7 +59,7 @@ pub enum Waveform {
         width: f64,
         period: f64,
     },
-    /// Piecewise linear: `(time, value)` pairs in increasing time.
+    /// Piecewise linear: `(time, value)` pairs in strictly increasing time (at least one).
     Pwl(Vec<(f64, f64)>),
 }
 
@@ -69,6 +74,43 @@ impl Waveform {
             damping: 0.0,
             phase: 0.0,
         }
+    }
+
+    /// # Panics
+    /// If a number is not finite, or the points of `Pwl` are none or not in increasing time.
+    #[track_caller]
+    fn validate(&self) {
+        let values: Vec<f64> = match self {
+            Waveform::Sin {
+                offset,
+                amplitude,
+                frequency,
+                delay,
+                damping,
+                phase,
+            } => vec![*offset, *amplitude, *frequency, *delay, *damping, *phase],
+            Waveform::Pulse {
+                initial,
+                pulsed,
+                delay,
+                rise,
+                fall,
+                width,
+                period,
+            } => vec![*initial, *pulsed, *delay, *rise, *fall, *width, *period],
+            Waveform::Pwl(points) => {
+                assert!(!points.is_empty(), "a PWL waveform needs a point");
+                assert!(
+                    points.windows(2).all(|pair| pair[0].0 < pair[1].0),
+                    "the times of a PWL waveform must increase: {points:?}"
+                );
+                points.iter().flat_map(|&(t, v)| [t, v]).collect()
+            }
+        };
+        assert!(
+            values.iter().all(|v| v.is_finite()),
+            "the numbers of a waveform must be finite: {self:?}"
+        );
     }
 
     pub(crate) fn to_spice(&self) -> String {
@@ -123,15 +165,23 @@ impl IndependentSource {
     /// The negative pin.
     pub const N: &'static str = "n";
 
+    /// # Panics
+    /// If `dc` is not finite.
+    #[track_caller]
     pub fn voltage(dc: f64) -> Box<Self> {
-        Box::new(IndependentSource {
+        let source = Box::new(IndependentSource {
             kind: SourceKind::Voltage,
             dc,
             ac: None,
             waveform: None,
-        })
+        });
+        source.validate();
+        source
     }
 
+    /// # Panics
+    /// If `dc` is not finite.
+    #[track_caller]
     pub fn current(dc: f64) -> Box<Self> {
         Box::new(IndependentSource {
             kind: SourceKind::Current,
@@ -139,14 +189,37 @@ impl IndependentSource {
         })
     }
 
+    /// # Panics
+    /// If `magnitude` is not finite.
+    #[track_caller]
     pub fn with_ac(mut self: Box<Self>, magnitude: f64) -> Box<Self> {
         self.ac = Some(magnitude);
+        self.validate();
         self
     }
 
+    /// # Panics
+    /// As [`Waveform`]'s numbers are not finite, or the points of `Pwl` are none or not in
+    /// increasing time.
+    #[track_caller]
     pub fn with_waveform(mut self: Box<Self>, waveform: Waveform) -> Box<Self> {
         self.waveform = Some(waveform);
+        self.validate();
         self
+    }
+
+    /// Checks the values, also when the netlist is written (the fields are public).
+    #[track_caller]
+    fn validate(&self) {
+        assert!(
+            self.dc.is_finite() && self.ac.is_none_or(f64::is_finite),
+            "the values of a source must be finite: DC {}, AC {:?}",
+            self.dc,
+            self.ac
+        );
+        if let Some(waveform) = &self.waveform {
+            waveform.validate();
+        }
     }
 
     fn device(&self) -> char {
@@ -157,6 +230,7 @@ impl IndependentSource {
     }
 
     fn args(&self) -> String {
+        self.validate();
         let mut args = format!("DC {}", spice_number(self.dc));
         if let Some(ac) = self.ac {
             args.push_str(&format!(" AC {}", spice_number(ac)));
@@ -231,6 +305,40 @@ mod tests {
         assert_eq!(spice_number(0.001), "0.001");
         assert_eq!(spice_number(1e-9), "1e-9");
         assert_eq!(spice_number(2.5e6), "2.5e6");
+    }
+
+    #[test]
+    #[should_panic(expected = "a SPICE number must be finite: NaN")]
+    fn test_spice_number_nan() {
+        spice_number(f64::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "the values of a source must be finite")]
+    fn test_source_infinite() {
+        IndependentSource::voltage(0.0).with_ac(f64::INFINITY);
+    }
+
+    #[test]
+    #[should_panic(expected = "the times of a PWL waveform must increase")]
+    fn test_pwl_not_increasing() {
+        IndependentSource::voltage(0.0)
+            .with_waveform(Waveform::Pwl(vec![(1e-6, 0.0), (1e-6, 1.0)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "the numbers of a waveform must be finite")]
+    fn test_waveform_nan() {
+        IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 1.0, f64::NAN));
+    }
+
+    /// The fields are public: they are checked again when the netlist is written.
+    #[test]
+    #[should_panic(expected = "the values of a source must be finite")]
+    fn test_source_field_changed() {
+        let mut source = IndependentSource::voltage(0.0);
+        source.dc = f64::NAN;
+        source.spice();
     }
 
     #[test]

@@ -54,12 +54,13 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
 | Method | |
 |---|---|
 | `time()` | the time of the point, in seconds |
+| `is_first_point()` | whether this is the first point of the transient analysis (time 0) |
 | `voltage(pin)` | the voltage of the pin relative to `gnd` (an analog input) |
 | `read(pin)` | the level an input reads, with its thresholds and hysteresis |
 | `rose(pin)` / `fell(pin)` | whether the input changed to high / low since the accepted point before |
 | `read_bus(pins)` | the levels of the inputs as a `u32`, the first pin as bit 0 |
 | `set(pin, Level)` | drives an output `Low`, `High` or `HiZ` |
-| `set_voltage(pin, volts)` | drives an output to a voltage (a DAC) |
+| `set_voltage(pin, volts)` | drives an output to a voltage between its `low` and `high` levels (a DAC) |
 | `set_bus(pins, value)` | drives the outputs to the bits of `value`, the first pin as bit 0 |
 | `wake_at(time)` | asks for an accepted point at `time` |
 
@@ -102,7 +103,14 @@ impl DeviceModel for Sram {
   point too; a pulse shorter than the time between two points can be missed.
 - Outputs start `Low` and bidirectional pins `HiZ` until the model sets them. The operating point
   before the transient analysis is computed with these levels. Other analyses (`op`, `ac`, `dc`) see
-  the outputs as they are and do not call the models; use one transient analysis per run.
+  the outputs as they are and do not call the models.
+- A run with several transient analyses starts each from time 0 with the pins as above. The model
+  is not reset: reset its state when `io.is_first_point()` is true. `Periodic` and `Pwm` start
+  over by themselves, and `Firmware` of `cuprite_wire_embedded_hal` drives the outputs the firmware
+  has set to their levels again (the firmware's own state is kept).
+- The models read the voltages of the pins from the results of the analysis. A `save` command that
+  leaves out the node of a pin (or of `gnd`) makes `run_with` return
+  `SimulationError::Cosimulation`, and the models are not called.
 - A panic in a model (e.g. an `assert!` or an unknown pin name) is resumed by `run_with` after the
   run, so it fails the test as usual; the models are not called after it.
 

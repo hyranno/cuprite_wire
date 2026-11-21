@@ -63,9 +63,20 @@ struct State {
     inputs: Vec<(String, bool)>,
     /// Each ADC: (converter, the code converted at the step).
     adcs: Vec<(Adc, u16)>,
-    /// Each output: (pin name, the level set, whether it was set during the step).
-    outputs: Vec<(String, Level, bool)>,
+    outputs: Vec<Output>,
     pwms: Vec<Pwm>,
+}
+
+/// A digital output of a [`Board`].
+#[derive(Debug)]
+struct Output {
+    pin: String,
+    /// The level set last.
+    level: Level,
+    /// Whether it was set during the step.
+    changed: bool,
+    /// Whether it has ever been set.
+    driven: bool,
 }
 
 /// The pins of a [`CosimDevice`](cuprite_wire::spice::cosim::CosimDevice) as `embedded-hal`
@@ -95,7 +106,12 @@ impl Board {
     /// It drives `Low` until it is set.
     pub fn output_pin(&self, pin: &str) -> OutputPinHandle {
         let mut state = self.state.borrow_mut();
-        state.outputs.push((pin.to_string(), Level::Low, false));
+        state.outputs.push(Output {
+            pin: pin.to_string(),
+            level: Level::Low,
+            changed: false,
+            driven: false,
+        });
         OutputPinHandle {
             state: self.state.clone(),
             index: state.outputs.len() - 1,
@@ -150,12 +166,20 @@ impl Board {
         }
     }
 
+    /// At the first point of a transient analysis, the pins of the device start over (`Low` or
+    /// `HiZ`): drives the outputs that have been set to their levels again.
+    fn restart(&self) {
+        for output in &mut self.state.borrow_mut().outputs {
+            output.changed |= output.driven;
+        }
+    }
+
     /// Drives the outputs set during the step, and the PWM channels.
     fn apply(&self, io: &mut DeviceIo<'_>) {
         let mut state = self.state.borrow_mut();
-        for (pin, level, changed) in &mut state.outputs {
-            if std::mem::take(changed) {
-                io.set(pin, *level);
+        for output in &mut state.outputs {
+            if std::mem::take(&mut output.changed) {
+                io.set(&output.pin, output.level);
             }
         }
         for pwm in &mut state.pwms {
@@ -166,6 +190,10 @@ impl Board {
 
 /// A firmware running as a periodic task: a [`DeviceModel`] calling `step(&mut task)` every
 /// `period` seconds from time 0, with the pins of `board`.
+///
+/// A run with several transient analyses runs the firmware from time 0 in each, without resetting
+/// `task`: the firmware goes on as if the time had jumped back, and the outputs it has set are
+/// driven to their levels again.
 pub struct Firmware<T, F> {
     board: Board,
     timer: Periodic,
@@ -198,6 +226,9 @@ impl<T, F: FnMut(&mut T)> Firmware<T, F> {
 
 impl<T, F: FnMut(&mut T)> DeviceModel for Firmware<T, F> {
     fn step(&mut self, io: &mut DeviceIo<'_>) {
+        if io.is_first_point() {
+            self.board.restart();
+        }
         if self.timer.due(io) {
             self.board.capture(io);
             (self.step)(&mut self.task);
@@ -238,8 +269,9 @@ impl OutputPinHandle {
     fn set(&mut self, level: Level) {
         let mut state = self.state.borrow_mut();
         let output = &mut state.outputs[self.index];
-        output.1 = level;
-        output.2 = true;
+        output.level = level;
+        output.changed = true;
+        output.driven = true;
     }
 }
 
@@ -261,7 +293,7 @@ impl digital::OutputPin for OutputPinHandle {
 
 impl digital::StatefulOutputPin for OutputPinHandle {
     fn is_set_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.state.borrow().outputs[self.index].1 == Level::High)
+        Ok(self.state.borrow().outputs[self.index].level == Level::High)
     }
 
     fn is_set_low(&mut self) -> Result<bool, Infallible> {
@@ -302,7 +334,7 @@ pub struct AdcPin {
 
 impl AdcChannel for AdcPin {
     fn bits(&self) -> u32 {
-        self.state.borrow().adcs[self.index].0.bits
+        self.state.borrow().adcs[self.index].0.bits()
     }
 
     fn read(&mut self) -> u16 {

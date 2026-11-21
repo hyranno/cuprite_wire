@@ -85,6 +85,23 @@ impl DeviceRun<'_> {
         }
         self.started = false;
     }
+
+    /// The first node of a pin (or `gnd`) that is not ground and has no vector in the plot,
+    /// e.g. left out by `save`.
+    fn missing_node(&self) -> Option<String> {
+        let pins = self.pins.iter().map(|pin| pin.pin.name.as_str());
+        let (pin, node) = pins
+            .chain(["gnd"])
+            .zip(&self.nodes)
+            .zip(&self.vectors)
+            .find(|((_, node), vector)| *node != GROUND && vector.is_none())?
+            .0;
+        Some(format!(
+            "the node {node:?} of the pin {pin:?} of the device {:?} is not in the results \
+             (a `save` must include it)",
+            self.name
+        ))
+    }
 }
 
 /// Which source of an output pin.
@@ -102,9 +119,17 @@ pub(crate) struct CosimSession<'m> {
     /// The index of the `time` vector, in a transient analysis.
     time: Option<usize>,
     wakes: Vec<f64>,
+    /// Why the models cannot be run (a node of a pin is not in the plot); the models are not
+    /// called after it.
+    error: Option<String>,
 }
 
 impl<'m> CosimSession<'m> {
+    /// Why the models could not be run, after the run.
+    pub(crate) fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
     /// Binds the models to the devices of a netlist by name.
     pub(crate) fn new(
         instances: &[CosimInstance],
@@ -171,6 +196,7 @@ impl<'m> CosimSession<'m> {
             sources,
             time: None,
             wakes: Vec::new(),
+            error: None,
         })
     }
 }
@@ -196,6 +222,9 @@ impl Session for CosimSession<'_> {
                 .collect();
             if transient {
                 device.reset();
+                if self.error.is_none() {
+                    self.error = device.missing_node();
+                }
             }
         }
     }
@@ -204,6 +233,9 @@ impl Session for CosimSession<'_> {
         let Some(time) = self.time.and_then(|i| values.get(i).copied()) else {
             return;
         };
+        if self.error.is_some() {
+            return;
+        }
         for device in &mut self.devices {
             let voltage = |vector: Option<usize>| vector.and_then(|i| values.get(i)).copied();
             let gnd = voltage(*device.vectors.last().expect("gnd is a node")).unwrap_or(0.0);
@@ -220,10 +252,11 @@ impl Session for CosimSession<'_> {
                 }
                 pin.request = None;
             }
-            device.started = true;
+            let first = !std::mem::replace(&mut device.started, true);
             self.wakes.clear();
             device.model.step(&mut DeviceIo {
                 time,
+                first,
                 pins: &mut device.pins,
                 wakes: &mut self.wakes,
             });
