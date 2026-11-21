@@ -5,6 +5,8 @@
 
 use std::fmt::{self, Display, Write};
 
+use cuprite_wire_kicad_lib::sexpr::ESCAPES;
+
 /// An S-expression node.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SExpr {
@@ -107,13 +109,12 @@ impl Display for SExpr {
 fn write_quoted(out: &mut impl Write, value: &str) -> fmt::Result {
     out.write_char('"')?;
     for c in value.chars() {
-        match c {
-            '"' => out.write_str("\\\"")?,
-            '\\' => out.write_str("\\\\")?,
-            '\n' => out.write_str("\\n")?,
-            '\r' => out.write_str("\\r")?,
-            '\t' => out.write_str("\\t")?,
-            c => out.write_char(c)?,
+        match ESCAPES.iter().find(|(_, unescaped)| *unescaped == c) {
+            Some(&(escaped, _)) => {
+                out.write_char('\\')?;
+                out.write_char(escaped)?;
+            }
+            None => out.write_char(c)?,
         }
     }
     out.write_char('"')
@@ -201,5 +202,13 @@ mod tests {
             SExpr::node("c", [SExpr::node("d", [SExpr::kv("e", "f")])]),
         ]);
         assert_eq!(expr.to_string(), "(a \"b\"\n  (c\n    (d (e \"f\"))))");
+    }
+
+    #[test]
+    fn test_kicad_lib_reads_written_strings() {
+        let value = "a \"b\" \\ c\nd\re\tf (g)";
+        let text = SExpr::string(value).to_string();
+        let read = cuprite_wire_kicad_lib::sexpr::parse(&text).unwrap();
+        assert_eq!(read.text(), Some(value));
     }
 }

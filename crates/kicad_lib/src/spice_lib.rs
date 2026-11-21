@@ -13,9 +13,14 @@
 
 use crate::Error;
 
-/// The SPICE dialect a library is written in, which selects the compatibility mode of ngspice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// The SPICE dialect a model is written in. Models in another dialect than ngspice's make
+/// ngspice run in a compatibility mode (`set ngbehavior=...`; see [`Dialect::ngbehavior`]).
+///
+/// ngspice 44 translates PSpice's `IF(...)`, `&`, `|`, `STP(...)`, `LIMIT(...)` and `.LIB file`
+/// in its PSpice mode, and LTspice's `uplim(...)` / `dnlim(...)` in its LTspice mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum Dialect {
+    #[default]
     Ngspice,
     Pspice,
     Ltspice,
@@ -28,6 +33,33 @@ impl Dialect {
             Dialect::Pspice => "pspice",
             Dialect::Ltspice => "ltspice",
         }
+    }
+
+    /// The value of ngspice's `ngbehavior` for models in these dialects, each with whether it is
+    /// written into the deck (inline) rather than included: `None` (the default mode) for ngspice's
+    /// own dialect, else `ps`, `lt` or `ltps`, followed by `a` if a model is inline.
+    ///
+    /// Without `a`, ngspice translates only the included files, which keeps the rest of the deck
+    /// in its own dialect (e.g. a `$` after whitespace starts a comment only in the default mode).
+    pub fn ngbehavior(models: impl IntoIterator<Item = (Dialect, bool)>) -> Option<&'static str> {
+        let (mut pspice, mut ltspice, mut all) = (false, false, false);
+        for (dialect, inline) in models {
+            match dialect {
+                Dialect::Ngspice => continue,
+                Dialect::Pspice => pspice = true,
+                Dialect::Ltspice => ltspice = true,
+            }
+            all |= inline;
+        }
+        Some(match (pspice, ltspice, all) {
+            (false, false, _) => return None,
+            (true, false, false) => "ps",
+            (true, false, true) => "psa",
+            (false, true, false) => "lt",
+            (false, true, true) => "lta",
+            (true, true, false) => "ltps",
+            (true, true, true) => "ltpsa",
+        })
     }
 }
 
@@ -880,5 +912,24 @@ R1 a b 1k
         let lib = SpiceLib::parse(".subckt a x y\r\n.ends a\r\n").unwrap();
         assert_eq!(subckt(lib.find("a").unwrap()).0, ["x", "y"]);
         assert_eq!(lib.find("a").unwrap().text, ".subckt a x y\n.ends a\n");
+    }
+
+    #[test]
+    fn test_ngbehavior() {
+        use Dialect::*;
+        assert_eq!(
+            Dialect::ngbehavior([(Ngspice, false), (Ngspice, true)]),
+            None
+        );
+        assert_eq!(
+            Dialect::ngbehavior([(Ngspice, true), (Pspice, false)]),
+            Some("ps")
+        );
+        assert_eq!(Dialect::ngbehavior([(Pspice, true)]), Some("psa"));
+        assert_eq!(Dialect::ngbehavior([(Ltspice, false)]), Some("lt"));
+        assert_eq!(
+            Dialect::ngbehavior([(Ltspice, false), (Pspice, true), (Ngspice, false)]),
+            Some("ltpsa")
+        );
     }
 }

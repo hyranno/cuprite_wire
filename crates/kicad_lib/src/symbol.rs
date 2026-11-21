@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     Error,
+    naming::natural_cmp,
     sexpr::{self, Sexpr},
 };
 
@@ -284,36 +285,6 @@ fn parse_pin(pin: &Sexpr, unit: u32) -> Result<Pin, Error> {
     })
 }
 
-/// Orders strings with embedded numbers naturally (`2` < `10`, `A2` < `A10`).
-pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    fn chunks(s: &str) -> Vec<(bool, &str)> {
-        let mut out = Vec::new();
-        let mut start = 0;
-        let bytes = s.as_bytes();
-        for i in 1..=bytes.len() {
-            if i == bytes.len() || bytes[i].is_ascii_digit() != bytes[start].is_ascii_digit() {
-                out.push((bytes[start].is_ascii_digit(), &s[start..i]));
-                start = i;
-            }
-        }
-        out
-    }
-    let (ca, cb) = (chunks(a), chunks(b));
-    for (x, y) in ca.iter().zip(&cb) {
-        let ordering = match (x, y) {
-            ((true, x), (true, y)) => {
-                let (x, y) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
-                x.len().cmp(&y.len()).then_with(|| x.cmp(y))
-            }
-            ((_, x), (_, y)) => x.cmp(y),
-        };
-        if ordering.is_ne() {
-            return ordering;
-        }
-    }
-    ca.len().cmp(&cb.len()).then_with(|| a.cmp(b))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,12 +357,5 @@ mod tests {
                 .to_string()
                 .contains("defined twice")
         );
-    }
-
-    #[test]
-    fn test_natural_cmp() {
-        let mut v = vec!["10", "2", "A10", "A2", "B1", "1"];
-        v.sort_by(|a, b| natural_cmp(a, b));
-        assert_eq!(v, ["1", "2", "10", "A2", "A10", "B1"]);
     }
 }

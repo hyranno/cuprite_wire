@@ -6,6 +6,7 @@
 
 pub mod binding;
 pub mod footprint;
+pub mod naming;
 pub mod part;
 pub mod resolve;
 pub mod sexpr;

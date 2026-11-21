@@ -158,14 +158,7 @@ pub fn bind(
             field: BindingField::Suffix,
             error: Error::new(message),
         };
-        if !suffix
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err(error(format!(
-                "suffix {suffix:?} may only contain ASCII letters, digits and '_'"
-            )));
-        }
+        crate::naming::check_element_suffix(suffix).map_err(error)?;
         if !suffixes.insert(suffix.to_ascii_uppercase()) {
             return Err(error(if bindings.len() > 1 && suffix.is_empty() {
                 "give each model a distinct `suffix` (e.g. \"A\", \"B\")".into()

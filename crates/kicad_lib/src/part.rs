@@ -6,41 +6,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{
     Error,
     binding::{self, BindOptions, BindingField, ModelBinding, PartPin, PartPins},
+    naming::LibId,
     resolve::Resolver,
     sim::{self, ModelMode, SimInput, SpiceDef, Value},
     symbol::{ElectricalType, Symbol},
 };
-
-/// A `Library:Name` identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LibId {
-    pub library: String,
-    pub name: String,
-}
-
-impl LibId {
-    pub fn parse(text: &str) -> Result<Self, Error> {
-        match text.split_once(':') {
-            Some((library, name))
-                if !library.is_empty() && !name.is_empty() && !name.contains(':') =>
-            {
-                Ok(LibId {
-                    library: library.to_string(),
-                    name: name.to_string(),
-                })
-            }
-            _ => Err(Error::new(format!(
-                "expected 'Library:Name', found {text:?}"
-            ))),
-        }
-    }
-}
-
-impl std::fmt::Display for LibId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.library, self.name)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FootprintOption {
@@ -187,11 +157,14 @@ pub struct KicadDef {
 pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartDef, PartError> {
     use OptionKey::*;
     let common = &options.common;
-    let symbol_id = LibId::parse(&options.symbol).map_err(at(Symbol))?;
+    let symbol_id = options
+        .symbol
+        .parse::<LibId>()
+        .map_err(|e| at(Symbol)(e.into()))?;
     let lib = resolver
-        .symbol_lib(&symbol_id.library)
+        .symbol_lib(symbol_id.library())
         .map_err(at(Symbol))?;
-    let symbol = lib.symbol(&symbol_id.name).map_err(at(Symbol))?;
+    let symbol = lib.symbol(symbol_id.name()).map_err(at(Symbol))?;
     check_symbol(&symbol).map_err(at(Symbol))?;
 
     let ref_base = match &common.ref_base {
@@ -373,9 +346,9 @@ fn footprint(
             return Ok(None);
         }
     };
-    let id = LibId::parse(&text).map_err(at(Footprint))?;
+    let id = text.parse::<LibId>().map_err(|e| at(Footprint)(e.into()))?;
     let pads = resolver
-        .footprint(&id.library, &id.name)
+        .footprint(id.library(), id.name())
         .map_err(at(Footprint))?;
     let missing: Vec<&str> = symbol
         .pins
