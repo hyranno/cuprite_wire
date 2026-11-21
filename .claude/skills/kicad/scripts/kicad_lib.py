@@ -28,6 +28,10 @@ FP_DIR = Path(os.environ.get("KICAD9_FOOTPRINT_DIR", "/usr/share/kicad/footprint
 _TOKEN = re.compile(r'\s*(?:(\()|(\))|"((?:[^"\\]|\\.)*)"|([^\s()"]+))', re.S)
 
 
+# Escapes in quoted strings (the rest stand for the character itself), as KiCad reads them.
+_ESCAPES = {"n": "\n", "r": "\r", "t": "\t"}
+
+
 class Str(str):
     """A quoted string atom (distinguished from bare symbols)."""
 
@@ -42,7 +46,8 @@ def parse_sexpr(text: str):
             done = stack.pop()
             stack[-1].append(done)
         elif quoted is not None:
-            stack[-1].append(Str(re.sub(r"\\(.)", r"\1", quoted)))
+            text = re.sub(r"\\(.)", lambda e: _ESCAPES.get(e.group(1), e.group(1)), quoted, flags=re.S)
+            stack[-1].append(Str(text))
         elif atom is not None:
             stack[-1].append(atom)
     return stack[0]
