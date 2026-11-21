@@ -209,6 +209,10 @@ circuit, through ngspice's `d_cosim` code model. It needs no feature and runs wi
 (`deck.run()`), so it fits HDL designs and digital models written in C. The library implements
 `Cosim_setup` of `cosim.h` (shipped with ngspice in `/usr/share/ngspice/scripts/src/ngspice/`).
 
+This section is supported on Linux only (the Rust models of sections 1 to 5 run on Windows and
+macOS too). The libraries are built with the compilers and ngspice's sources of a Linux
+installation; on Windows, use WSL 2 or the devcontainer.
+
 ```rust
 use cuprite_wire::spice::{digital::*, xspice::DCosim};
 
@@ -252,7 +256,8 @@ let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristic
 - The build runs `verilator --cc` (C++ with the class prefix `Vlng`), reads the ports from the
   generated class, and compiles the design with ngspice's `verilator_shim.cpp` and
   `verilator_main.cpp` (`DEFAULT_SHIM_DIR`, `/usr/share/ngspice/scripts/src`) into a shared library
-  with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them).
+  with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them). A missing
+  program or shim is reported as `VerilatorError::Io` that names it (and `shim_dir`, for the shim).
 - Builds take a few seconds and are cached by the contents of the sources, the arguments, the
   current directory and the version of Verilator, in `cuprite_wire-verilator` in the temporary
   directory (`cache_dir` to change it). The files Verilator read in besides the sources

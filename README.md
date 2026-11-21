@@ -78,9 +78,22 @@ fits your project and your team.
   (the netlist is written in KiCad 9's format, which KiCad 10 reads)
 - ngspice (44 or later) for the simulations
 
-The devcontainer in `.devcontainer/` has all of them. CI also runs the tests on Windows (ngspice
-from MSYS2) and macOS (ngspice from Homebrew), except the XSPICE tests building code models with
-gcc and Verilator, which expect ngspice's files in `/usr/share/ngspice`.
+The devcontainer in `.devcontainer/` has all of them.
+
+### Platforms
+
+| Feature | Linux | Windows, macOS |
+|---|---|---|
+| circuits, ERC, `kicad_part!`, KiCad netlist | ✅ | ✅ |
+| SPICE simulation (ngspice CLI and shared library) | ✅ | ✅ |
+| co-simulation with Rust models (`embedded-hal` too) | ✅ | ✅ |
+| XSPICE `d_cosim` models built with gcc or Verilator | ✅ | not supported |
+
+CI runs the tests on Linux (the devcontainer), Windows (ngspice from MSYS2) and macOS (ngspice from
+Homebrew). Building digital models into shared libraries for XSPICE (C code models, Verilog with
+Verilator) is supported on Linux only, where ngspice, Verilator and gcc are installed together; on
+Windows, use WSL 2 or the devcontainer for it. Outside Linux, `Verilator::build` reports a missing
+program or shim with this note.
 
 ## Documentation
 

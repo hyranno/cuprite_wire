@@ -146,7 +146,7 @@ fn test_quote_in_argument() {
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+    ignore = "builds code models with gcc, supported on Linux only"
 )]
 fn test_simulate_inverter() {
     let (_dir, library) = build_library("inverter");
@@ -196,7 +196,7 @@ fn test_simulate_inverter() {
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+    ignore = "builds code models with gcc, supported on Linux only"
 )]
 fn test_simulate_oscillator() {
     let (_dir, library) = build_library("oscillator");
@@ -231,7 +231,7 @@ fn test_simulate_oscillator() {
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+    ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_simulate_verilog_counter() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice/counter.v");
@@ -311,7 +311,7 @@ fn staging_dirs(cache: &Path) -> Vec<String> {
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+    ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_error() {
     let dir = TestDir::new("broken");
@@ -336,7 +336,7 @@ fn test_verilator_error() {
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+    ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_port_error() {
     let dir = TestDir::new("gnd-port");
@@ -358,13 +358,80 @@ fn test_verilator_port_error() {
     assert_eq!(staging_dirs(&cache), Vec::<String>::new());
 }
 
+/// A Verilog buffer in `dir`.
+fn write_buffer(dir: &Path) -> PathBuf {
+    let source = dir.join("buffer.v");
+    std::fs::write(
+        &source,
+        "module buffer(input a, output y);\n  assign y = a;\nendmodule\n",
+    )
+    .unwrap();
+    source
+}
+
+/// A missing shim is reported with the setting to change, before Verilator is run (outside Linux
+/// with the note that the build is supported on Linux only).
+#[test]
+fn test_verilator_missing_shim() {
+    let dir = TestDir::new("missing-shim");
+    let source = write_buffer(&dir);
+    let error = Verilator::new([&source])
+        .program(dir.join("no-such-verilator"))
+        .shim_dir(dir.join("no-such-shim"))
+        .cache_dir(dir.join("cache"))
+        .build()
+        .unwrap_err();
+    let message = error.to_string();
+    assert!(
+        matches!(&error, VerilatorError::Io(e) if e.kind() == std::io::ErrorKind::NotFound),
+        "{message}"
+    );
+    assert!(
+        message.contains("verilator_shim.cpp") && message.contains("`shim_dir`"),
+        "{message}"
+    );
+    assert_eq!(
+        message.contains("Linux only"),
+        cfg!(not(target_os = "linux")),
+        "{message}"
+    );
+}
+
+/// A missing Verilator is reported with its name (outside Linux with the note that the build is
+/// supported on Linux only).
+#[test]
+fn test_verilator_missing_program() {
+    let dir = TestDir::new("missing-verilator");
+    let source = write_buffer(&dir);
+    let shim = dir.join("shim");
+    std::fs::create_dir(&shim).unwrap();
+    std::fs::write(shim.join("verilator_shim.cpp"), "").unwrap();
+    std::fs::write(shim.join("verilator_main.cpp"), "").unwrap();
+    let error = Verilator::new([&source])
+        .program(dir.join("no-such-verilator"))
+        .shim_dir(&shim)
+        .cache_dir(dir.join("cache"))
+        .build()
+        .unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("cannot run") && message.contains("no-such-verilator"),
+        "{message}"
+    );
+    assert_eq!(
+        message.contains("Linux only"),
+        cfg!(not(target_os = "linux")),
+        "{message}"
+    );
+}
+
 /// Relative paths are resolved against the current directory: the sources, the cache directory
 /// (the library is absolute) and the include directories in the arguments. A change to an
 /// included file is a new build.
 #[test]
 #[cfg_attr(
     not(target_os = "linux"),
-    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+    ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_relative_paths_and_includes() {
     let dir = TestDir::new("include");
