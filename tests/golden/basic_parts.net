@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "src/basic.rs") (tool "cuprite_wire 0.1.0"))
+  (design (source "src/basic.rs") (tool "cuprite_wire 0.2.0"))
   (components
     (comp (ref "C1")
       (value "100n")
