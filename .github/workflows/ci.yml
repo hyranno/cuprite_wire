@@ -70,14 +70,10 @@ jobs:
           - kicad: 9
             image: rust:trixie
             packages: kicad-symbols kicad-footprints
-            features: kicad-libraries,shared-ngspice
           # The base image of the devcontainer, with the KiCad 10 libraries; Rust is installed below.
-          # tests/kicad_libraries.rs uses Device:Opamp_Dual, which KiCad 10 moved to
-          # Amplifier_Operational, so the kicad-libraries feature is left out for now.
           - kicad: 10
             image: kicad/kicad:10.0
             packages: build-essential ca-certificates curl
-            features: shared-ngspice
     container:
       image: ${{ matrix.image }}
       # kicad/kicad runs as the user `kicad` by default.
@@ -100,6 +96,6 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: kicad${{ matrix.kicad }}
-      - run: cargo test --workspace --features ${{ matrix.features }}
+      - run: cargo test --workspace --features kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored
