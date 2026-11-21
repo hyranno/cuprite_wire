@@ -10,7 +10,9 @@ use std::{
 };
 
 use super::DCosim;
-use crate::spice::digital::{InputCharacteristics, OutputCharacteristics, fnv1a};
+use crate::spice::digital::{
+    InputCharacteristics, OutputCharacteristics, check_subcircuit_pin, fnv1a,
+};
 
 /// Where ngspice installs `verilator_shim.cpp`, `verilator_main.cpp` and the headers they include.
 pub const DEFAULT_SHIM_DIR: &str = "/usr/share/ngspice/scripts/src";
@@ -79,18 +81,26 @@ impl Verilator {
     }
 
     /// Builds the design, or takes it from the cache.
+    ///
+    /// Relative paths (the sources, the shim and cache directories, and the paths in the
+    /// arguments) are resolved against the current directory, which is part of the cache key.
     pub fn build(&self) -> Result<VerilatedModel, VerilatorError> {
-        let dir = self.cache_dir.join(format!("{:016x}", self.key()?));
+        let this = self.absolute()?;
+        let dir = this.cache_dir.join(format!("{:016x}", this.key()?));
         let library = dir.join("libmodel.so");
-        if !library.exists() {
-            fs::create_dir_all(&self.cache_dir)?;
-            let staging = staging_dir(&self.cache_dir)?;
-            // On failure the staging directory is kept for inspection; the error names it.
-            self.build_in(&staging)?;
-            // Another build of the same key may have finished first; either is fine.
-            if fs::rename(&staging, &dir).is_err() {
-                let _ = fs::remove_dir_all(&staging);
+        if !library.exists() || !inputs_unchanged(&dir) {
+            fs::create_dir_all(&this.cache_dir)?;
+            let mut staging = Staging::new(&this.cache_dir)?;
+            match this.build_in(&staging.dir) {
+                Ok(()) => {}
+                Err(e @ VerilatorError::Command { .. }) => {
+                    // Kept for inspection; the error names it.
+                    staging.keep = true;
+                    return Err(e);
+                }
+                Err(e) => return Err(e),
             }
+            staging.install(&dir);
         }
         let header = fs::read_to_string(dir.join("obj").join(format!("{PREFIX}.h")))?;
         let (inputs, outputs) = read_ports(&header)?;
@@ -101,10 +111,30 @@ impl Verilator {
         })
     }
 
-    /// The cache key: the version of Verilator, the shim, the sources and the arguments.
+    /// The builder with absolute paths. The commands run in the current directory, but `make`
+    /// runs in the object directory, so the shim directory must be absolute, and [`DCosim::new`]
+    /// takes an absolute library.
+    fn absolute(&self) -> io::Result<Self> {
+        Ok(Verilator {
+            sources: self
+                .sources
+                .iter()
+                .map(std::path::absolute)
+                .collect::<io::Result<_>>()?,
+            args: self.args.clone(),
+            program: self.program.clone(),
+            shim_dir: std::path::absolute(&self.shim_dir)?,
+            cache_dir: std::path::absolute(&self.cache_dir)?,
+        })
+    }
+
+    /// The cache key: the version of Verilator, the shim, the sources, the arguments and the
+    /// current directory (which relative paths in the arguments are resolved against). Files that
+    /// the sources and arguments read in (`` `include ``, `-y`, `-f`) are checked against the
+    /// record of the build ([`inputs_unchanged`]).
     fn key(&self) -> Result<u64, VerilatorError> {
-        let version = self.run(Command::new(&self.program).arg("--version"), Path::new("."))?;
-        let mut text = version;
+        let cwd = std::env::current_dir()?;
+        let mut text = self.run(Command::new(&self.program).arg("--version"), &cwd)?;
         for file in [
             self.shim_dir.join("verilator_shim.cpp"),
             self.shim_dir.join("verilator_main.cpp"),
@@ -123,10 +153,12 @@ impl Verilator {
             text.push('\0');
             text.push_str(arg);
         }
+        text.push('\0');
+        text.push_str(&cwd.display().to_string());
         Ok(fnv1a(text.as_bytes()))
     }
 
-    /// The steps of `vlnggen`, in `dir`.
+    /// The steps of `vlnggen`, building in `dir`.
     fn build_in(&self, dir: &Path) -> Result<(), VerilatorError> {
         let obj = dir.join("obj");
         let verilator = || {
@@ -173,12 +205,15 @@ impl Verilator {
             .args(["-pthread", "-lpthread", "-o"])
             .arg(dir.join("libmodel.so"));
         self.run(&mut link, dir)?;
+
+        let files = fs::read_to_string(obj.join(format!("{PREFIX}__verFiles.dat")))?;
+        fs::write(dir.join(INPUTS), record_inputs(&files)?)?;
         Ok(())
     }
 
-    /// Runs a command in `dir`; its output, or an error with it.
+    /// Runs a command in the current directory; its output, or an error with it that names `dir`
+    /// (the build directory).
     fn run(&self, command: &mut Command, dir: &Path) -> Result<String, VerilatorError> {
-        command.current_dir(dir);
         let output = command.output().map_err(|e| {
             io::Error::new(
                 e.kind(),
@@ -205,18 +240,104 @@ impl Verilator {
     }
 }
 
-/// A new directory to build in, renamed to its key when the build succeeds.
-fn staging_dir(parent: &Path) -> io::Result<PathBuf> {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    loop {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = parent.join(format!("build-{}-{n}", std::process::id()));
-        match fs::create_dir(&dir) {
-            Ok(()) => return Ok(dir),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+/// A new directory to build in, removed when dropped unless kept or installed.
+struct Staging {
+    dir: PathBuf,
+    keep: bool,
+}
+
+impl Staging {
+    fn new(parent: &Path) -> io::Result<Self> {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        loop {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let dir = parent.join(format!("build-{}-{n}", std::process::id()));
+            match fs::create_dir(&dir) {
+                Ok(()) => return Ok(Staging { dir, keep: false }),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
         }
     }
+
+    /// Moves the build to `dir`, replacing an outdated build there. Another build of the same
+    /// key may have been installed first; either is fine.
+    fn install(mut self, dir: &Path) {
+        if dir.exists() && !inputs_unchanged(dir) {
+            // A library already loaded keeps working after it is removed.
+            let _ = fs::remove_dir_all(dir);
+        }
+        if fs::rename(&self.dir, dir).is_ok() {
+            self.keep = true;
+        }
+    }
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+}
+
+/// The file of a build that records the files Verilator read: `<size> <mtime s> <mtime ns>
+/// <absolute path>` per line.
+const INPUTS: &str = "inputs";
+
+/// The record of the inputs ([`INPUTS`]) from Verilator's `<prefix>__verFiles.dat`, whose lines
+/// `S <size> <ino> <ctime s> <ctime ns> <mtime s> <mtime ns> "<path>"` are the files it read
+/// (the sources, the files they include, Verilator itself), with paths relative to the current
+/// directory.
+fn record_inputs(files: &str) -> io::Result<String> {
+    let mut record = String::new();
+    for line in files.lines() {
+        let Some(rest) = line.strip_prefix("S ") else {
+            continue;
+        };
+        let parsed = rest.split_once('"').and_then(|(stat, path)| {
+            let stat: Vec<&str> = stat.split_whitespace().collect();
+            let path = path.strip_suffix('"')?;
+            (stat.len() == 6 && !path.contains('\n')).then(|| (stat[0], stat[4], stat[5], path))
+        });
+        let Some((size, secs, nanos, path)) = parsed else {
+            return Err(io::Error::other(format!(
+                "cannot read the line {line:?} of {PREFIX}__verFiles.dat"
+            )));
+        };
+        let path = std::path::absolute(path)?;
+        record.push_str(&format!("{size} {secs} {nanos} {}\n", path.display()));
+    }
+    Ok(record)
+}
+
+/// Whether the files read by the build in `dir` still have the size and modification time they
+/// had ([`INPUTS`]). A build without the record is outdated.
+fn inputs_unchanged(dir: &Path) -> bool {
+    let Ok(record) = fs::read_to_string(dir.join(INPUTS)) else {
+        return false;
+    };
+    record.lines().all(|line| {
+        let mut fields = line.splitn(4, ' ');
+        let (Some(size), Some(secs), Some(nanos), Some(path)) =
+            (fields.next(), fields.next(), fields.next(), fields.next())
+        else {
+            return false;
+        };
+        let Ok(metadata) = fs::metadata(path) else {
+            return false;
+        };
+        let Some(modified) = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        else {
+            return false;
+        };
+        size == metadata.len().to_string()
+            && secs == modified.as_secs().to_string()
+            && nanos == modified.subsec_nanos().to_string()
+    })
 }
 
 /// A port of the top module.
@@ -248,7 +369,8 @@ impl Port {
     }
 }
 
-/// The input and output ports declared in the generated class (`VL_IN8(&clk,0,0);`), in order.
+/// The input and output ports declared in the generated class (`VL_IN8(&clk,0,0);`), in order,
+/// with pins that can be added to a [`DCosim`].
 fn read_ports(header: &str) -> Result<(Vec<Port>, Vec<Port>), VerilatorError> {
     let (mut inputs, mut outputs) = (Vec::new(), Vec::new());
     for line in header.lines() {
@@ -289,6 +411,12 @@ fn read_ports(header: &str) -> Result<(Vec<Port>, Vec<Port>), VerilatorError> {
             )));
         }
         list.push(port);
+    }
+    let mut pins: Vec<String> = Vec::new();
+    for pin in inputs.iter().chain(&outputs).flat_map(Port::pins) {
+        check_subcircuit_pin(&pin, pins.iter().map(String::as_str), "the design")
+            .map_err(VerilatorError::Ports)?;
+        pins.push(pin);
     }
     Ok((inputs, outputs))
 }
@@ -336,7 +464,8 @@ impl VerilatedModel {
 #[derive(Debug)]
 pub enum VerilatorError {
     Io(io::Error),
-    /// A step of the build failed. Its directory is kept.
+    /// A step of the build failed. Its directory is kept (the build directory, or the current
+    /// directory for `verilator --version`); other errors remove it.
     Command {
         command: String,
         dir: PathBuf,
@@ -394,5 +523,35 @@ mod tests {
             read_ports("VL_IN64(&x,63,0);"),
             Err(VerilatorError::Ports(_))
         ));
+    }
+
+    /// Ports whose pins cannot be added to the part are reported, not left to panic in
+    /// [`VerilatedModel::part`].
+    #[test]
+    fn test_read_ports_pin_names() {
+        let error = |header| match read_ports(header) {
+            Err(VerilatorError::Ports(reason)) => reason,
+            other => panic!("{other:?}"),
+        };
+        assert!(error("VL_IN8(&GND,0,0);").contains("\"GND\""));
+        assert!(error("VL_IN8(&ref,0,0);").contains("reserved"));
+        assert!(error("VL_IN8(&q_0,0,0);\nVL_OUT8(&q,1,0);").contains("already has a pin \"q_0\""));
+    }
+
+    #[test]
+    fn test_record_inputs() {
+        let files = "# DESCRIPTION: ...\nC \"--cc top.v\"\n\
+            S       108  3116647  1795221207   251409447  1795221207   251409447 \"sp ace/top.v\"\n\
+            T       580  3116757  1795221207   300954585  1795221207   300954585 \"obj/Vlng__ver.d\"\n\
+            S  13920736  3102769  1795185144   381464455  1743199713           0 \"/usr/bin/verilator_bin\"\n";
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(
+            record_inputs(files).unwrap(),
+            format!(
+                "108 1795221207 251409447 {}/sp ace/top.v\n13920736 1743199713 0 /usr/bin/verilator_bin\n",
+                cwd.display()
+            )
+        );
+        assert!(record_inputs("S 1 2 \"x\"\n").is_err());
     }
 }
