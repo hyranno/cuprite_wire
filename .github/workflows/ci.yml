@@ -35,6 +35,10 @@ jobs:
       # cuprite_wire_embedded_hal turns shared-ngspice on for the whole workspace build;
       # check cuprite_wire without it too.
       - run: cargo clippy -p cuprite_wire --all-targets -- -D warnings
+      # Broken intra-doc links and other rustdoc warnings.
+      - run: cargo doc --workspace --no-deps --features shared-ngspice
+        env:
+          RUSTDOCFLAGS: -D warnings
 
   test:
     name: test

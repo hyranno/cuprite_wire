@@ -36,6 +36,7 @@ others get the same environment.
    cargo fmt --all --check
    cargo clippy --workspace --all-targets --features shared-ngspice -- -D warnings
    cargo clippy -p cuprite_wire --all-targets -- -D warnings
+   RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --features shared-ngspice
    cargo test --workspace --features kicad-libraries,shared-ngspice
    cargo test -p cuprite_wire_kicad_lib -- --ignored
    ```
