@@ -1,11 +1,12 @@
 ---
 name: kicad
-description: Investigate KiCad 9 data and behavior from the CLI - look up symbols/footprints/pins in the installed libraries, export reference netlists (KiCad S-expr .net, SPICE) and run ERC on schematics with kicad-cli, and read the demo projects. Use when researching KiCad file formats, part pinouts, footprint pads, netlist output, or ERC rules.
+description: Investigate KiCad 10 data and behavior from the CLI - look up symbols/footprints/pins in the installed libraries, export reference netlists (KiCad S-expr .net, SPICE) and run ERC on schematics with kicad-cli, and read the demo projects. Use when researching KiCad file formats, part pinouts, footprint pads, netlist output, or ERC rules.
 ---
 
 # KiCad investigation
 
-KiCad 9.0 is installed in the devcontainer (`kicad-cli`, Python module `pcbnew`).
+KiCad 10.0 is installed in the devcontainer (`kicad-cli`, Python module `pcbnew`; image
+`kicad/kicad:10.0`). CI also tests with KiCad 9 (Debian's libraries), which is not installed here.
 This skill is for *research*: the project (cuprite_wire) generates netlists from Rust
 and does not produce `.kicad_sch` / `.kicad_pcb`.
 
@@ -26,7 +27,7 @@ Write all outputs under `$TMPDIR` (or the scratchpad), never next to the input f
 
 | What | Path |
 |---|---|
-| Symbol libraries (`LIB.kicad_sym`) | `/usr/share/kicad/symbols` (`$KICAD9_SYMBOL_DIR`) |
+| Symbol libraries (`LIB.kicad_sym`) | `/usr/share/kicad/symbols` (`$KICAD10_SYMBOL_DIR`) |
 | Footprint libraries (`LIB.pretty/NAME.kicad_mod`) | `/usr/share/kicad/footprints` |
 | Demo projects (real schematics) | `/usr/share/kicad/demos` |
 | Simulation demos (Sim.* fields, `.lib` models) | `/usr/share/kicad/demos/simulation` |
@@ -100,6 +101,6 @@ Other netlist formats: `kicadxml cadstar orcadpcb2 pads allegro`.
 
 ## pcbnew Python module
 
-`python3 -c "import pcbnew"` works (KiCad 9.0.2). Useful for reading footprints with
+`python3 -c "import pcbnew"` works (KiCad 10.0). Useful for reading footprints with
 geometry resolved, e.g. `pcbnew.FootprintLoad('/usr/share/kicad/footprints/Package_SO.pretty', 'SOIC-8_3.9x4.9mm_P1.27mm')`
 then `fp.Pads()`. Set the XDG variables above first.
