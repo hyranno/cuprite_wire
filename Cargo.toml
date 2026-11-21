@@ -63,7 +63,7 @@ itertools = "0.15.0"
 trybuild = "1.0.125"
 
 [features]
-# Tests generating parts from the KiCad 9 libraries in /usr/share/kicad (the devcontainer has them).
+# Tests generating parts from the KiCad (9 or 10) libraries in /usr/share/kicad (the devcontainer has them).
 kicad-libraries = []
 
 # Tests with vendor models downloaded into $CUPRITE_VENDOR_MODELS_DIR (they cannot be committed).

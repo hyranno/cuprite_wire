@@ -55,7 +55,7 @@ use quote::{format_ident, quote};
 /// | `sim` | a library model replacing the symbol's `Sim.*` fields: `{ library, name, pins: { "1" => "PORT" }, unused, params, dialect }`, or a list of them with `suffix` | the `Sim.*` fields |
 /// | `sim_model` | `include` or `inline` (copy model definitions into the code) | `include` |
 /// | `fields` | `{ "MPN" => "..." }`: fields of the footprint | none |
-/// | `symbol_dir`, `footprint_dir` | library directories, relative to the crate | `$KICAD9_SYMBOL_DIR` / `$KICAD9_FOOTPRINT_DIR`, else `/usr/share/kicad/...` |
+/// | `symbol_dir`, `footprint_dir` | library directories, relative to the crate | `$KICAD10_SYMBOL_DIR`, `$KICAD9_SYMBOL_DIR` (and `FOOTPRINT`), else `/usr/share/kicad/...` |
 /// | `sim_library_dir` | base of relative `Sim.Library` / `sim.library` paths, relative to the crate | the crate |
 ///
 /// See the guide [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) for details.

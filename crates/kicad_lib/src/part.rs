@@ -182,16 +182,18 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     };
     let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
 
-    // Pins: symbol pins, then extra pads; IDs default to the numbers.
+    // Pins: a pin per pad of the symbol pins, then extra pads; IDs default to the pad numbers.
     let mut pins: Vec<PinDef> = symbol
         .pins
         .iter()
-        .map(|pin| PinDef {
-            id: pin.number.clone(),
-            pad: pin.number.clone(),
-            name: pin.name.clone(),
-            electrical_type: pin.electrical_type,
-            unit: pin.unit,
+        .flat_map(|pin| {
+            pin.pads.iter().map(|pad| PinDef {
+                id: pad.clone(),
+                pad: pad.clone(),
+                name: pin.name.clone(),
+                electrical_type: pin.electrical_type,
+                unit: pin.unit,
+            })
         })
         .collect();
     pins.extend(options.extra_pads.iter().map(|pad| PinDef {
@@ -202,12 +204,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         unit: 0,
     }));
     rename_pins(&mut pins, &common.pins, "pin")?;
-    let ids = PinIds::new(&pins);
+    let ids = PinIds::new(&pins, &symbol);
+    // The pads of a stacked pin notation, then pins at the same position.
     let mut internal_connections: Vec<Vec<String>> = symbol
-        .stacked_pins()
+        .pins
         .iter()
-        .map(|group| ids.of(group))
+        .filter(|pin| pin.pads.len() > 1)
+        .map(|pin| ids.of(&pin.pads))
         .collect();
+    internal_connections.extend(symbol.stacked_pins().iter().map(|group| ids.of_pins(group)));
     internal_connections.extend(check_internal_connections(
         &common.internal_connections,
         &pins,
@@ -251,11 +256,22 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             match def {
                 SpiceDef::Elements {
                     elements,
-                    mut unused_pins,
+                    unused_pins,
                 } => {
-                    // Extra pads are not part of the model.
+                    // The model connects symbol pins: the other pads of a stacked pin notation
+                    // and extra pads are not part of it.
+                    let other_pads = symbol
+                        .pins
+                        .iter()
+                        .filter(|pin| !unused_pins.contains(&pin.number))
+                        .flat_map(|pin| pin.pads[1..].iter().cloned());
+                    let mut unused_pins: Vec<String> = ids
+                        .symbol_pin_pads(&unused_pins)
+                        .into_iter()
+                        .chain(other_pads)
+                        .collect();
                     unused_pins.extend(options.extra_pads.iter().cloned());
-                    ids.elements(elements, unused_pins)
+                    ids.elements(ids.with_first_pads(elements), unused_pins)
                 }
                 other => other,
             }
@@ -286,23 +302,61 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     })
 }
 
-/// Pin IDs by pad number.
-struct PinIds<'a>(BTreeMap<&'a str, &'a str>);
+/// Pin IDs by pad number, and pads by symbol pin number.
+struct PinIds<'a> {
+    ids: BTreeMap<&'a str, &'a str>,
+    pads: BTreeMap<&'a str, &'a [String]>,
+}
 
 impl<'a> PinIds<'a> {
-    fn new(pins: &'a [PinDef]) -> Self {
-        PinIds(
-            pins.iter()
+    fn new(pins: &'a [PinDef], symbol: &'a Symbol) -> Self {
+        PinIds {
+            ids: pins
+                .iter()
                 .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
                 .collect(),
-        )
+            pads: symbol
+                .pins
+                .iter()
+                .map(|pin| (pin.number.as_str(), pin.pads.as_slice()))
+                .collect(),
+        }
     }
 
-    fn of(&self, numbers: &[String]) -> Vec<String> {
+    /// The IDs of pads.
+    fn of(&self, pads: &[String]) -> Vec<String> {
+        pads.iter()
+            .map(|n| self.ids[n.as_str()].to_string())
+            .collect()
+    }
+
+    /// The IDs of symbol pins (of the first pad of a stacked pin notation).
+    fn of_pins(&self, numbers: &[String]) -> Vec<String> {
+        self.of(&self.first_pads(numbers))
+    }
+
+    fn first_pads(&self, numbers: &[String]) -> Vec<String> {
         numbers
             .iter()
-            .map(|n| self.0[n.as_str()].to_string())
+            .map(|n| self.pads[n.as_str()][0].clone())
             .collect()
+    }
+
+    /// All pads of symbol pins.
+    fn symbol_pin_pads(&self, numbers: &[String]) -> Vec<String> {
+        numbers
+            .iter()
+            .flat_map(|n| self.pads[n.as_str()].iter().cloned())
+            .collect()
+    }
+
+    /// Elements with symbol pin numbers turned into pads (the first of a stacked pin notation,
+    /// whose pads are connected).
+    fn with_first_pads(&self, mut elements: Vec<sim::ElementDef>) -> Vec<sim::ElementDef> {
+        for element in &mut elements {
+            element.nodes = self.first_pads(&element.nodes);
+        }
+        elements
     }
 
     /// The SPICE description with pin IDs, from one with pad numbers.
@@ -350,11 +404,18 @@ fn footprint(
     let pads = resolver
         .footprint(id.library(), id.name())
         .map_err(at(Footprint))?;
+    let symbol_pads: BTreeSet<&str> = symbol
+        .pins
+        .iter()
+        .flat_map(|pin| &pin.pads)
+        .map(String::as_str)
+        .collect();
     let missing: Vec<&str> = symbol
         .pins
         .iter()
-        .map(|pin| pin.number.as_str())
-        .filter(|number| !pads.has_pad(number))
+        .flat_map(|pin| &pin.pads)
+        .map(String::as_str)
+        .filter(|pad| !pads.has_pad(pad))
         .collect();
     if !missing.is_empty() {
         return err(
@@ -365,10 +426,8 @@ fn footprint(
             ),
         );
     }
-    let symbol_numbers: BTreeSet<&str> =
-        symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
     for pad in &options.extra_pads {
-        if symbol_numbers.contains(pad.as_str()) {
+        if symbol_pads.contains(pad.as_str()) {
             return err(ExtraPads, format!("pad {pad:?} is a pin of the symbol"));
         }
         if !pads.has_pad(pad) {
@@ -379,7 +438,7 @@ fn footprint(
         .pad_numbers
         .iter()
         .map(String::as_str)
-        .filter(|pad| !symbol_numbers.contains(pad) && !options.extra_pads.iter().any(|p| p == pad))
+        .filter(|pad| !symbol_pads.contains(pad) && !options.extra_pads.iter().any(|p| p == pad))
         .collect();
     if !unlisted.is_empty() {
         return err(
@@ -772,6 +831,42 @@ mod tests {
         assert_eq!(part.internal_connections, vec![strings(&["2", "4"])]);
         assert_eq!(part.spice, SpiceDef::Excluded);
         assert!(part.kicad.unwrap().exclude_from_bom);
+    }
+
+    #[test]
+    fn test_stacked_pin_notation() {
+        let mut opts = options("test:STACKED_AMP", "");
+        opts.footprint = FootprintOption::FromSymbol;
+        let part = load_part(&opts, &mut resolver()).unwrap();
+        let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["1", "2", "3", "5", "4", "6"]);
+        assert_eq!(part.pins[5].name.as_deref(), Some("V-"));
+        assert_eq!(part.internal_connections, vec![strings(&["4", "6"])]);
+        // The model sees the stacked pin as one pin (Sim.Pins `[4,6]`), connected to pad 4.
+        let SpiceDef::Elements {
+            elements,
+            unused_pins,
+        } = &part.spice
+        else {
+            panic!("{:?}", part.spice)
+        };
+        assert_eq!(elements[0].nodes, strings(&["3", "2", "5", "4", "1"]));
+        assert_eq!(unused_pins, &strings(&["6"]));
+
+        // Pads of the stacked pin are checked against the footprint.
+        let error = load_part(
+            &options("test:STACKED_AMP", "test:SOT-223"),
+            &mut resolver(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .error
+                .message
+                .contains("no pads for the symbol pins 5, 6"),
+            "{}",
+            error.error
+        );
     }
 
     fn vsup_binding() -> ModelBinding {

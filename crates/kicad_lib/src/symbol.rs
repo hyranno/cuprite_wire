@@ -65,8 +65,12 @@ impl ElectricalType {
 /// A pin of a symbol.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pin {
-    /// The pin number, which is the footprint pad number.
+    /// The pin number as written in the library. It is the footprint pad number, unless it is
+    /// KiCad 10's stacked pin notation (`[1,3]`, `[1-4]`), which stands for several pads.
     pub number: String,
+    /// The footprint pad numbers of the pin: `number` itself, or the pads of the stacked pin
+    /// notation (see [`expand_stacked_pin_number`]).
+    pub pads: Vec<String>,
     /// The pin name; `None` when the library has no name (`~` or empty).
     pub name: Option<String>,
     pub electrical_type: ElectricalType,
@@ -102,6 +106,7 @@ impl Symbol {
 
     /// Groups of pin numbers placed at the same position in the same unit. KiCad connects such
     /// stacked pins in the schematic, so they are connected inside the part.
+    /// (These are pin numbers; the pads of a stacked pin notation are not listed here.)
     pub fn stacked_pins(&self) -> Vec<Vec<String>> {
         let mut groups: BTreeMap<(u32, i64, i64), Vec<String>> = BTreeMap::new();
         for pin in &self.pins {
@@ -247,6 +252,17 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
             }
         }
     }
+    let mut pin_of_pad: BTreeMap<&str, &str> = BTreeMap::new();
+    for pin in &pins {
+        for pad in &pin.pads {
+            if let Some(other) = pin_of_pad.insert(pad, &pin.number) {
+                return Err(Error::new(format!(
+                    "pad {pad:?} belongs to two pins ({other:?} and {:?})",
+                    pin.number
+                )));
+            }
+        }
+    }
     pins.sort_by(|a, b| natural_cmp(&a.number, &b.number));
     Ok(pins)
 }
@@ -275,8 +291,10 @@ fn parse_pin(pin: &Sexpr, unit: u32) -> Result<Pin, Error> {
             .and_then(|v| v.parse::<f64>().ok())
             .ok_or_else(|| error("with an invalid position"))
     };
+    let pads = expand_stacked_pin_number(number).map_err(|e| e.context(pin.pos()))?;
     Ok(Pin {
         number: number.to_string(),
+        pads,
         name,
         electrical_type,
         unit,
@@ -285,9 +303,54 @@ fn parse_pin(pin: &Sexpr, unit: u32) -> Result<Pin, Error> {
     })
 }
 
+/// The pad numbers of a pin number: the number itself, or the pads of KiCad 10's stacked pin
+/// notation, `[` and `]` around comma-separated pad numbers or ranges (`[1,3]`, `[1-4]`,
+/// `[A1-A4,B2]`; the ends of a range share the prefix before their trailing digits). Expanded as
+/// KiCad's `ExpandStackedPinNotation` does; KiCad keeps an invalid notation as a single pad number
+/// (with an ERC warning), while this is an error.
+pub fn expand_stacked_pin_number(number: &str) -> Result<Vec<String>, Error> {
+    if !number.contains(['[', ']']) {
+        return Ok(vec![number.to_string()]);
+    }
+    let invalid = || Error::new(format!("invalid stacked pin number {number:?}"));
+    let inner = number
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .ok_or_else(invalid)?;
+    let mut pads = Vec::new();
+    for part in inner
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let Some((start, end)) = part.split_once('-') else {
+            pads.push(part.to_string());
+            continue;
+        };
+        let (prefix, start) = split_trailing_number(start.trim()).ok_or_else(invalid)?;
+        let (end_prefix, end) = split_trailing_number(end.trim()).ok_or_else(invalid)?;
+        if prefix != end_prefix || start > end {
+            return Err(invalid());
+        }
+        pads.extend((start..=end).map(|n| format!("{prefix}{n}")));
+    }
+    if pads.is_empty() {
+        return Err(invalid());
+    }
+    Ok(pads)
+}
+
+/// Splits `A12` into `("A", 12)`; `None` without trailing digits.
+fn split_trailing_number(text: &str) -> Option<(&str, u64)> {
+    let prefix = text.trim_end_matches(|c: char| c.is_ascii_digit());
+    let number = text[prefix.len()..].parse().ok()?;
+    Some((prefix, number))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::strings;
 
     const LIB: &str = r#"(kicad_symbol_lib (version 20241209) (generator "test")
   (symbol "AMP"
@@ -341,6 +404,53 @@ mod tests {
         assert_eq!(symbol.pins.len(), 6);
         assert!(!symbol.in_bom);
         assert!(lib.symbol("NONE").is_err());
+    }
+
+    #[test]
+    fn test_expand_stacked_pin_number() {
+        let expand = |number| expand_stacked_pin_number(number).map_err(|e| e.message);
+        assert_eq!(expand("1"), Ok(strings(&["1"])));
+        assert_eq!(expand("[2,13]"), Ok(strings(&["2", "13"])));
+        assert_eq!(expand("[1-4]"), Ok(strings(&["1", "2", "3", "4"])));
+        assert_eq!(
+            expand("[ A1 - A3 , B2,]"),
+            Ok(strings(&["A1", "A2", "A3", "B2"]))
+        );
+        assert_eq!(expand("[AA9-AA10]"), Ok(strings(&["AA9", "AA10"])));
+        assert_eq!(expand("[7]"), Ok(strings(&["7"])));
+        for invalid in [
+            "[1,2", "1]", "x[1]", "[]", "[ , ]", "[A1-B2]", "[4-1]", "[A-C]",
+        ] {
+            assert_eq!(
+                expand(invalid),
+                Err(format!("invalid stacked pin number {invalid:?}"))
+            );
+        }
+    }
+
+    #[test]
+    fn test_stacked_pin_notation() {
+        let lib = SymbolLib::parse(
+            r#"(kicad_symbol_lib (symbol "X"
+                 (symbol "X_1_1"
+                   (pin power_in line (at 0 0 0) (name "GND") (number "[2,4-5]"))
+                   (pin input line (at 0 1 0) (name "A") (number "1")))))"#,
+        )
+        .unwrap();
+        let symbol = lib.symbol("X").unwrap();
+        assert_eq!(symbol.pins[0].number, "1");
+        assert_eq!(symbol.pins[1].number, "[2,4-5]");
+        assert_eq!(symbol.pins[1].pads, strings(&["2", "4", "5"]));
+        let lib = SymbolLib::parse(
+            r#"(kicad_symbol_lib (symbol "X"
+                 (symbol "X_1_1" (pin input line (at 0 0 0) (name "A") (number "[1")))))"#,
+        )
+        .unwrap();
+        let message = lib.symbol("X").unwrap_err().message;
+        assert!(
+            message.ends_with("invalid stacked pin number \"[1\""),
+            "{message}"
+        );
     }
 
     #[test]

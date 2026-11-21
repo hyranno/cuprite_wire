@@ -1,4 +1,4 @@
-//! Parts generated from the KiCad 9 libraries installed in the devcontainer.
+//! Parts generated from the KiCad libraries (9 or 10) installed in the devcontainer.
 //!
 //! Run with `cargo test --features kicad-libraries --test kicad_libraries`.
 //! The KiCad libraries are only read at compile time; the golden files are the netlists
@@ -38,10 +38,12 @@ kicad_part! {
 }
 
 kicad_part! {
-    /// KiCad's generic dual op-amp subcircuit in Simulation_SPICE.sp.
-    struct DualOpAmp {
-        symbol: "Device:Opamp_Dual",
-        footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+    /// KiCad's generic op-amp subcircuit in Simulation_SPICE.sp (pins 1 +, 2 -, 3 V+, 4 V-, 5 out).
+    struct OpAmp {
+        symbol: "Simulation_SPICE:OPAMP",
+        footprint: "Package_TO_SOT_SMD:SOT-23-5",
+        // The symbol's value is `${SIM.PARAMS}`, a text variable KiCad expands.
+        value: "OPAMP",
     }
 }
 
@@ -83,7 +85,7 @@ kicad_part! {
 /// A circuit using every part: an op-amp stage driving a transistor, a diode and a MOSFET.
 fn circuit() -> CircuitBuilder {
     let mut c = CircuitBuilder::new();
-    let amp = c.instantiate_part_named("amp", Box::new(DualOpAmp));
+    let amp = c.instantiate_part_named("amp", Box::new(OpAmp));
     let spare = c.instantiate_part_named("spare", Box::new(Lm358));
     let rf = c.instantiate_part_named("rf", Box::new(Resistor::new("10k")));
     let rg = c.instantiate_part_named("rg", Box::new(Resistor::new("1k")));
@@ -97,17 +99,14 @@ fn circuit() -> CircuitBuilder {
     let gnd = |c: &mut CircuitBuilder, node| c.label(node, NetLabel::global("GND"));
     let vcc = |c: &mut CircuitBuilder, node| c.label(node, NetLabel::global("+5V"));
 
-    // Channel 1: non-inverting amplifier of IN with a gain of 11.
-    c.label(amp["3"], NetLabel::local("IN"));
-    c.connect(amp["1"], rf["1"]);
+    // A non-inverting amplifier of IN with a gain of 11.
+    c.label(amp["1"], NetLabel::local("IN"));
+    c.connect(amp["5"], rf["1"]);
     c.connect(rf["2"], amp["2"]);
     c.connect(amp["2"], rg["1"]);
     gnd(&mut c, rg["2"]);
-    c.label(amp["1"], NetLabel::local("AMP"));
-    // Channel 2: a follower of ground.
-    c.connect(amp["7"], amp["6"]);
-    gnd(&mut c, amp["5"]);
-    vcc(&mut c, amp["8"]);
+    c.label(amp["5"], NetLabel::local("AMP"));
+    vcc(&mut c, amp["3"]);
     gnd(&mut c, amp["4"]);
     // The unused LM358: inputs to ground, outputs as followers, powered.
     for (out, inv, noninv) in [("1", "2", "3"), ("7", "6", "5")] {
@@ -117,7 +116,7 @@ fn circuit() -> CircuitBuilder {
     vcc(&mut c, spare["8"]);
     gnd(&mut c, spare["4"]);
     // The transistor switches the load; the diode clamps it to +5V, the MOSFET pulls OUT down.
-    c.connect(amp["1"], rb["1"]);
+    c.connect(amp["5"], rb["1"]);
     c.connect(rb["2"], q["2"]);
     gnd(&mut c, q["3"]);
     c.connect(q["1"], rc["2"]);
