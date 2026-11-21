@@ -9,6 +9,9 @@
     "service": "app",
     "workspaceFolder": "/workspace",
 	"overrideCommand": true,
+	// Prune target/: drop artifacts built by uninstalled toolchains or unused for 30 days,
+	// then remove the oldest ones until it fits in 10 GB.
+	"postStartCommand": "cargo sweep --installed && cargo sweep --time 30 && cargo sweep --maxsize 10GB",
 	"customizations": {
 		"vscode": {
 			"extensions": [
