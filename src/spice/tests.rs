@@ -13,7 +13,6 @@ use crate::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
         },
-        spice_path,
     },
     test_parts::{
         self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, deck_of, rc_filter,
@@ -661,7 +660,10 @@ fn test_shared_library_matches_cli() {
     let library_deck = std::fs::read_to_string(shared.dir().join("shared.cir")).unwrap();
     let tran = shared.dir().join("tran.txt");
     assert!(
-        library_deck.contains(&format!(r#"wrdata {} v("/OUT")"#, spice_path(&tran))),
+        library_deck.contains(&format!(
+            r#"wrdata {} v("/OUT")"#,
+            crate::spice::spice_path(&tran)
+        )),
         "{library_deck}"
     );
     assert!(!library_deck.contains("quit"), "{library_deck}");
