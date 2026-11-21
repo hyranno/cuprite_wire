@@ -36,6 +36,10 @@ break the API).
 - On Windows, paths in netlists and ngspice commands (`.include`, the `d_cosim` library, the
   output files of `SharedNgspice`) and in the `Sim.Library` field of generated parts are written
   with `/`.
+- The supported platforms are documented (README): everything but building digital models for
+  XSPICE `d_cosim` (gcc, Verilator) runs on Windows and macOS; those builds are Linux-only.
+- `Verilator::build` reports a missing shim with `shim_dir` to set, and outside Linux a missing
+  program or shim with the note that the build is supported on Linux only.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.

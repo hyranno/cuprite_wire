@@ -23,6 +23,14 @@ const PREFIX: &str = "Vlng";
 /// The widest port the shim handles (it shifts `int`s).
 const MAX_WIDTH: u32 = 32;
 
+/// Added to the errors of a missing program or shim: outside Linux, these are most likely because
+/// the build is not supported there.
+const SUPPORT_NOTE: &str = if cfg!(target_os = "linux") {
+    ""
+} else {
+    " (Verilator builds are supported on Linux only; on Windows, use WSL 2 or the devcontainer)"
+};
+
 /// A Verilator build of Verilog sources, cached by the contents of the sources, the arguments and
 /// the version of Verilator.
 ///
@@ -139,21 +147,32 @@ impl Verilator {
     /// record of the build ([`inputs_unchanged`]).
     fn key(&self) -> Result<u64, VerilatorError> {
         let cwd = std::env::current_dir()?;
-        let mut text = self.run(Command::new(&self.program).arg("--version"), &cwd)?;
-        for file in [
+        let mut text = String::new();
+        let shims = [
             self.shim_dir.join("verilator_shim.cpp"),
             self.shim_dir.join("verilator_main.cpp"),
-        ]
-        .iter()
-        .chain(&self.sources)
-        {
+        ];
+        for (i, file) in shims.iter().chain(&self.sources).enumerate() {
             text.push('\0');
             text.push_str(&file.display().to_string());
             text.push('\0');
             text.push_str(&fs::read_to_string(file).map_err(|e| {
-                io::Error::new(e.kind(), format!("cannot read {}: {e}", file.display()))
+                let hint = if i < shims.len() && e.kind() == io::ErrorKind::NotFound {
+                    format!(
+                        "; set `shim_dir` to the `share/ngspice/scripts/src` directory of \
+                        ngspice{SUPPORT_NOTE}"
+                    )
+                } else {
+                    String::new()
+                };
+                io::Error::new(
+                    e.kind(),
+                    format!("cannot read {}: {e}{hint}", file.display()),
+                )
             })?);
         }
+        text.push('\0');
+        text.push_str(&self.run(Command::new(&self.program).arg("--version"), &cwd)?);
         for arg in &self.args {
             text.push('\0');
             text.push_str(arg);
@@ -220,10 +239,15 @@ impl Verilator {
     /// (the build directory).
     fn run(&self, command: &mut Command, dir: &Path) -> Result<String, VerilatorError> {
         let output = command.output().map_err(|e| {
+            let note = if e.kind() == io::ErrorKind::NotFound {
+                SUPPORT_NOTE
+            } else {
+                ""
+            };
             io::Error::new(
                 e.kind(),
                 format!(
-                    "cannot run {}: {e}",
+                    "cannot run {}: {e}{note}",
                     command.get_program().to_string_lossy()
                 ),
             )
@@ -557,7 +581,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(not(target_os = "linux"), ignore = "Verilator is used on Linux only")]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "Verilator builds are supported on Linux only"
+    )]
     fn test_record_inputs() {
         let files = "# DESCRIPTION: ...\nC \"--cc top.v\"\n\
             S       108  3116647  1795221207   251409447  1795221207   251409447 \"sp ace/top.v\"\n\
