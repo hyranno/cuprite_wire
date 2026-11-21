@@ -1,3 +1,5 @@
+//! KiCad-specific information of parts: footprint, symbol, pins and fields.
+
 use std::collections::{BTreeMap, HashSet};
 
 pub use crate::parts::PinType;
@@ -11,10 +13,12 @@ pub struct KicadPinInfo {
     pub pad: String,
     /// Pin name, written as `pinfunction`.
     pub name: Option<String>,
+    /// Electrical type, written as `pintype` and used by ERC.
     pub pin_type: PinType,
 }
 
 impl KicadPinInfo {
+    /// Pin information with the pad `pad`, the name `name` and the type `pin_type`.
     pub fn new(pad: impl Into<String>, name: Option<&str>, pin_type: PinType) -> Self {
         KicadPinInfo {
             pad: pad.into(),
@@ -27,8 +31,11 @@ impl KicadPinInfo {
 /// Component flags written as value-less properties.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PartFlags {
+    /// Do not populate (`dnp`).
     pub dnp: bool,
+    /// Excluded from the bill of materials (`exclude_from_bom`).
     pub exclude_from_bom: bool,
+    /// Not placed on the board (`exclude_from_board`).
     pub exclude_from_board: bool,
 }
 
@@ -43,6 +50,7 @@ pub struct KicadPartInfo {
     pub lib_source: Option<LibId>,
     /// Additional fields imported into the footprint.
     pub fields: Vec<(String, String)>,
+    /// The flags of the component.
     pub flags: PartFlags,
 }
 
@@ -51,11 +59,20 @@ pub struct KicadPartInfo {
 #[non_exhaustive]
 pub enum PinInfoProblem {
     /// A pin ID of the part has no entry.
-    Missing { pin_id: String },
+    Missing {
+        /// The pin ID without an entry.
+        pin_id: String,
+    },
     /// An entry is not a pin ID of the part.
-    Unknown { pin_id: String },
+    Unknown {
+        /// The key of the entry.
+        pin_id: String,
+    },
     /// Several pins are assigned to the pad.
-    DuplicatePad { pad: String },
+    DuplicatePad {
+        /// The pad number.
+        pad: String,
+    },
 }
 
 impl KicadPartInfo {

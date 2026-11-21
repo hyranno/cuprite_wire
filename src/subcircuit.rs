@@ -85,6 +85,10 @@ pub type InterfaceWith<G, U> = <<G as SubcircuitGenerator>::Interface as Interfa
 
 /// Generates the contents of a subcircuit.
 pub trait SubcircuitGenerator: Debug + Clone {
+    /// The options the subcircuit is built with, given to [`construct_subcircuit`] and to the
+    /// generators of the subcircuits inside it. Use `()` if there are none.
+    ///
+    /// [`construct_subcircuit`]: SubcircuitGenerator::construct_subcircuit
     type Options;
     /// The nodes the circuit around the subcircuit connects to.
     type Interface: Interface;
@@ -165,6 +169,8 @@ where
     }
 }
 
+/// A subcircuit instantiated in a [`CircuitBuilder`], expanded when the circuit is built with
+/// options of type `B`.
 pub struct SubcircuitInstance<B = ()> {
     pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
     /// The nodes in the circuit around the instance, connected to the subcircuit's interface nodes

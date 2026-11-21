@@ -1,8 +1,12 @@
 //! Reads KiCad symbol and footprint libraries and SPICE model libraries, and turns a symbol
 //! into the description of a cuprite_wire part ([`part::PartDef`]).
 //!
-//! This crate is used by the `kicad_part!` macro at compile time. It does not depend on
-//! `proc_macro`, so it can be tested and used on its own.
+//! This crate is used by the `kicad_part!` and `spice_part!` macros of `cuprite_wire` at compile
+//! time. It does not depend on `proc_macro`, so it can be tested on its own.
+//!
+//! It is an implementation detail of `cuprite_wire`, published only because the macros depend on
+//! it: its API is not covered by semantic versioning and may change in any release. Use
+//! `cuprite_wire` instead; the items it needs from here are re-exported there.
 
 pub mod binding;
 pub mod footprint;

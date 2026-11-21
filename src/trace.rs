@@ -11,6 +11,7 @@ pub type Loc = &'static Location<'static>;
 pub struct Trace(pub Vec<Loc>);
 
 impl Trace {
+    /// A trace of the single location `loc`.
     pub fn new(loc: Loc) -> Self {
         Trace(vec![loc])
     }

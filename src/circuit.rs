@@ -42,14 +42,18 @@ impl NodeInfo {
         }
     }
 
+    /// Where the node was created.
     pub fn trace(&self) -> &Trace {
         &self.trace
     }
 
+    /// The labels attached to the node, including those attached inside subcircuits when it is
+    /// an interface node.
     pub fn labels(&self) -> &[NodeLabel] {
         &self.labels
     }
 
+    /// The ERC marks attached to the node, including those attached inside subcircuits.
     pub fn marks(&self) -> &[NodeMark] {
         &self.marks
     }
@@ -104,6 +108,10 @@ impl NameRegistry {
     }
 }
 
+/// Describes a circuit: nodes, parts, labels, ERC marks and subcircuit instances.
+///
+/// `B` is the type of the options the circuit is built with ([`CircuitBuilder::build`]), passed
+/// to the generators of its subcircuits.
 pub struct CircuitBuilder<B = ()> {
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) ref_name_counters: HashMap<String, u32>,
@@ -141,6 +149,7 @@ impl<B> Debug for CircuitBuilder<B> {
 }
 
 impl<B> CircuitBuilder<B> {
+    /// An empty circuit.
     pub fn new() -> Self {
         CircuitBuilder {
             parts: Vec::new(),
@@ -513,6 +522,8 @@ impl From<ExpandedCircuit> for BuiltCircuit {
     }
 }
 
+/// A circuit with all subcircuits expanded, returned by [`CircuitBuilder::build`]. Convert it
+/// with [`BuiltCircuit::to_netlist`].
 #[derive(Debug, Clone)]
 pub struct BuiltCircuit {
     pub(crate) parts: Vec<PartInstance>,
@@ -522,10 +533,12 @@ pub struct BuiltCircuit {
 }
 
 impl BuiltCircuit {
+    /// The graph of all nodes, before they are grouped into nets.
     pub fn nets(&self) -> &NetGraph {
         &self.nets
     }
 
+    /// The errors found while describing the circuit, reported by [`BuiltCircuit::to_netlist`].
     pub fn errors(&self) -> &[CircuitError] {
         &self.errors
     }

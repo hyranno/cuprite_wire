@@ -31,6 +31,8 @@
 //! | [Electrical rules check](https://github.com/hyranno/cuprite_wire/blob/main/doc/erc.md) | [`erc`] |
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_docs)]
+
 pub mod basic;
 pub mod circuit;
 pub mod erc;

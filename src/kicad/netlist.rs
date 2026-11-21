@@ -196,6 +196,7 @@ impl KicadNetlist {
         )
     }
 
+    /// Writes the netlist to `writer` as a `.net` file, followed by a newline.
     pub fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
         writeln!(writer, "{self}")
     }

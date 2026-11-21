@@ -436,6 +436,7 @@ impl SpiceNetlist {
         Ok(())
     }
 
+    /// Writes the netlist (as [`Display`](fmt::Display) formats it, ending with `.end`) to `writer`.
     pub fn write(&self, writer: &mut impl io::Write) -> io::Result<()> {
         write!(writer, "{self}")
     }

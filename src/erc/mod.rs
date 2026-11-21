@@ -38,20 +38,31 @@ pub enum ErcMark {
     /// The net is intentionally unconnected (KiCad's no-connect flag).
     NoConnect,
     /// A pin outside the circuit, seen by ERC as a pin of this type (`PWR_FLAG` is a `PowerOut` one).
-    VirtualPin { pin_type: PinType, name: String },
+    VirtualPin {
+        /// The type ERC sees the pin as.
+        pin_type: PinType,
+        /// The name shown in ERC messages.
+        name: String,
+    },
 }
 
 /// A mark with the location where it was attached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeMark {
+    /// The mark.
     pub mark: ErcMark,
+    /// Where the mark was attached, reported by violations about it.
     pub trace: Trace,
 }
 
+/// The severity of an ERC rule or a pin conflict, ordered from [`Severity::Ignore`] to [`Severity::Error`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Severity {
+    /// Not checked: violations are left out of the [`ErcReport`].
     Ignore,
+    /// Reported as a warning.
     Warning,
+    /// Reported as an error (see [`ErcReport::has_errors`]).
     Error,
 }
 
@@ -60,6 +71,7 @@ pub enum Severity {
 pub struct PinMap([[Severity; 12]; 12]);
 
 impl PinMap {
+    /// The severity of connecting `a` and `b`.
     pub fn get(&self, a: PinType, b: PinType) -> Severity {
         self.0[a.index()][b.index()]
     }
@@ -154,14 +166,17 @@ impl ErcRule {
     }
 }
 
+/// The severities ERC uses; the default is KiCad 9's (see [`ErcRule::default_severity`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErcSettings {
+    /// The severities of pin conflicts.
     pub pin_map: PinMap,
     /// Severities differing from [`ErcRule::default_severity`].
     severities: BTreeMap<ErcRule, Severity>,
 }
 
 impl ErcSettings {
+    /// The severity of `rule`.
     pub fn severity(&self, rule: ErcRule) -> Severity {
         self.severities
             .get(&rule)
@@ -169,6 +184,7 @@ impl ErcSettings {
             .unwrap_or_else(|| rule.default_severity())
     }
 
+    /// Sets the severity of `rule`.
     pub fn with_severity(mut self, rule: ErcRule, severity: Severity) -> Self {
         self.severities.insert(rule, severity);
         self
@@ -178,18 +194,26 @@ impl ErcSettings {
 /// A pin in an ERC message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ErcPin {
+    /// A pin of a part.
     Part {
+        /// The reference designator of the part, e.g. `R1`.
         ref_name: String,
+        /// The pin ID (the KiCad pin number).
         pin_id: String,
+        /// The electrical type of the pin.
         pin_type: PinType,
     },
+    /// A virtual pin ([`ErcMark::VirtualPin`]).
     Virtual {
+        /// The name of the virtual pin.
         name: String,
+        /// The type ERC sees the pin as.
         pin_type: PinType,
     },
 }
 
 impl ErcPin {
+    /// The electrical type of the pin.
     pub fn pin_type(&self) -> PinType {
         match self {
             ErcPin::Part { pin_type, .. } | ErcPin::Virtual { pin_type, .. } => *pin_type,
@@ -210,36 +234,60 @@ impl fmt::Display for ErcPin {
     }
 }
 
+/// What an ERC violation is about. Each variant but [`ErcViolationKind::PinToPin`] corresponds to
+/// the [`ErcRule`] of the same name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErcViolationKind {
+    /// Two pins whose types conflict in the [`PinMap`]. Traced to `pin`, with a note at `other`.
     PinToPin {
+        /// The name of the net.
         net: String,
+        /// The reported pin.
         pin: ErcPin,
+        /// The conflicting pin of the highest severity.
         other: ErcPin,
     },
+    /// [`ErcRule::PinNotConnected`]. Traced to the pin.
     PinNotConnected {
+        /// The name of the net.
         net: String,
+        /// The only pin of the net.
         pin: ErcPin,
     },
+    /// [`ErcRule::PinNotDriven`]. Traced to the pin.
     PinNotDriven {
+        /// The name of the net.
         net: String,
+        /// The input pin without a driver.
         pin: ErcPin,
     },
+    /// [`ErcRule::PowerPinNotDriven`]. Traced to the pin.
     PowerPinNotDriven {
+        /// The name of the net.
         net: String,
+        /// A `power_in` pin of the net.
         pin: ErcPin,
     },
+    /// [`ErcRule::NoConnectConnected`]. Traced to the no-connect mark, with a note at each pin.
     NoConnectConnected {
+        /// The name of the net.
         net: String,
+        /// The pins on the net.
         pins: Vec<ErcPin>,
     },
+    /// [`ErcRule::NoConnectDangling`]. Traced to the mark.
     NoConnectDangling,
+    /// [`ErcRule::VirtualPinDangling`]. Traced to the mark.
     VirtualPinDangling {
+        /// The name of the virtual pin.
         name: String,
     },
+    /// [`ErcRule::SimilarNetNames`]. Traced to the net `name`, with a note at the net `other`.
     SimilarNetNames {
+        /// The reported net name.
         name: String,
+        /// The first net name that differs from it only in case.
         other: String,
     },
     /// A warning of the netlist conversion.
@@ -288,13 +336,17 @@ impl fmt::Display for ErcViolationKind {
     }
 }
 
+/// A violation found by ERC.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErcViolation {
+    /// [`Severity::Warning`] or [`Severity::Error`]; ignored violations are not reported.
     pub severity: Severity,
+    /// What the violation is, with its trace and notes.
     pub diagnostic: Diagnostic<ErcViolationKind>,
 }
 
 impl ErcViolation {
+    /// What the violation is about.
     pub fn kind(&self) -> &ErcViolationKind {
         &self.diagnostic.kind
     }
@@ -313,26 +365,31 @@ impl fmt::Display for ErcViolation {
 /// The violations found by ERC, without the ignored ones.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErcReport {
+    /// The reported violations, errors and warnings alike.
     pub violations: Vec<ErcViolation>,
 }
 
 impl ErcReport {
+    /// The violations of [`Severity::Error`].
     pub fn errors(&self) -> impl Iterator<Item = &ErcViolation> {
         self.violations
             .iter()
             .filter(|v| v.severity == Severity::Error)
     }
 
+    /// The violations of [`Severity::Warning`].
     pub fn warnings(&self) -> impl Iterator<Item = &ErcViolation> {
         self.violations
             .iter()
             .filter(|v| v.severity == Severity::Warning)
     }
 
+    /// Whether any violation is an error.
     pub fn has_errors(&self) -> bool {
         self.errors().next().is_some()
     }
 
+    /// Whether there is no violation at all, warnings included.
     pub fn is_clean(&self) -> bool {
         self.violations.is_empty()
     }

@@ -14,8 +14,11 @@ use crate::{
 /// A pin of a [`CosimDevice`]: an output, an input, or both (a bidirectional GPIO).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CosimPin {
+    /// The pin name: a port of the subcircuit, unique (case-insensitively) among the pins of the device.
     pub name: String,
+    /// How the pin drives the circuit, if it is an output.
     pub output: Option<OutputCharacteristics>,
+    /// How the pin loads and reads the circuit, if it is an input.
     pub input: Option<InputCharacteristics>,
 }
 
@@ -57,6 +60,7 @@ pub struct CosimDevice {
 impl Eq for CosimDevice {}
 
 impl CosimDevice {
+    /// The reference pin the voltages of all pins are relative to.
     pub const GND: &'static str = "gnd";
 
     /// # Panics
@@ -137,6 +141,7 @@ impl CosimDevice {
         &self.name
     }
 
+    /// The pins in the order they were added (the order of [`PinIndex`]), without `gnd`.
     pub fn pins(&self) -> &[CosimPin] {
         &self.pins
     }

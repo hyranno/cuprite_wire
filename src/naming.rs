@@ -149,14 +149,17 @@ pub enum NetLabel {
 }
 
 impl NetLabel {
+    /// A [`NetLabel::Global`] label.
     pub fn global(name: impl Into<String>) -> Self {
         NetLabel::Global(name.into())
     }
 
+    /// A [`NetLabel::Local`] label.
     pub fn local(name: impl Into<String>) -> Self {
         NetLabel::Local(name.into())
     }
 
+    /// The name given, without the path of a local label.
     pub fn name(&self) -> &str {
         match self {
             NetLabel::Global(name) | NetLabel::Local(name) => name,
@@ -167,8 +170,11 @@ impl NetLabel {
 /// A label attached to a node, with the subcircuit instance it was attached in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeLabel {
+    /// The label.
     pub label: NetLabel,
+    /// The path of the subcircuit instance the label was attached in.
     pub scope: HierPath,
+    /// Where the label was attached.
     pub trace: Trace,
 }
 

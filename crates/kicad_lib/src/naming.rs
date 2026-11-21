@@ -10,9 +10,12 @@ pub struct LibId {
     name: String,
 }
 
+/// An invalid library identifier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibIdError {
+    /// The identifier as given, `Library:Name`.
     pub lib_id: String,
+    /// Why it is invalid.
     pub reason: &'static str,
 }
 
@@ -35,6 +38,8 @@ impl From<LibIdError> for crate::Error {
 }
 
 impl LibId {
+    /// Makes an identifier from the library and item names, which must be non-empty and contain
+    /// neither `:` nor control characters.
     pub fn new(library: impl Into<String>, name: impl Into<String>) -> Result<Self, LibIdError> {
         let library = library.into();
         let name = name.into();
@@ -59,10 +64,12 @@ impl LibId {
         Ok(LibId { library, name })
     }
 
+    /// The library name, the part before `:`.
     pub fn library(&self) -> &str {
         &self.library
     }
 
+    /// The item name, the part after `:`.
     pub fn name(&self) -> &str {
         &self.name
     }

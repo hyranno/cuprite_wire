@@ -13,6 +13,7 @@ use std::{
 pub enum SpicePartInfo {
     /// The part is written as one or more SPICE elements.
     Elements {
+        /// The elements written for the part.
         elements: Vec<SpiceElement>,
         /// Pins intentionally left out of the model (e.g. NC pins). Every other pin must be
         /// used by an element, or be connected inside the part to a pin that is.
@@ -121,6 +122,7 @@ pub struct SpiceElement {
 }
 
 impl SpiceElement {
+    /// An element of `device` with the pin IDs `nodes` and `args`, without a suffix or models.
     pub fn new<S: Into<String>>(
         device: char,
         nodes: impl IntoIterator<Item = S>,
@@ -135,11 +137,13 @@ impl SpiceElement {
         }
     }
 
+    /// Sets the suffix appended to the element name (see [`SpiceElement::suffix`]).
     pub fn with_suffix(mut self, suffix: impl Into<String>) -> Self {
         self.suffix = suffix.into();
         self
     }
 
+    /// Adds a model definition the element needs.
     pub fn with_model(mut self, model: ModelSource) -> Self {
         self.models.push(model);
         self
@@ -226,14 +230,20 @@ pub enum ModelSource {
     /// (e.g. `concat!(env!("CARGO_MANIFEST_DIR"), "/models/x.lib")`), since ngspice resolves
     /// relative paths against its working directory.
     Include {
+        /// Absolute path of the library.
         path: PathBuf,
+        /// The dialect the library is written in.
         dialect: SpiceDialect,
     },
     /// A `.model` or `.subckt` definition written into the deck. Definitions are deduplicated
     /// by name (case-insensitively, like SPICE); two different definitions with the same name are an error.
     Inline {
+        /// Name of the model or subcircuit, used to deduplicate definitions.
         name: String,
+        /// The definition as written into the deck (the `.model` line or the
+        /// `.subckt` ... `.ends` block).
         text: String,
+        /// The dialect the definition is written in.
         dialect: SpiceDialect,
     },
 }
@@ -256,12 +266,15 @@ impl ModelSource {
         }
     }
 
+    /// The dialect the model is written in.
     pub fn dialect(&self) -> SpiceDialect {
         match self {
             ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => *dialect,
         }
     }
 
+    /// Sets the dialect the model is written in. Decks using a model of another dialect than
+    /// ngspice's run ngspice in the matching compatibility mode.
     pub fn with_dialect(mut self, new: SpiceDialect) -> Self {
         match &mut self {
             ModelSource::Include { dialect, .. } | ModelSource::Inline { dialect, .. } => {
@@ -293,13 +306,27 @@ pub enum SpiceProblem {
     /// `Elements` without any element (use `Excluded` to leave a part out).
     NoElements,
     /// An element cannot be written (`suffix` identifies the element).
-    InvalidElement { suffix: String, reason: String },
+    InvalidElement {
+        /// Suffix of the element.
+        suffix: String,
+        /// What is wrong with the element.
+        reason: String,
+    },
     /// Two elements of the part have the same suffix.
-    DuplicateSuffix { suffix: String },
+    DuplicateSuffix {
+        /// The duplicated suffix.
+        suffix: String,
+    },
     /// An element or `unused_pins` refers to a pin the part does not have.
-    UnknownPin { pin_id: String },
+    UnknownPin {
+        /// The pin ID the part does not have.
+        pin_id: String,
+    },
     /// A pin of the part is used by no element and not declared unused.
-    UnmappedPin { pin_id: String },
+    UnmappedPin {
+        /// The pin ID of the unmapped pin.
+        pin_id: String,
+    },
 }
 
 #[cfg(test)]

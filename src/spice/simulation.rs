@@ -15,6 +15,7 @@ use crate::spice::SpiceDeck;
 /// read-only (e.g. the Claude Code sandbox), the devcontainer's `ngspice` wrapper redirects it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ngspice {
+    /// The ngspice executable (a name looked up in `PATH`, or a path).
     pub program: PathBuf,
 }
 
@@ -281,15 +282,26 @@ impl Table {
     }
 }
 
+/// An error running a deck or reading its results.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SimulationError {
     /// ngspice cannot be run. The run directory, if any, is removed.
     Io(io::Error),
     /// ngspice failed or printed an error. The run directory is kept.
-    Ngspice { log: String, dir: PathBuf },
+    Ngspice {
+        /// The output of ngspice.
+        log: String,
+        /// The run directory, with the deck (`deck.cir`) to reproduce the run.
+        dir: PathBuf,
+    },
     /// A `wrdata` file cannot be read as a table.
-    Table { file: String, reason: String },
+    Table {
+        /// The file name passed to [`Simulation::table`].
+        file: String,
+        /// Why it cannot be read.
+        reason: String,
+    },
     /// The ngspice shared library cannot be loaded or used.
     SharedLibrary(String),
     /// The models of a co-simulation do not match the devices of the deck.

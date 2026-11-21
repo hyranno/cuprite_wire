@@ -56,6 +56,7 @@ impl Periodic {
         }
     }
 
+    /// The period in seconds.
     pub fn period(&self) -> f64 {
         self.period
     }
@@ -113,14 +114,17 @@ impl Adc {
         }
     }
 
+    /// The name of the pin converted.
     pub fn pin(&self) -> &str {
         &self.pin
     }
 
+    /// The resolution of the codes.
     pub fn bits(&self) -> u32 {
         self.bits
     }
 
+    /// The full-scale voltage in volts.
     pub fn reference(&self) -> f64 {
         self.reference
     }
@@ -169,6 +173,7 @@ impl Pwm {
         }
     }
 
+    /// The duty set last, in 0..=1 (it may not have taken effect yet).
     pub fn duty(&self) -> f64 {
         self.duty
     }
