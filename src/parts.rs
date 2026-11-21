@@ -21,7 +21,10 @@ use crate::{kicad::KicadPartInfo, naming::HierPath, spice::SpicePartInfo, trace:
 pub trait Part: Debug + DynClone {
     /// Reference designator prefix (e.g. `"R"`).
     fn get_ref_base_name(&self) -> String;
-    /// IDs of the pins. One pin ID corresponds to one footprint pad.
+    /// IDs of the pins. One pin ID corresponds to one footprint pad, except for duplicate pins
+    /// (several pins on one pad, which KiCad 10 allows): they must be connected by
+    /// [`Part::internal_connections`], and the KiCad netlist writes the pad once, with the first
+    /// of them in this order.
     fn pin_ids(&self) -> Vec<String>;
     /// The value of the part (e.g. `"10k"`).
     fn value(&self) -> String;

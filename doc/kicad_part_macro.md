@@ -75,8 +75,21 @@ with the same nickname.
   parts. Pin names are not used as IDs: they are often `~`, `+`, `-`, or shared by several pins.
   Use `pins` to give readable IDs.
 - Every unit of the symbol is part of the one generated part (the netlist has one component).
-  Pins of unit 0 are shared by all units. A pin number defined in several units is one pin
-  (an error if their names or types differ). Only body style 1 is read (De Morgan styles repeat the pins).
+  Pins of unit 0 are shared by all units. A pin number defined in several units with the same
+  name and type is one pin (e.g. a supply pin repeated in each unit). Only body style 1 is read
+  (De Morgan styles repeat the pins).
+- **Duplicate pins**: KiCad 10 allows several pins with the same number but different names or
+  types (e.g. `Diode:BAT54SDW`, whose pad 6 is K of unit 1 and A of unit 2, or `74xx_IEEE:74278`,
+  whose pad 6 is the outputs Y4 and ~{P1}). Each of them is a pin of the part, and they are
+  connected inside the part. They are ordered as KiCad picks the first of them: by unit, then by
+  position in the unit (left to right, then top to bottom), then in file order. The first keeps
+  the pad number as its ID (`"6"`), the others get `#2`, `#3`, ... appended (`"6#2"`); in `pins`,
+  the pad number renames the first and `"6#2"` the second. Connect the one you like: they are
+  the same node. The netlist has one node for the pad, with the first pin's name and type, as
+  KiCad writes it, and the model (`Sim.Pins` gives pin numbers) connects the first.
+  KiCad itself does not connect such pins, and reports them on different nets in ERC; ERC here
+  sees them as pins connected inside the part (doc/erc.md section 3), so it does not report two
+  outputs among them as conflicting, as KiCad does when they are wired together.
 - **Stacked pins** (several pins at the same position of a unit) are connected inside the part,
   as KiCad connects them in a schematic.
 - A pin number in **KiCad 10's stacked pin notation** (`[2,13]`, `[1-4]`, `[A1-A3,B2]`) stands for

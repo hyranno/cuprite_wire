@@ -24,6 +24,10 @@ break the API).
   (`[2,13]`, `[1-4]`) as a pin per pad, connected inside the part, and looks up the library
   directories in `KICAD10_SYMBOL_DIR` / `KICAD10_FOOTPRINT_DIR` before the `KICAD9_` ones. The
   netlist stays in KiCad 9's format, which KiCad 10 reads.
+- Duplicate pins of KiCad 10 (several pins with the same number but different names or types,
+  e.g. `Diode:BAT54SDW`): `kicad_part!` makes each a pin (IDs `6`, `6#2`, ...) connected inside
+  the part, and the KiCad netlist writes the pad once, with the first pin as KiCad does.
+  A part may have several pins on one pad if they are connected inside the part.
 - `PartPins` (`PartPins::of(&part)`): the pin IDs of a part and its internal connection groups,
   with overlapping groups merged. `Component::pins` holds those of each component.
 

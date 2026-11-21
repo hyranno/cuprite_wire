@@ -78,6 +78,23 @@
 			(pin input line (at -7.62 2.54 0) (length 2.54) (name "+") (number "3"))
 			(pin power_in line (at -2.54 -7.62 90) (length 3.81) (name "V-") (number "[4,6]"))
 			(pin power_in line (at -2.54 7.62 270) (length 3.81) (name "V+") (number "5"))))
+	(symbol "DUP_AMP"
+		(exclude_from_sim no) (in_bom yes) (on_board yes)
+		(property "Reference" "U" (at 0 0 0))
+		(property "Value" "DUP_AMP" (at 0 0 0))
+		(property "Footprint" "" (at 0 0 0))
+		(property "Description" "Pad 4 has duplicate pins (KiCad 10): SUB is the first, being left of V-" (at 0 0 0))
+		(property "Sim.Device" "SUBCKT" (at 0 0 0))
+		(property "Sim.Library" "models/amp.lib" (at 0 0 0))
+		(property "Sim.Name" "amp" (at 0 0 0))
+		(property "Sim.Pins" "1=out 2=in- 3=in+ 5=vcc 4=vee" (at 0 0 0))
+		(symbol "DUP_AMP_1_1"
+			(pin output line (at 7.62 0 180) (length 2.54) (name "~") (number "1"))
+			(pin input line (at -7.62 -2.54 0) (length 2.54) (name "-") (number "2"))
+			(pin input line (at -7.62 2.54 0) (length 2.54) (name "+") (number "3"))
+			(pin power_in line (at -2.54 -7.62 90) (length 3.81) (name "V-") (number "4"))
+			(pin passive line (at -5.08 -7.62 90) (length 3.81) (name "SUB") (number "4"))
+			(pin power_in line (at -2.54 7.62 270) (length 3.81) (name "V+") (number "5"))))
 	(symbol "VSUP"
 		(exclude_from_sim no) (in_bom yes) (on_board yes)
 		(property "Reference" "U" (at 0 0 0))
