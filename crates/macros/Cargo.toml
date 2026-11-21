@@ -2,6 +2,7 @@
 name = "cuprite_wire_macros"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Procedural macros generating cuprite_wire parts from KiCad libraries"

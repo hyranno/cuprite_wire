@@ -73,7 +73,7 @@ fits your project and your team.
 
 ## Requirements
 
-- Rust (edition 2024)
+- Rust 1.89 or later
 - KiCad 9: pcbnew to import the netlist, and its libraries if parts are generated from them
 - ngspice (44 or later) for the simulations
 
