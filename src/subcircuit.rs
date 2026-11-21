@@ -2,7 +2,7 @@
 //!
 //! See the guide [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md#3-nodes-parts-and-subcircuits).
 
-use std::{collections::HashMap, fmt::Debug, marker::PhantomData, panic::Location};
+use std::{fmt::Debug, marker::PhantomData};
 
 use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
@@ -105,12 +105,12 @@ pub trait SubcircuitGenerator: Debug + Clone {
     }
 }
 
-/// Creates a circuit with the interface nodes `0..N` of `generator`, traced to `location`, and
+/// Creates a circuit with the interface nodes of `generator`, traced to `location`, and
 /// constructs the subcircuit in it.
 pub(crate) fn construct<G: SubcircuitGenerator>(
     generator: &G,
     options: &G::Options,
-    location: &'static Location<'static>,
+    location: Loc,
 ) -> (CircuitBuilder<G::Options>, G::Interface) {
     let mut circuit = CircuitBuilder::new();
     let interface = G::Interface::from_fn(|_| circuit.add_node_at(location));
@@ -120,7 +120,9 @@ pub(crate) fn construct<G: SubcircuitGenerator>(
 }
 
 pub(crate) trait ErasedSubcircuitGenerator<B>: Debug + DynClone {
-    fn generate(&self, options: &B) -> ExpandedCircuit;
+    /// Generates the subcircuit for an instance at `location`. Returns it with its interface
+    /// nodes in order.
+    fn generate(&self, options: &B, location: Loc) -> (ExpandedCircuit, Vec<NodeIndex>);
 }
 dyn_clone::clone_trait_object!(<B> ErasedSubcircuitGenerator<B>);
 
@@ -151,30 +153,24 @@ where
     }
 }
 
-impl<B, G, F> BoundSubcircuitGenerator<B, G, F>
-where
-    G: SubcircuitGenerator,
-{
-    fn generate_subcircuit(&self, options: &G::Options) -> ExpandedCircuit {
-        let (circuit, _) = construct(&self.generator, options, Location::caller());
-        circuit.expand(options)
-    }
-}
-
 impl<B, G, F> ErasedSubcircuitGenerator<B> for BoundSubcircuitGenerator<B, G, F>
 where
     G: SubcircuitGenerator + 'static,
     F: Fn(&B) -> G::Options + Clone + 'static,
 {
-    fn generate(&self, options: &B) -> ExpandedCircuit {
-        let generator_options = (self.options_for_generator)(options);
-        self.generate_subcircuit(&generator_options)
+    fn generate(&self, options: &B, location: Loc) -> (ExpandedCircuit, Vec<NodeIndex>) {
+        let options = (self.options_for_generator)(options);
+        let (circuit, interface) = construct(&self.generator, &options, location);
+        let interface = interface.values().into_iter().copied().collect();
+        (circuit.expand(&options), interface)
     }
 }
 
 pub struct SubcircuitInstance<B = ()> {
     pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
-    pub node_mapping: HashMap<NodeIndex, NodeIndex>,
+    /// The nodes in the circuit around the instance, connected to the subcircuit's interface nodes
+    /// in order.
+    pub interface: Vec<NodeIndex>,
     /// Explicit or automatic instance name.
     pub name: String,
     /// Where the subcircuit was instantiated.
@@ -185,7 +181,7 @@ impl<B> Clone for SubcircuitInstance<B> {
     fn clone(&self) -> Self {
         Self {
             generator: dyn_clone::clone_box(&*self.generator),
-            node_mapping: self.node_mapping.clone(),
+            interface: self.interface.clone(),
             name: self.name.clone(),
             location: self.location,
         }
@@ -195,7 +191,7 @@ impl<B> Clone for SubcircuitInstance<B> {
 impl<B> Debug for SubcircuitInstance<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SubcircuitInstance")
-            .field("node_mapping", &self.node_mapping)
+            .field("interface", &self.interface)
             .field("name", &self.name)
             .field("location", &self.location)
             .finish_non_exhaustive()
@@ -206,7 +202,7 @@ impl<B> SubcircuitInstance<B> {
     pub(crate) fn new<G, F>(
         generator: G,
         options_for_generator: F,
-        node_mapping: HashMap<NodeIndex, NodeIndex>,
+        interface: Vec<NodeIndex>,
         name: String,
         location: Loc,
     ) -> Self
@@ -221,7 +217,7 @@ impl<B> SubcircuitInstance<B> {
                 options_for_generator,
                 _builder_options: PhantomData,
             }),
-            node_mapping,
+            interface,
             name,
             location,
         }

@@ -43,6 +43,29 @@ pub struct Component {
     pub trace: Trace,
 }
 
+impl Component {
+    /// Checks the format-specific information `info` of the component for an exporter. Reports
+    /// `unsupported` if there is none, and the problems `check` finds otherwise, with the trace of
+    /// the component. Returns the information if there was no problem.
+    pub(crate) fn checked_info<I>(
+        &self,
+        info: Option<I>,
+        unsupported: impl FnOnce(String) -> CircuitErrorKind,
+        check: impl FnOnce(&I) -> Vec<CircuitErrorKind>,
+        errors: &mut Vec<CircuitError>,
+    ) -> Option<I> {
+        let error = |kind| CircuitError::new(kind, self.trace.clone());
+        let Some(info) = info else {
+            errors.push(error(unsupported(self.ref_name.clone())));
+            return None;
+        };
+        let problems = check(&info);
+        let ok = problems.is_empty();
+        errors.extend(problems.into_iter().map(error));
+        ok.then_some(info)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Net {
     pub name: String,
@@ -82,88 +105,23 @@ impl BuiltCircuit {
             })
             .collect();
         let pins_by_node = self.pins_by_node(&component_of_part);
+        let unnamed = |nodes: &[NetNode]| unnamed_net_name(nodes, &components, &kicad_infos);
 
         let mut nets = Vec::new();
         let mut pinless_marks = Vec::new();
         for group in self.connected_nodes() {
-            let mut nodes: Vec<NetNode> = group
-                .iter()
-                .filter_map(|node| pins_by_node.get(node).cloned())
-                .collect();
-            let labels: Vec<&NodeLabel> = group
-                .iter()
-                .flat_map(|&node| &self.nets[node].labels)
-                .collect();
-            let marks: Vec<NodeMark> = group
-                .iter()
-                .flat_map(|&node| self.nets[node].marks.iter().cloned())
-                .collect();
-            if nodes.is_empty() {
-                pinless_marks.extend(marks);
-                if let Some(first) = labels.first() {
-                    let names = distinct_names(&labels);
-                    warnings.push(CircuitWarning::new(
-                        CircuitWarningKind::LabelOnlyNet { names },
-                        first.trace.clone(),
-                    ));
-                }
-                continue;
+            match self.resolve_net(&group, &pins_by_node, unnamed, &mut warnings) {
+                Ok(net) => nets.push(net),
+                Err(marks) => pinless_marks.extend(marks),
             }
-            nodes.sort();
-
-            let net = match choose_label(&labels) {
-                Some(label) => {
-                    let name = label.net_name();
-                    let others: Vec<_> = distinct_names(&labels)
-                        .into_iter()
-                        .filter(|other| *other != name)
-                        .collect();
-                    if !others.is_empty() {
-                        let mut warning = CircuitWarning::new(
-                            CircuitWarningKind::MultipleNetNames {
-                                used: name.clone(),
-                                others,
-                            },
-                            label.trace.clone(),
-                        );
-                        for other in labels.iter().filter(|other| other.net_name() != name) {
-                            warning = warning.with_note(
-                                format!("also named {:?} here", other.net_name()),
-                                other.trace.clone(),
-                            );
-                        }
-                        warnings.push(warning);
-                    }
-                    Net {
-                        name,
-                        nodes,
-                        trace: label.trace.clone(),
-                        marks,
-                    }
-                }
-                None => Net {
-                    name: unnamed_net_name(&nodes, &components, &kicad_infos),
-                    trace: self.nets[group[0]].trace.clone(),
-                    nodes,
-                    marks,
-                },
-            };
-            nets.push(net);
         }
         nets.sort_by(|a, b| natural_cmp(&a.name, &b.name));
-        for pair in nets.windows(2) {
-            if pair[0].name == pair[1].name {
-                errors.push(
-                    CircuitError::new(
-                        CircuitErrorKind::DuplicateNetName {
-                            name: pair[1].name.clone(),
-                        },
-                        pair[1].trace.clone(),
-                    )
-                    .with_note("the other net is named here", pair[0].trace.clone()),
-                );
-            }
-        }
+        errors.extend(duplicate_name_errors(
+            &nets,
+            |net| (&net.name, &net.trace),
+            |name| CircuitErrorKind::DuplicateNetName { name },
+            "the other net is named here",
+        ));
 
         for warning in &warnings {
             warn(warning);
@@ -210,19 +168,12 @@ impl BuiltCircuit {
 
         let mut by_ref: Vec<&Component> = components.iter().collect();
         by_ref.sort_by(|a, b| natural_cmp(&a.ref_name, &b.ref_name));
-        for pair in by_ref.windows(2) {
-            if pair[0].ref_name == pair[1].ref_name {
-                errors.push(
-                    CircuitError::new(
-                        CircuitErrorKind::DuplicateRef {
-                            ref_name: pair[1].ref_name.clone(),
-                        },
-                        pair[1].trace.clone(),
-                    )
-                    .with_note("the other part is instantiated here", pair[0].trace.clone()),
-                );
-            }
-        }
+        errors.extend(duplicate_name_errors(
+            &by_ref,
+            |component| (&component.ref_name, &component.trace),
+            |ref_name| CircuitErrorKind::DuplicateRef { ref_name },
+            "the other part is instantiated here",
+        ));
         for component in &components {
             let error = |kind| CircuitError::new(kind, component.trace.clone());
             let pin_ids = component.part.pin_ids();
@@ -245,6 +196,57 @@ impl BuiltCircuit {
             }
         }
         (components, component_of_part)
+    }
+
+    /// The net of a group of connected nodes, named by its labels or by `unnamed`. Reports a
+    /// warning if the net has several names. A group without part pins is not a net: its labels
+    /// are reported, and its ERC marks are returned as the error.
+    fn resolve_net(
+        &self,
+        group: &[NodeIndex],
+        pins_by_node: &HashMap<NodeIndex, NetNode>,
+        unnamed: impl Fn(&[NetNode]) -> String,
+        warnings: &mut Vec<CircuitWarning>,
+    ) -> Result<Net, Vec<NodeMark>> {
+        let marks: Vec<NodeMark> = group
+            .iter()
+            .flat_map(|&node| self.nets[node].marks.iter().cloned())
+            .collect();
+        let mut nodes: Vec<NetNode> = group
+            .iter()
+            .filter_map(|node| pins_by_node.get(node).cloned())
+            .collect();
+        let labels: Vec<&NodeLabel> = group
+            .iter()
+            .flat_map(|&node| &self.nets[node].labels)
+            .collect();
+        if nodes.is_empty() {
+            if let Some(first) = labels.first() {
+                warnings.push(CircuitWarning::new(
+                    CircuitWarningKind::LabelOnlyNet {
+                        names: distinct_names(&labels),
+                    },
+                    first.trace.clone(),
+                ));
+            }
+            return Err(marks);
+        }
+        nodes.sort();
+
+        let (name, trace) = match choose_label(&labels) {
+            Some(label) => {
+                let name = label.net_name();
+                warnings.extend(multiple_names_warning(&name, label, &labels));
+                (name, label.trace.clone())
+            }
+            None => (unnamed(&nodes), self.nets[group[0]].trace.clone()),
+        };
+        Ok(Net {
+            name,
+            nodes,
+            trace,
+            marks,
+        })
     }
 
     fn pins_by_node(&self, component_of_part: &[usize]) -> HashMap<NodeIndex, NetNode> {
@@ -292,6 +294,57 @@ fn choose_label<'a>(labels: &[&'a NodeLabel]) -> Option<&'a NodeLabel> {
             .then_with(|| a.scope.0.len().cmp(&b.scope.0.len()))
             .then_with(|| a.net_name().cmp(&b.net_name()))
     })
+}
+
+/// The warning for a net named `name` by `label` that the other `labels` name differently.
+fn multiple_names_warning(
+    name: &str,
+    label: &NodeLabel,
+    labels: &[&NodeLabel],
+) -> Option<CircuitWarning> {
+    let others: Vec<_> = distinct_names(labels)
+        .into_iter()
+        .filter(|other| other != name)
+        .collect();
+    if others.is_empty() {
+        return None;
+    }
+    let mut warning = CircuitWarning::new(
+        CircuitWarningKind::MultipleNetNames {
+            used: name.to_string(),
+            others,
+        },
+        label.trace.clone(),
+    );
+    for other in labels.iter().filter(|other| other.net_name() != name) {
+        warning = warning.with_note(
+            format!("also named {:?} here", other.net_name()),
+            other.trace.clone(),
+        );
+    }
+    Some(warning)
+}
+
+/// Errors for the items named like the item before them, with a note pointing at it.
+/// `items` are sorted so that equal names are adjacent; `name_and_trace` gives the name and the
+/// trace of an item.
+fn duplicate_name_errors<T>(
+    items: &[T],
+    name_and_trace: impl Fn(&T) -> (&String, &Trace),
+    kind: impl Fn(String) -> CircuitErrorKind,
+    note: &str,
+) -> Vec<CircuitError> {
+    items
+        .windows(2)
+        .filter_map(|pair| {
+            let ((name, trace), (other, other_trace)) =
+                (name_and_trace(&pair[1]), name_and_trace(&pair[0]));
+            (name == other).then(|| {
+                CircuitError::new(kind(name.clone()), trace.clone())
+                    .with_note(note, other_trace.clone())
+            })
+        })
+        .collect()
 }
 
 fn distinct_names(labels: &[&NodeLabel]) -> Vec<String> {

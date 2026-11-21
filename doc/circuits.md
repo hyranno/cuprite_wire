@@ -136,7 +136,7 @@ Reference designators (`R1`, `R2`, ...) are numbered in instantiation order over
 | (none) | - | `Net-(R1-Pad2)`, `Net-(U1-OUT)`, `unconnected-(U1-NC-Pad7)` |
 
 - Sheet paths are made from the instance names of the subcircuits (`/amp_left/stage#1/`).
-  `/` in names is written as `{slash}`.
+  `/` in names is written as `{slash}`, so `{` is not allowed in explicit names and labels.
 - A net with several names is not an error (as in KiCad). The name is chosen by:
   global over local, then the label in the shallower subcircuit instance, then the smallest name.
   A `MultipleNetNames` warning is reported, and the other names still connect nets
@@ -168,7 +168,7 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 
 | Error | Cause |
 |---|---|
-| `InvalidName` | empty name or label, or `#` in an explicit name |
+| `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label |
 | `DuplicateInstanceName` | the same explicit name twice in one (sub)circuit (the note points at the first) |
 | `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections |
 | `DuplicateRef` | two parts with the same reference designator |
