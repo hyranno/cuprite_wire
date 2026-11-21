@@ -37,7 +37,7 @@ Each net is checked for:
 
 | Rule | Default | Violation |
 |---|---|---|
-| (pin map) | see below | two pins whose types conflict |
+| `PinToPin` | see below | two pins whose types conflict |
 | `PinNotConnected` | error | the only pin of the net (except `no_connect` and `free` pins) |
 | `PinNotDriven` | error | an `input` pin on a net without `output`, `power_out`, `passive`, `tri_state` or `bidirectional` pins |
 | `PowerPinNotDriven` | error | a net with a `power_in` pin and without a `power_out` pin |
@@ -70,6 +70,9 @@ let mut settings = ErcSettings::default().with_severity(ErcRule::PinNotConnected
 settings.pin_map.set(PinType::Output, PinType::Output, Severity::Ignore);
 ```
 
+The severity of `PinToPin` (`Error` by default) is the highest a pin conflict can be: `Warning`
+reports the errors of the pin map as warnings, and `Ignore` turns pin conflicts off.
+
 ## 4. Marks
 
 Nodes can carry marks seen only by ERC; the exporters ignore them. Like labels, marks attached
@@ -80,10 +83,23 @@ inside a subcircuit stay on the nets of the circuit that instantiates it.
 | `circuit.no_connect(node)` | no-connect flag | the net is intentionally unconnected |
 | `circuit.power_flag(node)` | `PWR_FLAG` | a virtual `power_out` pin named `PWR_FLAG` |
 | `circuit.virtual_pin(node, pin_type, name)` | - | a pin outside the circuit, e.g. what a connector brings in |
+| `circuit.erc_allow(node, rule)` | excluded ERC marker | the violations of `rule` on the net are not reported |
 
 As in KiCad, a supply that enters the board through a connector (a `passive` pin) needs a
 `power_flag` for the `power_in` pins on it. Global labels connect nets but are not pins, so a
 `GND` label does not drive anything by itself.
+
+`erc_allow` excludes one rule on one net, where `ErcSettings` would change it everywhere:
+
+```rust
+circuit.erc_allow(bus, ErcRule::PinToPin);   // outputs connected on purpose
+```
+
+`SimilarNetNames` is left out if either of the two nets allows it. Nothing is reported for an
+`erc_allow` without violations: a subcircuit may have them when checked alone but not on the
+board, or the other way around. The rules about nets without part pins (`NoConnectDangling`,
+`VirtualPinDangling`, `LabelOnlyNet`) cannot be allowed; remove the mark or the label instead, or
+change their severity.
 
 ## 5. Checking a subcircuit
 

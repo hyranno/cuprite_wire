@@ -11,7 +11,7 @@ use petgraph::{graph::UnGraph, unionfind::UnionFind, visit::EdgeRef};
 pub use petgraph::graph::NodeIndex;
 
 use crate::{
-    erc::{ErcMark, NodeMark},
+    erc::{ErcMark, ErcRule, NodeMark},
     error::{CircuitError, CircuitErrorKind},
     naming::{
         AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_explicit_name, check_label_name,
@@ -258,6 +258,15 @@ impl<B> CircuitBuilder<B> {
                 name: name.to_string(),
             },
         );
+    }
+
+    /// Leaves the violations of `rule` on the net containing `node` out of ERC (like excluding a
+    /// KiCad ERC marker), e.g. [`ErcRule::PinToPin`] for outputs that are connected on purpose.
+    /// Nothing is reported if there is no such violation, and the mark has no effect on a net
+    /// without part pins.
+    #[track_caller]
+    pub fn erc_allow(&mut self, node: NodeIndex, rule: ErcRule) {
+        self.mark(node, ErcMark::Allow(rule));
     }
 
     #[track_caller]

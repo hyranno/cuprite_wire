@@ -155,6 +155,99 @@ fn test_conflicting_outputs() {
         .pin_map
         .set(PinType::Output, PinType::Output, Severity::Ignore);
     erc_with(&circuit, &(), &settings).assert_clean();
+
+    // The severity of the rule caps that of the pin map.
+    let settings = ErcSettings::default().with_severity(ErcRule::PinToPin, Severity::Warning);
+    let report = erc_with(&circuit, &(), &settings);
+    assert_eq!(report.warnings().count(), 1);
+    report.assert_no_errors();
+    let settings = settings.with_severity(ErcRule::PinToPin, Severity::Ignore);
+    erc_with(&circuit, &(), &settings).assert_clean();
+
+    // The net can allow it.
+    circuit.erc_allow(u["out"], ErcRule::PinToPin);
+    erc(&circuit).assert_clean();
+}
+
+/// A resistor whose second pin is left open on purpose. Node 0: the first pin.
+#[derive(Debug, Clone)]
+struct OpenResistor;
+
+impl SubcircuitGenerator for OpenResistor {
+    type Options = ();
+    type Interface = [NodeIndex; 1];
+
+    fn construct_subcircuit(
+        &self,
+        _options: &(),
+        circuit: &mut CircuitBuilder,
+        interface: Self::Interface,
+    ) {
+        let r = circuit.instantiate_part_named("r", Box::new(Resistor0603::new("1k")));
+        circuit.connect(interface[0], r["1"]);
+        circuit.erc_allow(r["2"], ErcRule::PinNotConnected);
+    }
+}
+
+#[test]
+fn test_allow() {
+    let mut circuit = CircuitBuilder::new();
+    let [a] = circuit.instantiate_subcircuit_named("a", OpenResistor);
+    let [b] = circuit.instantiate_subcircuit_named("b", OpenResistor);
+    // Allowing another rule has no effect.
+    circuit.erc_allow(a, ErcRule::PinNotDriven);
+    // The marks inside the subcircuits allow only the nets they are on.
+    assert_eq!(
+        summary(&erc(&circuit)),
+        vec![
+            error("net \"unconnected-(R1-Pad1)\": R1.1 (passive) is not connected to anything"),
+            error("net \"unconnected-(R2-Pad1)\": R2.1 (passive) is not connected to anything"),
+        ]
+    );
+    circuit.connect(a, b);
+    erc(&circuit).assert_clean();
+    // Nothing is reported for a mark without violations, or on a net without part pins.
+    let node = circuit.add_node();
+    circuit.erc_allow(node, ErcRule::NoConnectDangling);
+    erc(&circuit).assert_clean();
+
+    // The marks apply to a subcircuit checked alone too.
+    let report = check_subcircuit(&OpenResistor, &(), &[None], &ErcSettings::default()).unwrap();
+    assert_eq!(
+        summary(&report),
+        vec![error(
+            "net \"unconnected-(R1-Pad1)\": R1.1 (passive) is not connected to anything"
+        )]
+    );
+}
+
+#[test]
+fn test_allow_net_name_rules() {
+    let mut circuit = follower_circuit(true);
+    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    circuit.connect(r["1"], r["2"]);
+    circuit.label(r["1"], NetLabel::global("out"));
+    circuit.label(r["2"], NetLabel::local("SIG"));
+    assert_eq!(
+        summary(&erc(&circuit)),
+        vec![
+            warning("net names \"out\" and \"OUT\" differ only in case"),
+            warning("net \"out\" is also named \"/SIG\""),
+        ]
+    );
+    circuit.erc_allow(r["1"], ErcRule::SimilarNetNames);
+    circuit.erc_allow(r["1"], ErcRule::MultipleNetNames);
+    erc(&circuit).assert_clean();
+
+    // Either net of similar names allows it.
+    let mut circuit = follower_circuit(true);
+    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    circuit.connect(r["1"], r["2"]);
+    circuit.label(r["1"], NetLabel::global("out"));
+    let output = circuit.add_node();
+    circuit.label(output, NetLabel::global("OUT"));
+    circuit.erc_allow(output, ErcRule::SimilarNetNames);
+    erc(&circuit).assert_clean();
 }
 
 #[test]

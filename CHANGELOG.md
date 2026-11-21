@@ -10,7 +10,16 @@ break the API).
 
 ## [Unreleased]
 
+### Added
+
+- `CircuitBuilder::erc_allow` (`ErcMark::Allow`): leaves the violations of one ERC rule on one
+  net out of the report, like excluding a KiCad ERC marker.
+- `ErcRule::PinToPin`: its severity caps those of the pin map (`Warning` reports pin conflicts as
+  warnings at most, `Ignore` turns them off).
+
 ### Changed
+
+- `ErcMark` is `#[non_exhaustive]`.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
