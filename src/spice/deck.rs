@@ -54,7 +54,7 @@ impl SpiceDeck {
         self
     }
 
-    fn has_control(&self) -> bool {
+    pub(crate) fn has_control(&self) -> bool {
         !self.control.is_empty()
     }
 
@@ -67,6 +67,10 @@ impl SpiceDeck {
 #[cfg(feature = "shared-ngspice")]
 /// Front-end commands whose first argument is an output file.
 const OUTPUT_COMMANDS: [&str; 3] = ["wrdata", "write", "wrs2p"];
+
+#[cfg(feature = "shared-ngspice")]
+/// The file `write` writes when it is given none.
+const DEFAULT_RAW_FILE: &str = "rawspice.raw";
 
 impl SpiceDeck {
     #[cfg(feature = "shared-ngspice")]
@@ -118,12 +122,16 @@ fn output_in<'a>(command: &'a str, dir: &Path) -> Cow<'a, str> {
     };
     let (name, rest) = split(command);
     let (file, rest) = split(rest);
-    if !OUTPUT_COMMANDS.iter().any(|c| c.eq_ignore_ascii_case(name))
-        || file.is_empty()
-        || Path::new(file).is_absolute()
-    {
+    if !OUTPUT_COMMANDS.iter().any(|c| c.eq_ignore_ascii_case(name)) {
         return Cow::Borrowed(command);
     }
+    // `write` without a file writes the default raw file of ngspice.
+    let file = match file {
+        "" if name.eq_ignore_ascii_case("write") => DEFAULT_RAW_FILE,
+        "" => return Cow::Borrowed(command),
+        file if Path::new(file).is_absolute() => return Cow::Borrowed(command),
+        file => file,
+    };
     Cow::Owned(format!("{name} {}{rest}", dir.join(file).display()))
 }
 
@@ -149,7 +157,9 @@ mod tests {
             output_in("wrdata /abs.txt v(1)", dir),
             "wrdata /abs.txt v(1)"
         );
-        assert_eq!(output_in("write", dir), "write");
+        assert_eq!(output_in("write", dir), "write /run/dir/rawspice.raw");
+        assert_eq!(output_in(" Write ", dir), "Write /run/dir/rawspice.raw");
+        assert_eq!(output_in("wrs2p", dir), "wrs2p");
         assert_eq!(output_in("tran 1u 1m", dir), "tran 1u 1m");
     }
 }

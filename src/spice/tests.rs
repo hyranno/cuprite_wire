@@ -674,6 +674,48 @@ fn test_shared_library_matches_cli() {
     assert!(!library_deck.contains("quit"), "{library_deck}");
 }
 
+/// A deck without a control block runs the analyses of its dot directives in both backends.
+#[cfg(feature = "shared-ngspice")]
+#[test]
+fn test_shared_library_runs_dot_analyses() {
+    use crate::spice::{Ngspice, SharedNgspice};
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .deck()
+        .directive(".tran 10u 2m uic")
+        .directive(".meas tran half WHEN v(/OUT)=0.5");
+    let cli = Ngspice::default().run(&deck).unwrap();
+    let shared = SharedNgspice::default().run(&deck).unwrap();
+    assert!(cli.value("half").is_some(), "{}", cli.log());
+    assert_eq!(shared.value("half"), cli.value("half"), "{}", shared.log());
+}
+
+/// `write` without a file writes `rawspice.raw` in the run directory, not in the working
+/// directory of the process.
+#[cfg(feature = "shared-ngspice")]
+#[test]
+fn test_shared_library_writes_default_raw_file() {
+    use crate::spice::SharedNgspice;
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .deck()
+        .control(["op", "write"]);
+    let shared = SharedNgspice::default().run(&deck).unwrap();
+    assert!(
+        shared.dir().join("rawspice.raw").is_file(),
+        "{}",
+        shared.log()
+    );
+}
+
+/// A measurement whose name starts with `error` is a value, not an error of ngspice.
+#[test]
+fn test_measurement_named_error() {
+    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+        .deck()
+        .control(["tran 10u 2m uic", r#"meas tran error_max MAX v("/OUT")"#]);
+    let sim = deck.run().unwrap();
+    assert!((sim.expect_value("error_max") - 1.0).abs() < 0.2);
+}
+
 /// After an error ngspice cannot recover from (a syntax error in an expression), the library is
 /// loaded again and the next run succeeds.
 #[cfg(feature = "shared-ngspice")]

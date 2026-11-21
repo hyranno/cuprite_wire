@@ -45,8 +45,11 @@ const DEFAULT_LIBRARY: &str = if cfg!(windows) {
 /// the run directory holds `deck.cir` (`ngspice -b deck.cir` there reproduces the run with the CLI)
 /// and `shared.cir`, the form the library runs. That form has no `quit`, and the relative output
 /// files of `wrdata`, `write` and `wrs2p` are made absolute, since the library runs in the working
-/// directory of the process. Output files of other commands (e.g. `print ... > file`) must be
-/// absolute. The compatibility mode is set with `set ngbehavior=...` before the deck is read.
+/// directory of the process (`write` without a file writes `rawspice.raw` in the run directory, as
+/// the CLI does). Output files of other commands (e.g. `print ... > file`) must be absolute, and
+/// `wrs2p` needs a file. The compatibility mode is set with `set ngbehavior=...` before the deck is
+/// read. A deck without a control block is run with `run` after it is read, as the CLI runs the
+/// analyses of its dot directives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SharedNgspice {
     /// The library file: a path, or a file name the dynamic loader searches for.
@@ -110,18 +113,19 @@ impl SharedNgspice {
             None => "unset ngbehavior".into(),
         };
         let source = format!("source {}", deck_path.display());
+        // Without a control block the CLI runs the analyses of the dot directives; `source` only
+        // loads the circuit.
+        let commands = [mode.as_str(), source.as_str()]
+            .into_iter()
+            .chain((!deck.has_control()).then_some("run"));
         let status = {
             let _active = session.map(|session| Active::start(session, loaded.set_breakpoint));
-            loaded.command(&mode).and_then(|status| {
-                if status == 0 {
-                    loaded.command(&source)
-                } else {
-                    Ok(status)
-                }
-            })
+            commands
+                .map(|command| loaded.command(command))
+                .find(|status| !matches!(status, Ok(0)) || EXITED.load(Ordering::SeqCst))
+                .unwrap_or(Ok(0))
         };
         let panic = Active::take_panic();
-        let succeeded = status? == 0;
         let log = std::mem::take(&mut *lock(&OUTPUT));
         let exited = EXITED.load(Ordering::SeqCst);
         if exited {
@@ -129,14 +133,16 @@ impl SharedNgspice {
             *library = None;
         } else {
             // Free the circuit and its results.
-            loaded.command("remcirc")?;
-            loaded.command("destroy all")?;
+            for command in ["remcirc", "destroy all"] {
+                loaded.command(command).expect("no NUL character");
+            }
             lock(&OUTPUT).clear();
         }
         drop(library);
         if let Some(panic) = panic {
             resume_unwind(panic);
         }
+        let succeeded = status? == 0;
         finish_run(dir, log, succeeded && !exited)
     }
 }

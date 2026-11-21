@@ -38,7 +38,7 @@ impl Ngspice {
         let output = Command::new(&self.program)
             .arg("-b")
             .arg(dir.join(DECK_FILE))
-            .current_dir(&dir)
+            .current_dir(dir.path())
             .output()?;
         let log = format!(
             "{}{}",
@@ -68,8 +68,8 @@ pub(crate) const DECK_FILE: &str = "deck.cir";
 /// Creates a run directory with the deck ([`DECK_FILE`]) and, if the models need a compatibility
 /// mode, a `.spiceinit` setting it (ngspice reads it from its working directory before the deck;
 /// the mode cannot be set from the deck).
-pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<PathBuf> {
-    let dir = create_run_dir()?;
+pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<RunDir> {
+    let dir = RunDir::create()?;
     fs::write(dir.join(DECK_FILE), deck.to_string())?;
     if let Some(mode) = deck.netlist().ngbehavior() {
         fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
@@ -79,33 +79,79 @@ pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<PathBuf> {
 
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
 pub(crate) fn finish_run(
-    dir: PathBuf,
+    dir: RunDir,
     log: String,
     succeeded: bool,
 ) -> Result<Simulation, SimulationError> {
-    let reported_error = log
-        .lines()
-        .any(|line| line.trim_start().to_ascii_lowercase().starts_with("error"));
-    if !succeeded || reported_error {
+    if !succeeded || log.lines().any(is_error_line) {
         // The directory is kept for inspection.
-        return Err(SimulationError::Ngspice { log, dir });
+        return Err(SimulationError::Ngspice {
+            log,
+            dir: dir.keep(),
+        });
     }
     Ok(Simulation { dir, log })
 }
 
-fn create_run_dir() -> io::Result<PathBuf> {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    loop {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "{}-sim-{}-{n}",
-            env!("CARGO_PKG_NAME"),
-            std::process::id()
-        ));
-        match fs::create_dir(&dir) {
-            Ok(()) => return Ok(dir),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+/// Whether ngspice reports an error with `line`: it starts with the word `error` (`Error: ...`,
+/// `ERROR ...`), but is not a value printed as `name = value` (`error_max = 1.0` of `meas`).
+fn is_error_line(line: &str) -> bool {
+    let line = line.trim_start();
+    let end = line
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .unwrap_or(line.len());
+    let (word, rest) = line.split_at(end);
+    word.eq_ignore_ascii_case("error") && !rest.trim_start().starts_with('=')
+}
+
+/// A temporary directory a deck runs in, removed when dropped unless kept.
+#[derive(Debug)]
+pub(crate) struct RunDir {
+    /// `None` once kept.
+    path: Option<PathBuf>,
+}
+
+impl RunDir {
+    /// A new, empty directory in the temporary directory of the system.
+    fn create() -> io::Result<Self> {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        loop {
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "{}-sim-{}-{n}",
+                env!("CARGO_PKG_NAME"),
+                std::process::id()
+            ));
+            match fs::create_dir(&path) {
+                Ok(()) => return Ok(RunDir { path: Some(path) }),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.path.as_deref().expect("the directory is not kept yet")
+    }
+
+    /// The path of the directory, which is no longer removed.
+    fn keep(mut self) -> PathBuf {
+        self.path.take().expect("the directory is not kept yet")
+    }
+}
+
+impl std::ops::Deref for RunDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.path()
+    }
+}
+
+impl Drop for RunDir {
+    fn drop(&mut self) {
+        if let Some(path) = &self.path {
+            let _ = fs::remove_dir_all(path);
         }
     }
 }
@@ -113,7 +159,7 @@ fn create_run_dir() -> io::Result<PathBuf> {
 /// The results of a successful run. The run directory is removed when this is dropped.
 #[derive(Debug)]
 pub struct Simulation {
-    dir: PathBuf,
+    dir: RunDir,
     log: String,
 }
 
@@ -125,7 +171,7 @@ impl Simulation {
 
     /// The directory the deck ran in.
     pub fn dir(&self) -> &Path {
-        &self.dir
+        self.dir.path()
     }
 
     /// Reads a file written by `wrdata` in the control block.
@@ -153,12 +199,6 @@ impl Simulation {
     pub fn expect_value(&self, name: &str) -> f64 {
         self.value(name)
             .unwrap_or_else(|| panic!("{name} not found in the output of ngspice:\n{}", self.log))
-    }
-}
-
-impl Drop for Simulation {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -243,17 +283,12 @@ impl Table {
 
 #[derive(Debug)]
 pub enum SimulationError {
+    /// ngspice cannot be run. The run directory, if any, is removed.
     Io(io::Error),
     /// ngspice failed or printed an error. The run directory is kept.
-    Ngspice {
-        log: String,
-        dir: PathBuf,
-    },
+    Ngspice { log: String, dir: PathBuf },
     /// A `wrdata` file cannot be read as a table.
-    Table {
-        file: String,
-        reason: String,
-    },
+    Table { file: String, reason: String },
     /// The ngspice shared library cannot be loaded or used.
     SharedLibrary(String),
     /// The models of a co-simulation do not match the devices of the deck.
@@ -294,7 +329,9 @@ mod tests {
 
     fn simulation(log: &str) -> Simulation {
         Simulation {
-            dir: std::env::temp_dir().join("cuprite_wire-no-such-run-dir"),
+            dir: RunDir {
+                path: Some(std::env::temp_dir().join("cuprite_wire-no-such-run-dir")),
+            },
             log: log.to_string(),
         }
     }
@@ -311,6 +348,37 @@ mod tests {
     #[should_panic(expected = "gain not found in the output of ngspice:\nNote: ...")]
     fn test_expect_value_panics_with_the_log() {
         simulation("Note: ...\n").expect_value("gain");
+    }
+
+    /// The run directory is removed when dropped, and kept when ngspice reports an error.
+    #[test]
+    fn test_run_dir_removed() {
+        let dir = RunDir::create().unwrap();
+        let path = dir.to_path_buf();
+        assert!(path.is_dir());
+        drop(dir);
+        assert!(!path.exists());
+
+        let dir = RunDir::create().unwrap();
+        let path = dir.to_path_buf();
+        let error = finish_run(dir, "Error: no circuit loaded.".into(), true).unwrap_err();
+        assert!(matches!(&error, SimulationError::Ngspice { dir, .. } if *dir == path));
+        assert!(path.is_dir());
+        fs::remove_dir(&path).unwrap();
+    }
+
+    #[test]
+    fn test_is_error_line() {
+        assert!(is_error_line("Error: unknown subckt: x1 out 0 nosuch"));
+        assert!(is_error_line("  ERROR on line 3"));
+        assert!(is_error_line("error"));
+        assert!(!is_error_line(
+            "error_max           =  1.000000e+00 at=  5.000000e-03"
+        ));
+        assert!(!is_error_line("error               =  1.000000e+00"));
+        assert!(!is_error_line("errors: none"));
+        assert!(!is_error_line("PPerror: syntax error in line segment"));
+        assert!(!is_error_line("Warning: error ignored"));
     }
 
     #[test]
