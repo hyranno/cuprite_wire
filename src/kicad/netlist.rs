@@ -100,7 +100,16 @@ impl Netlist {
                     .collect();
                 // KiCad sorts nodes by reference and pad number, both in string order.
                 nodes.sort();
-                nodes.dedup_by(|a, b| a.ref_name == b.ref_name && a.pad == b.pad);
+                // A part with two pins on one pad is rejected (`DuplicatePad`), and references
+                // are unique (`DuplicateRef`).
+                debug_assert!(
+                    nodes
+                        .windows(2)
+                        .all(|pair| (&pair[0].ref_name, &pair[0].pad)
+                            != (&pair[1].ref_name, &pair[1].pad)),
+                    "a pad is listed twice in net {:?}",
+                    net.name
+                );
                 KicadNet {
                     code: i + 1,
                     name: net.name.clone(),
@@ -123,37 +132,38 @@ impl Netlist {
 /// Returns the KiCad information of a component if it can be exported.
 fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Option<KicadPartInfo> {
     let ref_name = || component.ref_name.clone();
-    let errors_before = errors.len();
-    let mut error = |kind| errors.push(CircuitError::new(kind, component.trace.clone()));
-
-    let Some(info) = component.part.kicad() else {
-        error(CircuitErrorKind::KicadUnsupported {
-            ref_name: ref_name(),
-        });
-        return None;
+    let check = |info: &KicadPartInfo| {
+        let footprint = info
+            .footprint
+            .is_none()
+            .then(|| CircuitErrorKind::FootprintMissing {
+                ref_name: ref_name(),
+            });
+        let pins = info
+            .check_pins(&component.part.pin_ids())
+            .into_iter()
+            .map(|problem| match problem {
+                PinInfoProblem::Missing { pin_id } => CircuitErrorKind::PinInfoMissing {
+                    ref_name: ref_name(),
+                    pin_id,
+                },
+                PinInfoProblem::Unknown { pin_id } => CircuitErrorKind::UnknownPinId {
+                    ref_name: ref_name(),
+                    pin_id,
+                },
+                PinInfoProblem::DuplicatePad { pad } => CircuitErrorKind::DuplicatePad {
+                    ref_name: ref_name(),
+                    pad,
+                },
+            });
+        footprint.into_iter().chain(pins).collect()
     };
-    if info.footprint.is_none() {
-        error(CircuitErrorKind::FootprintMissing {
-            ref_name: ref_name(),
-        });
-    }
-    for problem in info.check_pins(&component.part.pin_ids()) {
-        error(match problem {
-            PinInfoProblem::Missing { pin_id } => CircuitErrorKind::PinInfoMissing {
-                ref_name: ref_name(),
-                pin_id,
-            },
-            PinInfoProblem::Unknown { pin_id } => CircuitErrorKind::UnknownPinId {
-                ref_name: ref_name(),
-                pin_id,
-            },
-            PinInfoProblem::DuplicatePad { pad } => CircuitErrorKind::DuplicatePad {
-                ref_name: ref_name(),
-                pad,
-            },
-        });
-    }
-    (errors.len() == errors_before).then_some(info)
+    component.checked_info(
+        component.part.kicad(),
+        |ref_name| CircuitErrorKind::KicadUnsupported { ref_name },
+        check,
+        errors,
+    )
 }
 
 impl KicadNetlist {

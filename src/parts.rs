@@ -81,13 +81,6 @@ impl PartInstance {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PinRef {
-    pub node_index: NodeIndex,
-    pub part_ref_name: String,
-    pub pin_id: String,
-}
-
 /// Electrical type of a pin, used by ERC and written as `pintype` in the KiCad netlist.
 /// The types and their names are those of KiCad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]

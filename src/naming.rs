@@ -12,6 +12,10 @@ const UUID_NAMESPACE: Uuid = Uuid::from_u128(0x472d540a_1f37_4bd8_a634_de0cd5e63
 /// Character reserved for automatic instance names (`R#1`, `OpAmpStage#2`, ...).
 pub(crate) const AUTO_NAME_SEPARATOR: char = '#';
 
+/// Character starting an escape sequence (`{slash}`). Rejected in names and labels so that
+/// [`escape_name`] is injective on them.
+const ESCAPE_START: char = '{';
+
 /// Escapes characters that have a special meaning in KiCad net names and sheet paths.
 pub fn escape_name(name: &str) -> String {
     name.replace('/', "{slash}")
@@ -85,6 +89,19 @@ pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
         Err("names must not be empty")
     } else if name.contains(AUTO_NAME_SEPARATOR) {
         Err("'#' is reserved for automatic names")
+    } else if name.contains(ESCAPE_START) {
+        Err("'{' is reserved for escape sequences such as {slash}")
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks the name of a net label.
+pub(crate) fn check_label_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        Err("net labels must not be empty")
+    } else if name.contains(ESCAPE_START) {
+        Err("'{' is reserved for escape sequences such as {slash}")
     } else {
         Ok(())
     }
@@ -220,5 +237,13 @@ mod tests {
         assert!(check_explicit_name("amp_left").is_ok());
         assert!(check_explicit_name("").is_err());
         assert!(check_explicit_name("R#1").is_err());
+        assert!(check_explicit_name("a{slash}b").is_err());
+    }
+
+    #[test]
+    fn test_check_label_name() {
+        assert!(check_label_name("I/O").is_ok());
+        assert!(check_label_name("").is_err());
+        assert!(check_label_name("I{slash}O").is_err());
     }
 }

@@ -3,7 +3,7 @@
 //! See [SPICE Netlist Format](https://github.com/hyranno/cuprite_wire/blob/main/doc/dev/spice_netlist_format.md) for the format.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, btree_map::Entry},
     fmt, io,
     path::PathBuf,
 };
@@ -41,6 +41,61 @@ struct SpiceLine {
     name: String,
     nodes: Vec<String>,
     args: String,
+}
+
+/// An element line whose nodes are still net indices.
+struct PendingLine<'a> {
+    name: String,
+    nets: Vec<usize>,
+    args: String,
+    /// The trace of the component.
+    trace: &'a Trace,
+    #[cfg(feature = "shared-ngspice")]
+    cosim_device: Option<crate::spice::cosim::CosimDevice>,
+}
+
+/// The models used by the elements.
+#[derive(Default)]
+struct Models<'a> {
+    includes: BTreeSet<PathBuf>,
+    dialects: BTreeSet<(SpiceDialect, bool)>,
+    /// Lowercase name -> (inline definition, trace of the first component using it).
+    inline: BTreeMap<String, (String, &'a Trace)>,
+}
+
+impl<'a> Models<'a> {
+    /// Adds a model used by the component at `trace`. Reports an inline model defined
+    /// differently by another component.
+    fn add(&mut self, model: &ModelSource, trace: &'a Trace, errors: &mut Vec<CircuitError>) {
+        self.dialects
+            .insert((model.dialect(), matches!(model, ModelSource::Inline { .. })));
+        match model {
+            ModelSource::Include { path, .. } => {
+                self.includes.insert(path.clone());
+            }
+            ModelSource::Inline { name, text, .. } => {
+                let text = text.trim_end().to_string();
+                match self.inline.entry(name.to_ascii_lowercase()) {
+                    Entry::Vacant(entry) => {
+                        entry.insert((text, trace));
+                    }
+                    Entry::Occupied(entry) if entry.get().0 != text => {
+                        errors.push(
+                            CircuitError::new(
+                                CircuitErrorKind::SpiceModelConflict { name: name.clone() },
+                                trace.clone(),
+                            )
+                            .with_note(
+                                "first defined by the part instantiated here",
+                                entry.get().1.clone(),
+                            ),
+                        );
+                    }
+                    Entry::Occupied(_) => {}
+                }
+            }
+        }
+    }
 }
 
 /// Writes the line of an element: its name, its nodes and the arguments, if any.
@@ -135,15 +190,8 @@ impl Netlist {
             })
             .collect();
 
-        // (element name, net indices, args, trace)
         let mut lines = Vec::new();
-        // (index into `lines`, device) of the co-simulated devices.
-        #[cfg(feature = "shared-ngspice")]
-        let mut cosim_lines = Vec::new();
-        let mut includes = BTreeSet::new();
-        let mut dialects = BTreeSet::new();
-        // Lowercase name -> (definition, trace of the first user).
-        let mut models: BTreeMap<String, (String, &Trace)> = BTreeMap::new();
+        let mut models = Models::default();
         for (index, component) in self.components.iter().enumerate() {
             let Some(SpicePartInfo::Elements { elements, .. }) =
                 check_component(component, &mut errors)
@@ -151,6 +199,9 @@ impl Netlist {
                 continue;
             };
             for element in elements {
+                for model in &element.models {
+                    models.add(model, &component.trace, &mut errors);
+                }
                 let nets = element
                     .nodes
                     .iter()
@@ -159,81 +210,46 @@ impl Netlist {
                             .get(&(index, pin_id.as_str()))
                             .expect("every pin of a component belongs to a net")
                     })
-                    .collect::<Vec<_>>();
-                for model in &element.models {
-                    dialects.insert((model.dialect(), matches!(model, ModelSource::Inline { .. })));
-                    match model {
-                        ModelSource::Include { path, .. } => {
-                            includes.insert(path.clone());
-                        }
-                        ModelSource::Inline { name, text, .. } => {
-                            let text = text.trim_end().to_string();
-                            match models.entry(name.to_ascii_lowercase()) {
-                                std::collections::btree_map::Entry::Vacant(entry) => {
-                                    entry.insert((text, &component.trace));
-                                }
-                                std::collections::btree_map::Entry::Occupied(entry) => {
-                                    if entry.get().0 != text {
-                                        errors.push(
-                                            CircuitError::new(
-                                                CircuitErrorKind::SpiceModelConflict {
-                                                    name: name.clone(),
-                                                },
-                                                component.trace.clone(),
-                                            )
-                                            .with_note(
-                                                "first defined by the part instantiated here",
-                                                entry.get().1.clone(),
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                #[cfg(feature = "shared-ngspice")]
-                if let Some(device) = component.part.cosim_device() {
-                    cosim_lines.push((lines.len(), device.clone()));
-                }
-                lines.push((
-                    element_name(element.device, &component.ref_name, &element.suffix),
+                    .collect();
+                lines.push(PendingLine {
+                    name: element_name(element.device, &component.ref_name, &element.suffix),
                     nets,
-                    element.args.trim().to_string(),
-                    &component.trace,
-                ));
+                    args: element.args.trim().to_string(),
+                    trace: &component.trace,
+                    #[cfg(feature = "shared-ngspice")]
+                    cosim_device: component.part.cosim_device().cloned(),
+                });
             }
         }
 
         let nodes = self.resolve_nodes(
-            lines.iter().flat_map(|line| line.1.iter().copied()),
+            lines.iter().flat_map(|line| line.nets.iter().copied()),
             &mut errors,
         );
         check_element_names(
-            lines.iter().map(|line| (line.0.as_str(), line.3)),
+            lines.iter().map(|line| (line.name.as_str(), line.trace)),
             &mut errors,
         );
 
-        let elements = lines
-            .into_iter()
-            .map(|(name, nets, args, _)| SpiceLine {
-                name,
-                nodes: nets.iter().map(|net| nodes[net].clone()).collect(),
-                args,
-            })
-            .collect::<Vec<_>>();
         #[cfg(feature = "shared-ngspice")]
-        let cosim_devices = cosim_lines
-            .into_iter()
-            .map(|(index, device)| {
-                let line: &SpiceLine = &elements[index];
-                crate::spice::cosim::CosimInstance {
-                    element: line.name.clone(),
-                    nodes: line.nodes.clone(),
+        let mut cosim_devices = Vec::new();
+        let mut elements = Vec::new();
+        for line in lines {
+            let element = SpiceLine {
+                name: line.name,
+                nodes: line.nets.iter().map(|net| nodes[net].clone()).collect(),
+                args: line.args,
+            };
+            #[cfg(feature = "shared-ngspice")]
+            if let Some(device) = line.cosim_device {
+                cosim_devices.push(crate::spice::cosim::CosimInstance {
+                    element: element.name.clone(),
+                    nodes: element.nodes.clone(),
                     device,
-                }
-            })
-            .collect();
+                });
+            }
+            elements.push(element);
+        }
         let nodes = nodes
             .into_iter()
             .map(|(net, node)| (self.nets[net].name.clone(), node))
@@ -242,9 +258,9 @@ impl Netlist {
             errors,
             SpiceNetlist {
                 title: env!("CARGO_PKG_NAME").to_string(),
-                includes,
-                dialects,
-                models: models.into_values().map(|(text, _)| text).collect(),
+                includes: models.includes,
+                dialects: models.dialects,
+                models: models.inline.into_values().map(|(text, _)| text).collect(),
                 elements,
                 nodes,
                 #[cfg(feature = "shared-ngspice")]
@@ -306,52 +322,48 @@ impl Netlist {
 
 /// Returns the SPICE information of a component if it can be exported.
 fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Option<SpicePartInfo> {
-    let ref_name = || component.ref_name.clone();
-    let errors_before = errors.len();
-    let mut error = |kind| errors.push(CircuitError::new(kind, component.trace.clone()));
-
-    let Some(info) = component.part.spice() else {
-        error(CircuitErrorKind::SpiceUnsupported {
-            ref_name: ref_name(),
-        });
-        return None;
+    let check = |info: &SpicePartInfo| {
+        let problems = info.check(
+            &component.part.pin_ids(),
+            &component.part.internal_connections(),
+        );
+        problems
+            .into_iter()
+            .map(|problem| problem_kind(problem, component.ref_name.clone()))
+            .collect()
     };
-    let problems = info.check(
-        &component.part.pin_ids(),
-        &component.part.internal_connections(),
-    );
-    for problem in problems {
-        error(match problem {
-            SpiceProblem::NoElements => CircuitErrorKind::InvalidSpiceElement {
-                ref_name: ref_name(),
-                reason: "no SPICE elements (use `SpicePartInfo::Excluded` to leave the part out)"
-                    .into(),
+    component.checked_info(
+        component.part.spice(),
+        |ref_name| CircuitErrorKind::SpiceUnsupported { ref_name },
+        check,
+        errors,
+    )
+}
+
+fn problem_kind(problem: SpiceProblem, ref_name: String) -> CircuitErrorKind {
+    match problem {
+        SpiceProblem::NoElements => CircuitErrorKind::InvalidSpiceElement {
+            ref_name,
+            reason: "no SPICE elements (use `SpicePartInfo::Excluded` to leave the part out)"
+                .into(),
+        },
+        SpiceProblem::InvalidElement { suffix, reason } => CircuitErrorKind::InvalidSpiceElement {
+            ref_name,
+            reason: if suffix.is_empty() {
+                reason
+            } else {
+                format!("element {suffix:?}: {reason}")
             },
-            SpiceProblem::InvalidElement { suffix, reason } => {
-                CircuitErrorKind::InvalidSpiceElement {
-                    ref_name: ref_name(),
-                    reason: if suffix.is_empty() {
-                        reason
-                    } else {
-                        format!("element {suffix:?}: {reason}")
-                    },
-                }
-            }
-            SpiceProblem::DuplicateSuffix { suffix } => CircuitErrorKind::InvalidSpiceElement {
-                ref_name: ref_name(),
-                reason: format!("more than one element has the suffix {suffix:?}"),
-            },
-            SpiceProblem::UnknownPin { pin_id } => CircuitErrorKind::UnknownPinId {
-                ref_name: ref_name(),
-                pin_id,
-            },
-            SpiceProblem::UnmappedPin { pin_id } => CircuitErrorKind::SpicePinUnmapped {
-                ref_name: ref_name(),
-                pin_id,
-            },
-        });
+        },
+        SpiceProblem::DuplicateSuffix { suffix } => CircuitErrorKind::InvalidSpiceElement {
+            ref_name,
+            reason: format!("more than one element has the suffix {suffix:?}"),
+        },
+        SpiceProblem::UnknownPin { pin_id } => CircuitErrorKind::UnknownPinId { ref_name, pin_id },
+        SpiceProblem::UnmappedPin { pin_id } => {
+            CircuitErrorKind::SpicePinUnmapped { ref_name, pin_id }
+        }
     }
-    (errors.len() == errors_before).then_some(info)
 }
 
 fn check_element_names<'a>(

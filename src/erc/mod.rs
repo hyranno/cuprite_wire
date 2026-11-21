@@ -369,6 +369,17 @@ impl Netlist {
             settings,
             violations: Vec::new(),
         };
+        self.check_nets(&mut report);
+        self.check_pinless_marks(&mut report);
+        self.check_similar_net_names(&mut report);
+        self.report_warnings(&mut report);
+        ErcReport {
+            violations: report.violations,
+        }
+    }
+
+    /// Checks the pins and marks on each net.
+    fn check_nets(&self, report: &mut Reporter) {
         let pin_types: Vec<_> = self.components.iter().map(|c| c.part.pin_types()).collect();
         // Pin ID -> index of its internal connection group, for each component.
         let stack_groups: Vec<HashMap<String, usize>> = self
@@ -383,53 +394,68 @@ impl Netlist {
             .collect();
 
         for net in &self.nets {
-            let mut pins = Vec::new();
-            let mut net_pins = Vec::new();
-            let mut traces = Vec::new();
-            for node in &net.nodes {
-                let pin_type = pin_types[node.component]
-                    .get(&node.pin_id)
-                    .copied()
-                    .unwrap_or(PinType::Passive);
-                // Pins not in an internal connection get their own group, after the real ones.
-                let group = stack_groups[node.component]
-                    .get(&node.pin_id)
-                    .copied()
-                    .unwrap_or(usize::MAX - net_pins.len());
-                let component = &self.components[node.component];
-                pins.push(ErcPin::Part {
-                    ref_name: component.ref_name.clone(),
-                    pin_id: node.pin_id.clone(),
-                    pin_type,
-                });
-                net_pins.push(NetPin {
-                    pin_type,
-                    stack: Some((node.component, group)),
-                });
-                traces.push(component.trace.clone());
-            }
-            for mark in &net.marks {
-                if let ErcMark::VirtualPin { pin_type, name } = &mark.mark {
-                    pins.push(ErcPin::Virtual {
-                        name: name.clone(),
-                        pin_type: *pin_type,
-                    });
-                    net_pins.push(NetPin {
-                        pin_type: *pin_type,
-                        stack: None,
-                    });
-                    traces.push(mark.trace.clone());
-                }
-            }
+            let (pins, net_pins, traces) = self.net_pins(net, &pin_types, &stack_groups);
             let no_connect = net
                 .marks
                 .iter()
                 .find(|mark| mark.mark == ErcMark::NoConnect);
-            for finding in check_net(&net_pins, no_connect.is_some(), &settings.pin_map) {
+            let pin_map = &report.settings.pin_map;
+            for finding in check_net(&net_pins, no_connect.is_some(), pin_map) {
                 report.net_finding(net, finding, &pins, &traces, no_connect);
             }
         }
+    }
 
+    /// The pins on `net` (part pins, then virtual pins) for ERC, with the trace of each.
+    fn net_pins(
+        &self,
+        net: &Net,
+        pin_types: &[BTreeMap<String, PinType>],
+        stack_groups: &[HashMap<String, usize>],
+    ) -> (Vec<ErcPin>, Vec<NetPin>, Vec<Trace>) {
+        let mut pins = Vec::new();
+        let mut net_pins = Vec::new();
+        let mut traces = Vec::new();
+        for node in &net.nodes {
+            let pin_type = pin_types[node.component]
+                .get(&node.pin_id)
+                .copied()
+                .unwrap_or(PinType::Passive);
+            // Pins not in an internal connection get their own group, after the real ones.
+            let group = stack_groups[node.component]
+                .get(&node.pin_id)
+                .copied()
+                .unwrap_or(usize::MAX - net_pins.len());
+            let component = &self.components[node.component];
+            pins.push(ErcPin::Part {
+                ref_name: component.ref_name.clone(),
+                pin_id: node.pin_id.clone(),
+                pin_type,
+            });
+            net_pins.push(NetPin {
+                pin_type,
+                stack: Some((node.component, group)),
+            });
+            traces.push(component.trace.clone());
+        }
+        for mark in &net.marks {
+            if let ErcMark::VirtualPin { pin_type, name } = &mark.mark {
+                pins.push(ErcPin::Virtual {
+                    name: name.clone(),
+                    pin_type: *pin_type,
+                });
+                net_pins.push(NetPin {
+                    pin_type: *pin_type,
+                    stack: None,
+                });
+                traces.push(mark.trace.clone());
+            }
+        }
+        (pins, net_pins, traces)
+    }
+
+    /// Reports the marks on nets without part pins.
+    fn check_pinless_marks(&self, report: &mut Reporter) {
         for mark in &self.pinless_marks {
             let (rule, kind) = match &mark.mark {
                 ErcMark::NoConnect => (
@@ -442,11 +468,14 @@ impl Netlist {
                 ),
             };
             report.push(
-                settings.severity(rule),
+                report.settings.severity(rule),
                 Diagnostic::new(kind, mark.trace.clone()),
             );
         }
+    }
 
+    /// Reports net names that differ only in case.
+    fn check_similar_net_names(&self, report: &mut Reporter) {
         for (i, first) in case_insensitive_duplicates(self.nets.iter().map(|net| net.name.as_str()))
         {
             let (net, other) = (&self.nets[i], &self.nets[first]);
@@ -455,12 +484,15 @@ impl Netlist {
                 other: other.name.clone(),
             };
             report.push(
-                settings.severity(ErcRule::SimilarNetNames),
+                report.settings.severity(ErcRule::SimilarNetNames),
                 Diagnostic::new(kind, net.trace.clone())
                     .with_note("the other net is named here", other.trace.clone()),
             );
         }
+    }
 
+    /// Reports the warnings of the netlist conversion.
+    fn report_warnings(&self, report: &mut Reporter) {
         for warning in &self.warnings {
             let rule = match warning.kind {
                 CircuitWarningKind::MultipleNetNames { .. } => ErcRule::MultipleNetNames,
@@ -471,11 +503,7 @@ impl Netlist {
                 trace: warning.trace.clone(),
                 notes: warning.notes.clone(),
             };
-            report.push(settings.severity(rule), diagnostic);
-        }
-
-        ErcReport {
-            violations: report.violations,
+            report.push(report.settings.severity(rule), diagnostic);
         }
     }
 }
