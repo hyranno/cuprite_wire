@@ -335,11 +335,13 @@ fn element(
     (vec![element], unused_pins)
 }
 
-/// The pins of a symbol, for binding them to a model.
+/// The pins of a symbol, for binding them to a model: the first of duplicate pins only (the others are connected to it).
 fn part_pins(symbol: &Symbol) -> Vec<PartPin> {
+    let mut numbers = std::collections::BTreeSet::new();
     symbol
         .pins
         .iter()
+        .filter(|pin| numbers.insert(pin.number.as_str()))
         .map(|pin| PartPin {
             id: pin.number.clone(),
             name: pin.name.clone(),

@@ -44,7 +44,8 @@ impl Part for Passive {
 ```
 
 - **One pin ID corresponds to one footprint pad**, as in KiCad symbols. A part with several pads
-  of the same function (e.g. six GND pins) has one pin ID per pad.
+  of the same function (e.g. six GND pins) has one pin ID per pad. The exception is KiCad 10's duplicate pins
+  (several pins with different names or types on one pad), which must be connected inside the part.
 - Pins connected inside the part are declared with `internal_connections()`; they are connected
   when the part is instantiated (like stacked pins in a KiCad symbol). Groups sharing a pin are
   merged into one. `PartPins::of(&part)` gives the pin IDs and the merged groups, as the netlist

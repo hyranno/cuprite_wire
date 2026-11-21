@@ -182,7 +182,8 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     };
     let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
 
-    // Pins: a pin per pad of the symbol pins, then extra pads; IDs default to the pad numbers.
+    // Pins: a pin per pad of the symbol pins, then extra pads; IDs default to the pad numbers
+    // (see `default_pin_ids` for duplicate pins).
     let mut pins: Vec<PinDef> = symbol
         .pins
         .iter()
@@ -203,6 +204,10 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         electrical_type: ElectricalType::Passive,
         unit: 0,
     }));
+    let default_ids = default_pin_ids(&pins);
+    for (pin, id) in pins.iter_mut().zip(&default_ids) {
+        pin.id.clone_from(id);
+    }
     rename_pins(&mut pins, &common.pins, "pin")?;
     let ids = PinIds::new(&pins, &symbol);
     // The pads of a stacked pin notation, then pins at the same position.
@@ -213,6 +218,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         .map(|pin| ids.of(&pin.pads))
         .collect();
     internal_connections.extend(symbol.stacked_pins().iter().map(|group| ids.of_pins(group)));
+    // The duplicate pins of each pad.
+    let mut pins_of_pad: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for pin in &pins {
+        pins_of_pad
+            .entry(pin.pad.as_str())
+            .or_default()
+            .push(pin.id.clone());
+    }
+    internal_connections.extend(pins_of_pad.into_values().filter(|ids| ids.len() > 1));
     internal_connections.extend(check_internal_connections(
         &common.internal_connections,
         &pins,
@@ -260,9 +274,12 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                 } => {
                     // The model connects symbol pins: the other pads of a stacked pin notation
                     // and extra pads are not part of it.
+                    // (Duplicate pins are connected to the first, which the model connects.)
+                    let mut numbers = BTreeSet::new();
                     let other_pads = symbol
                         .pins
                         .iter()
+                        .filter(|pin| numbers.insert(&pin.number))
                         .filter(|pin| !unused_pins.contains(&pin.number))
                         .flat_map(|pin| pin.pads[1..].iter().cloned());
                     let mut unused_pins: Vec<String> = ids
@@ -302,7 +319,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     })
 }
 
-/// Pin IDs by pad number, and pads by symbol pin number.
+/// Pin IDs by pad number (of the first pin of duplicate pins), and pads by symbol pin number.
 struct PinIds<'a> {
     ids: BTreeMap<&'a str, &'a str>,
     pads: BTreeMap<&'a str, &'a [String]>,
@@ -311,8 +328,10 @@ struct PinIds<'a> {
 impl<'a> PinIds<'a> {
     fn new(pins: &'a [PinDef], symbol: &'a Symbol) -> Self {
         PinIds {
+            // The first pin of each pad (`rev` so that it is inserted last).
             ids: pins
                 .iter()
+                .rev()
                 .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
                 .collect(),
             pads: symbol
@@ -475,8 +494,11 @@ fn sim_block(
                 .collect()
         })
         .collect();
+    // Duplicate pins are one pin of the model: the first, to which the others are connected.
+    let mut pads = BTreeSet::new();
     let part_pins: Vec<PartPin> = pins
         .iter()
+        .filter(|pin| pads.insert(pin.pad.as_str()))
         .map(|pin| PartPin {
             id: pin.pad.clone(),
             name: pin.name.clone(),
@@ -600,6 +622,7 @@ fn rename_pins(
     renames: &[(String, String)],
     what: &str,
 ) -> Result<(), PartError> {
+    let default_ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
     let mut renamed = BTreeSet::new();
     for (key, id) in renames {
         let normalized = if what == "port" {
@@ -613,12 +636,17 @@ fn rename_pins(
         if id.is_empty() {
             return err(OptionKey::Pins, format!("empty pin ID for {what} {key:?}"));
         }
-        let pin = if what == "port" {
-            pins.iter_mut()
-                .find(|pin| pin.pad.eq_ignore_ascii_case(key))
+        // A pad number stands for its first pin; the other duplicate pins are given by their
+        // default IDs (`6#2`).
+        let index = if what == "port" {
+            pins.iter()
+                .position(|pin| pin.pad.eq_ignore_ascii_case(key))
         } else {
-            pins.iter_mut().find(|pin| &pin.pad == key)
+            pins.iter()
+                .position(|pin| &pin.pad == key)
+                .or_else(|| default_ids.iter().position(|id| id == key))
         };
+        let pin = index.map(|i| &mut pins[i]);
         match pin {
             Some(pin) => pin.id = id.clone(),
             None => {
@@ -647,6 +675,23 @@ fn rename_pins(
         }
     }
     Ok(())
+}
+
+/// The default pin IDs: the pad numbers, with `#2`, `#3`, ... appended for the second and later
+/// duplicate pins of a pad (the first is the one KiCad writes to the netlist).
+fn default_pin_ids(pins: &[PinDef]) -> Vec<String> {
+    let mut count: BTreeMap<&str, usize> = BTreeMap::new();
+    pins.iter()
+        .map(|pin| {
+            let n = count.entry(pin.pad.as_str()).or_default();
+            *n += 1;
+            if *n == 1 {
+                pin.pad.clone()
+            } else {
+                format!("{}#{n}", pin.pad)
+            }
+        })
+        .collect()
 }
 
 fn check_internal_connections(
@@ -838,6 +883,52 @@ mod tests {
         assert_eq!(part.internal_connections, vec![strings(&["2", "4"])]);
         assert_eq!(part.spice, SpiceDef::Excluded);
         assert!(part.kicad.unwrap().exclude_from_bom);
+    }
+
+    #[test]
+    fn test_duplicate_pins() {
+        let mut opts = options("test:DUP_AMP", "");
+        opts.footprint = FootprintOption::None;
+        let part = load_part(&opts, &mut resolver()).unwrap();
+        // The first pin of pad 4 is SUB (left of V-), which keeps the pad number as its ID.
+        let pins: Vec<_> = part
+            .pins
+            .iter()
+            .map(|p| (p.id.as_str(), p.pad.as_str(), p.name.as_deref()))
+            .collect();
+        assert_eq!(
+            pins,
+            [
+                ("1", "1", None),
+                ("2", "2", Some("-")),
+                ("3", "3", Some("+")),
+                ("4", "4", Some("SUB")),
+                ("4#2", "4", Some("V-")),
+                ("5", "5", Some("V+")),
+            ]
+        );
+        assert_eq!(part.internal_connections, vec![strings(&["4", "4#2"])]);
+        // The model connects the first pin; the other is connected to it inside the part.
+        let SpiceDef::Elements {
+            elements,
+            unused_pins,
+        } = &part.spice
+        else {
+            panic!("{:?}", part.spice)
+        };
+        assert_eq!(elements[0].nodes, strings(&["3", "2", "5", "4", "1"]));
+        assert!(unused_pins.is_empty());
+
+        // The pad number renames the first pin, and `4#2` the other.
+        opts.common.pins = vec![("4#2".into(), "vee".into()), ("4".into(), "sub".into())];
+        let part = load_part(&opts, &mut resolver()).unwrap();
+        let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["1", "2", "3", "sub", "vee", "5"]);
+        assert_eq!(part.internal_connections, vec![strings(&["sub", "vee"])]);
+        let SpiceDef::Elements { elements, .. } = &part.spice else {
+            panic!("{:?}", part.spice)
+        };
+        assert_eq!(elements[0].nodes, strings(&["3", "2", "5", "sub", "1"]));
     }
 
     #[test]

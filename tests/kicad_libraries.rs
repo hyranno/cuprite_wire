@@ -82,6 +82,25 @@ kicad_part! {
     }
 }
 
+kicad_part! {
+    /// Duplicate pins (KiCad 10): pad 6 is K of unit 1 and A of unit 2 (pin IDs `6` and `6#2`),
+    /// and pad 3 is K of unit 3 and A of unit 4 (`3` and `3#2`). No simulation model.
+    struct Bat54sdw {
+        symbol: "Diode:BAT54SDW",
+        spice: excluded,
+    }
+}
+
+kicad_part! {
+    /// Duplicate pins in one unit: pad 6 is the outputs Y4 and ~{P1} (`6` and `6#2`).
+    struct Sn74278 {
+        symbol: "74xx_IEEE:74278",
+        footprint: "Package_DIP:DIP-14_W7.62mm",
+        extra_pads: ["5", "11"],
+        spice: excluded,
+    }
+}
+
 /// A circuit using every part: an op-amp stage driving a transistor, a diode and a MOSFET.
 fn circuit() -> CircuitBuilder {
     let mut c = CircuitBuilder::new();
@@ -202,4 +221,41 @@ fn test_golden_extra_pad() {
         .write(&mut out)
         .unwrap();
     check_golden("kicad_libraries_ep.net", &String::from_utf8(out).unwrap());
+}
+
+/// The netlist of parts with duplicate pins: one node per pad, with the first pin's name and type.
+/// `tools/compare_kicad_cli_netlist.py --library-symbols` agrees on the nodes, but for the extra
+/// pads 5 and 11 (not pins of the symbol) and the single node of pad 3, whose duplicate pins
+/// it leaves unconnected (KiCad then writes a net for each pin).
+#[test]
+fn test_golden_duplicate_pins() {
+    let mut c = CircuitBuilder::new();
+    let d = c.instantiate_part_named("d", Box::new(Bat54sdw));
+    let u = c.instantiate_part_named("u", Box::new(Sn74278));
+    let r = c.instantiate_part_named("r", Box::new(Resistor::new("10k")));
+    // Two diodes in series from IN to OUT, the midpoint (pad 6) through R to a 74278 output.
+    c.label(d["1"], NetLabel::local("IN"));
+    c.connect(d["6#2"], r["1"]);
+    c.label(d["2"], NetLabel::local("OUT"));
+    c.connect(r["2"], u["6"]);
+    // The other pair (pad 3) left unconnected, and the 74278 powered with its inputs grounded.
+    c.label(d["4"], NetLabel::local("IN2"));
+    c.label(d["5"], NetLabel::local("OUT2"));
+    c.label(u["14"], NetLabel::global("+5V"));
+    for pin in ["1", "2", "3", "4", "7", "12", "13", "5", "11"] {
+        c.label(u[pin], NetLabel::global("GND"));
+    }
+    let mut out = Vec::new();
+    c.build(&())
+        .to_netlist()
+        .unwrap()
+        .to_kicad()
+        .unwrap()
+        .with_source("tests/kicad_libraries.rs")
+        .write(&mut out)
+        .unwrap();
+    check_golden(
+        "kicad_libraries_duplicate_pins.net",
+        &String::from_utf8(out).unwrap(),
+    );
 }

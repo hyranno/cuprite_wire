@@ -86,6 +86,6 @@ Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_kicad` rep
 | `FootprintMissing` | no footprint assigned |
 | `PinInfoMissing` | no `KicadPinInfo` for a pin ID |
 | `UnknownPinId` | a `KicadPinInfo` for a pin ID the part does not have |
-| `DuplicatePad` | two pins on the same pad |
+| `DuplicatePad` | two pins on the same pad that are not connected inside the part (connected ones are duplicate pins: the pad is written once, with the first of them in `Part::pin_ids`) |
 
 The output is checked against pcbnew and Eeschema by the tools described in `doc/dev/verifying.md`.

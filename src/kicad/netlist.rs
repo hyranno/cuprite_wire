@@ -2,7 +2,7 @@
 //!
 //! See [KiCad Netlist Format](https://github.com/hyranno/cuprite_wire/blob/main/doc/dev/kicad_netlist_format.md) for the format.
 
-use std::{fmt, io};
+use std::{collections::HashSet, fmt, io};
 
 use uuid::Uuid;
 
@@ -84,6 +84,26 @@ impl Netlist {
             })
             .collect();
 
+        // Pins on a pad of another pin (duplicate pins, connected inside the part) are left out:
+        // KiCad writes one node per pad, with the first pin's name and type.
+        let duplicate_pins: Vec<HashSet<&str>> = self
+            .components
+            .iter()
+            .zip(&infos)
+            .map(|(component, info)| {
+                let Some(info) = info else {
+                    return HashSet::new();
+                };
+                let mut pads = HashSet::new();
+                component
+                    .pins
+                    .ids()
+                    .iter()
+                    .filter(|id| !pads.insert(&info.pins[*id].pad))
+                    .map(String::as_str)
+                    .collect()
+            })
+            .collect();
         let nets = self
             .nets
             .iter()
@@ -92,6 +112,7 @@ impl Netlist {
                 let mut nodes: Vec<KicadNode> = net
                     .nodes
                     .iter()
+                    .filter(|node| !duplicate_pins[node.component].contains(node.pin_id.as_str()))
                     .filter_map(|node| {
                         let pin = infos[node.component].as_ref()?.pins.get(&node.pin_id)?;
                         Some(KicadNode {
@@ -104,8 +125,8 @@ impl Netlist {
                     .collect();
                 // KiCad sorts nodes by reference and pad number, both in string order.
                 nodes.sort();
-                // A part with two pins on one pad is rejected (`DuplicatePad`), and references
-                // are unique (`DuplicateRef`).
+                // Duplicate pins are left out above, other pins sharing a pad are rejected
+                // (`DuplicatePad`), and references are unique (`DuplicateRef`).
                 debug_assert!(
                     nodes
                         .windows(2)

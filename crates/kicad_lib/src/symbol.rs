@@ -87,7 +87,11 @@ pub struct Symbol {
     pub name: String,
     /// Properties in the order of the library (`Reference`, `Value`, `Footprint`, `Sim.*`, ...).
     pub properties: Vec<(String, String)>,
-    /// Pins sorted by number (in natural order: `2` before `10`).
+    /// Pins sorted by number (in natural order: `2` before `10`). KiCad 10 allows several pins
+    /// with the same number (but different names or types) on the same pad(s), called duplicate
+    /// pins here. They are sorted as KiCad takes the first of them (whose name and type go to the
+    /// netlist): by unit, then by position in the unit (left to right, then top to bottom), then
+    /// in file order.
     pub pins: Vec<Pin>,
     pub unit_count: u32,
     pub power: bool,
@@ -116,7 +120,10 @@ impl Symbol {
                 (pin.at.0 * 1e4).round() as i64,
                 (pin.at.1 * 1e4).round() as i64,
             );
-            groups.entry(key).or_default().push(pin.number.clone());
+            let group = groups.entry(key).or_default();
+            if !group.contains(&pin.number) {
+                group.push(pin.number.clone());
+            }
         }
         let mut groups: Vec<_> = groups
             .into_values()
@@ -234,36 +241,38 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
         }
         for pin in unit_symbol.children("pin") {
             let pin = parse_pin(pin, unit)?;
-            match pins.iter().find(|other| other.number == pin.number) {
-                None => pins.push(pin),
-                // The same number in several units (e.g. a shared supply pin): one pin.
-                Some(other)
-                    if other.electrical_type == pin.electrical_type && other.name == pin.name => {}
-                Some(other) => {
-                    return Err(Error::new(format!(
-                        "pin {:?} is defined twice with different names or types ({:?} {} / {:?} {})",
-                        pin.number,
-                        other.name,
-                        other.electrical_type.as_str(),
-                        pin.name,
-                        pin.electrical_type.as_str()
-                    )));
-                }
+            // The same number with the same name and type in several units (e.g. a shared supply
+            // pin) is one pin. With another name or type, it is a duplicate pin of the pad(s).
+            if !pins.iter().any(|other| {
+                other.number == pin.number
+                    && other.electrical_type == pin.electrical_type
+                    && other.name == pin.name
+            }) {
+                pins.push(pin);
             }
         }
     }
     let mut pin_of_pad: BTreeMap<&str, &str> = BTreeMap::new();
     for pin in &pins {
         for pad in &pin.pads {
-            if let Some(other) = pin_of_pad.insert(pad, &pin.number) {
-                return Err(Error::new(format!(
-                    "pad {pad:?} belongs to two pins ({other:?} and {:?})",
-                    pin.number
-                )));
+            match pin_of_pad.insert(pad, &pin.number) {
+                Some(other) if other != pin.number => {
+                    return Err(Error::new(format!(
+                        "pad {pad:?} belongs to two pins ({other:?} and {:?})",
+                        pin.number
+                    )));
+                }
+                _ => {}
             }
         }
     }
-    pins.sort_by(|a, b| natural_cmp(&a.number, &b.number));
+    // Duplicate pins in the order of `Symbol::pins` (the sort is stable, keeping the file order).
+    pins.sort_by(|a, b| {
+        natural_cmp(&a.number, &b.number)
+            .then(a.unit.cmp(&b.unit))
+            .then(a.at.0.total_cmp(&b.at.0))
+            .then(b.at.1.total_cmp(&a.at.1))
+    });
     Ok(pins)
 }
 
@@ -454,18 +463,55 @@ mod tests {
     }
 
     #[test]
-    fn test_conflicting_pins() {
+    fn test_duplicate_pins() {
+        // Like Diode:BAT54SDW (pad 6: K of unit 1, A of unit 2), with the units in reverse order,
+        // a shared supply pin, and duplicates in one unit like 74xx_IEEE:74278.
+        let lib = SymbolLib::parse(
+            r#"(kicad_symbol_lib (symbol "X"
+                 (symbol "X_2_1"
+                   (pin passive line (at 0 0 0) (name "A") (number "6"))
+                   (pin power_in line (at 0 5 0) (name "V") (number "1")))
+                 (symbol "X_1_1"
+                   (pin passive line (at 0 0 0) (name "K") (number "6"))
+                   (pin power_in line (at 0 5 0) (name "V") (number "1"))
+                   (pin output line (at 2 -1 0) (name "P") (number "7"))
+                   (pin output line (at 2 1 0) (name "Y") (number "7"))
+                   (pin output line (at 1 -3 0) (name "Q") (number "7")))))"#,
+        )
+        .unwrap();
+        let symbol = lib.symbol("X").unwrap();
+        let pins: Vec<_> = symbol
+            .pins
+            .iter()
+            .map(|pin| (pin.number.as_str(), pin.name.as_deref().unwrap(), pin.unit))
+            .collect();
+        assert_eq!(
+            pins,
+            [
+                ("1", "V", 2),
+                ("6", "K", 1),
+                ("6", "A", 2),
+                ("7", "Q", 1),
+                ("7", "Y", 1),
+                ("7", "P", 1),
+            ]
+        );
+        assert!(symbol.stacked_pins().is_empty());
+    }
+
+    #[test]
+    fn test_pad_of_two_pins() {
         let lib = SymbolLib::parse(
             r#"(kicad_symbol_lib (symbol "X"
                  (symbol "X_1_1" (pin input line (at 0 0 0) (name "A") (number "1")))
-                 (symbol "X_2_1" (pin output line (at 0 0 0) (name "A") (number "1")))))"#,
+                 (symbol "X_2_1" (pin output line (at 0 0 0) (name "B") (number "[1-2]")))))"#,
         )
         .unwrap();
         assert!(
             lib.symbol("X")
                 .unwrap_err()
                 .to_string()
-                .contains("defined twice")
+                .contains("pad \"1\" belongs to two pins")
         );
     }
 }
