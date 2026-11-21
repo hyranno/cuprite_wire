@@ -1,11 +1,10 @@
 //! Test bench shared by the tests of the subcircuits: a supply and SPICE helpers.
 
 use cuprite_wire::{
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, NodeIndex},
     naming::NetLabel,
     spice::{IndependentSource, Simulation},
 };
-use petgraph::graph::NodeIndex;
 
 /// The nodes of a signal stage (the preamp, the filter) for [`Bench::stage`].
 pub struct StageNodes {

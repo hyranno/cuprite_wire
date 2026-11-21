@@ -52,6 +52,16 @@ fn check_string(what: &str, value: &str) {
     );
 }
 
+/// Collects arguments written as quoted strings of the model, checking each with [`check_string`].
+#[track_caller]
+fn string_args<S: Into<String>>(what: &str, args: impl IntoIterator<Item = S>) -> Vec<String> {
+    let args: Vec<String> = args.into_iter().map(Into::into).collect();
+    for arg in &args {
+        check_string(what, arg);
+    }
+    args
+}
+
 impl DCosim {
     pub const GND: &'static str = "gnd";
 
@@ -88,10 +98,7 @@ impl DCosim {
         mut self: Box<Self>,
         args: impl IntoIterator<Item = S>,
     ) -> Box<Self> {
-        self.sim_args = args.into_iter().map(Into::into).collect();
-        for arg in &self.sim_args {
-            check_string("simulation argument", arg);
-        }
+        self.sim_args = string_args("simulation argument", args);
         self
     }
 
@@ -101,10 +108,7 @@ impl DCosim {
         mut self: Box<Self>,
         args: impl IntoIterator<Item = S>,
     ) -> Box<Self> {
-        self.lib_args = args.into_iter().map(Into::into).collect();
-        for arg in &self.lib_args {
-            check_string("library argument", arg);
-        }
+        self.lib_args = string_args("library argument", args);
         self
     }
 

@@ -4,10 +4,11 @@
 
 use std::{collections::HashMap, fmt::Debug, panic::Location};
 
-use petgraph::{
-    graph::{NodeIndex, UnGraph},
-    unionfind::UnionFind,
-};
+use petgraph::{graph::UnGraph, unionfind::UnionFind};
+
+/// A node of a circuit, returned by [`CircuitBuilder`] and held in subcircuit interfaces.
+/// Re-exported from `petgraph` so that users do not need to depend on it.
+pub use petgraph::graph::NodeIndex;
 
 use crate::{
     erc::{ErcMark, NodeMark},

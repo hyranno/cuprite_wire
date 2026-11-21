@@ -66,6 +66,9 @@ let amp = circuit.instantiate_subcircuit_named("amp_left", Follower);
 circuit.connect(amp.output, node);
 ```
 
+Nodes are `circuit::NodeIndex` (petgraph's `NodeIndex`, re-exported so that circuits can be
+written without depending on petgraph).
+
 A subcircuit is a `SubcircuitGenerator`. Its `Interface` type lists the nodes the circuit around
 it connects to, usually as a struct deriving `subcircuit::Interface`, generic over the type of its
 fields. The generator gets the interface nodes inside the subcircuit, and `instantiate_subcircuit*`
