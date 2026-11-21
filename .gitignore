@@ -1,4 +1,7 @@
 /target
+# rustfmt backups and dumps of internal compiler errors
+**/*.rs.bk
+rustc-ice-*.txt
 
 *.local.*
 *_local.*
@@ -13,6 +16,14 @@ fp-info-cache
 *.lck
 *-backups/
 _autosave-*
+*.kicad_prl
+.history
+
+# Files operating systems and editors leave behind (not .vscode/, whose shared settings may be committed)
+.DS_Store
+Thumbs.db
+*~
+.idea/
 
 # Personal devcontainer configuration
 /.devcontainer/local/
