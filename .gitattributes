@@ -1,2 +1,6 @@
+# Check text files out with LF on every platform: the tests compare output with files in the
+# repository (e.g. tests/golden/).
+* text=auto eol=lf
+
 # Test models with CRLF line ends and Windows-1252 text, kept as written.
 crates/kicad_lib/tests/fixtures/models/*.lib -text

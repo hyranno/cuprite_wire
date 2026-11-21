@@ -78,7 +78,9 @@ fits your project and your team.
   (the netlist is written in KiCad 9's format, which KiCad 10 reads)
 - ngspice (44 or later) for the simulations
 
-The devcontainer in `.devcontainer/` has all of them.
+The devcontainer in `.devcontainer/` has all of them. CI also runs the tests on Windows (ngspice
+from MSYS2) and macOS (ngspice from Homebrew), except the XSPICE tests building code models with
+gcc and Verilator, which expect ngspice's files in `/usr/share/ngspice`.
 
 ## Documentation
 

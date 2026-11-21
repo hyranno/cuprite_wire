@@ -1,5 +1,5 @@
 .title cuprite_wire
-.include "/opt/models/unused.lib"
+.include "${CARGO_MANIFEST_DIR}/models/unused.lib"
 .subckt ideal_opamp inp inn vdd vss out
 E1 out 0 inp inn 100k
 .ends ideal_opamp

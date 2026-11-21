@@ -508,10 +508,7 @@ fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(S
         .collect();
     let mut fields = vec![
         ("Sim.Device".to_string(), info.sim_device.to_string()),
-        (
-            "Sim.Library".to_string(),
-            info.path.to_string_lossy().into_owned(),
-        ),
+        ("Sim.Library".to_string(), library_field(&info.path)),
         ("Sim.Name".to_string(), info.name.clone()),
         ("Sim.Pins".to_string(), pins.join(" ")),
     ];
@@ -701,6 +698,16 @@ fn check_symbol(symbol: &Symbol) -> Result<(), Error> {
     Ok(())
 }
 
+/// The `Sim.Library` field of a model file: with `/` as the separator on Windows, as KiCad writes
+/// paths and as the SPICE netlist does.
+fn library_field(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -916,10 +923,7 @@ mod tests {
             fields,
             &vec![
                 ("Sim.Device".to_string(), "SUBCKT".to_string()),
-                (
-                    "Sim.Library".to_string(),
-                    lib.to_string_lossy().into_owned()
-                ),
+                ("Sim.Library".to_string(), library_field(&lib)),
                 ("Sim.Name".to_string(), "VSUP01".to_string()),
                 (
                     "Sim.Pins".to_string(),

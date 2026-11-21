@@ -157,7 +157,11 @@ fn test_sim_block() {
         fields,
         vec![
             ("Sim.Device".to_string(), "SUBCKT".to_string()),
-            ("Sim.Library".to_string(), format!("{MODELS}/vsup01.lib")),
+            // Written with `/` on Windows.
+            (
+                "Sim.Library".to_string(),
+                format!("{MODELS}/vsup01.lib").replace('\\', "/")
+            ),
             ("Sim.Name".to_string(), "VSUP01".to_string()),
             (
                 "Sim.Pins".to_string(),

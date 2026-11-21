@@ -31,6 +31,11 @@ break the API).
 - ERC follows KiCad 10: the only pin of a labeled net is reported as `LabelSinglePin` (a warning)
   instead of `PinNotConnected` (an error).
 - `Net` has a new public field (`labeled`).
+- `Ngspice::default()` runs `ngspice_con` on Windows (the console program of ngspice's Windows
+  builds; `ngspice` there is the GUI).
+- On Windows, paths in netlists and ngspice commands (`.include`, the `d_cosim` library, the
+  output files of `SharedNgspice`) and in the `Sim.Library` field of generated parts are written
+  with `/`.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.

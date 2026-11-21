@@ -454,7 +454,8 @@ fn test_check_subcircuit() {
 #[test]
 fn test_display() {
     let report = erc(&rc_filter());
-    let text = report.to_string();
+    // The source files are written with `\\` on Windows.
+    let text = report.to_string().replace('\\', "/");
     assert!(
         text.starts_with(
             "warning: label \"/IN\" is connected only to R1.1 (passive)\n  at src/test_parts.rs:"

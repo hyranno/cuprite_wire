@@ -128,7 +128,10 @@ impl crate::parts::Part for DualOpAmp {
             SpiceElement::new('X', [inp, inn, "vdd", "vss", out], "ideal_opamp")
                 .with_suffix(suffix)
                 .with_model(ModelSource::inline("ideal_opamp", IDEAL_OPAMP))
-                .with_model(ModelSource::include("/opt/models/unused.lib"))
+                .with_model(ModelSource::include(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/models/unused.lib"
+                )))
         };
         Some(
             SpicePartInfo::elements([
@@ -657,7 +660,10 @@ fn test_shared_library_matches_cli() {
     let library_deck = std::fs::read_to_string(shared.dir().join("shared.cir")).unwrap();
     let tran = shared.dir().join("tran.txt");
     assert!(
-        library_deck.contains(&format!(r#"wrdata {} v("/OUT")"#, tran.display())),
+        library_deck.contains(&format!(
+            r#"wrdata {} v("/OUT")"#,
+            crate::spice::spice_path(&tran)
+        )),
         "{library_deck}"
     );
     assert!(!library_deck.contains("quit"), "{library_deck}");

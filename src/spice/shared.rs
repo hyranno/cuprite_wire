@@ -25,6 +25,7 @@ use libloading::Library;
 use crate::spice::{
     SpiceDeck,
     simulation::{Simulation, SimulationError, Simulator, finish_run, prepare_run_dir},
+    spice_path,
 };
 
 /// The deck as the library runs it, next to [`DECK_FILE`](crate::spice::simulation::DECK_FILE).
@@ -117,7 +118,7 @@ impl SharedNgspice {
             Some(mode) => format!("set ngbehavior={mode}"),
             None => "unset ngbehavior".into(),
         };
-        let source = format!("source {}", deck_path.display());
+        let source = format!("source {}", spice_path(&deck_path));
         // Without a control block the CLI runs the analyses of the dot directives; `source` only
         // loads the circuit.
         let commands = [mode.as_str(), source.as_str()]

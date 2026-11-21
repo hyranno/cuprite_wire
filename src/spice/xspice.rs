@@ -17,6 +17,7 @@ use crate::{
             assert_subcircuit_pin, hashed_subcircuit, internal_node, subcircuit_part,
         },
         sources::spice_number,
+        spice_path,
     },
 };
 
@@ -190,7 +191,7 @@ impl DCosim {
         };
         let mut model = format!(
             ".model cosim d_cosim( simulation=\"{}\"",
-            self.simulation.display()
+            spice_path(&self.simulation)
         );
         if !self.sim_args.is_empty() {
             model.push_str(&format!(" sim_args={}", strings(&self.sim_args)));

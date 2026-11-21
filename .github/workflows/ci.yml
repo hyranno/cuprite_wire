@@ -99,3 +99,33 @@ jobs:
       - run: cargo test --workspace --features kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored
+
+  test-other-os:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Homebrew's libngspice is in a directory the dynamic loader does not search by default.
+      - name: Install ngspice (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ngspice
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:/usr/local/lib:/usr/lib" >> "${GITHUB_ENV}"
+      # MSYS2 is on the runner. Its shared library is copied to ngspice.dll, the name of the
+      # official build and the default of SharedNgspice.
+      - name: Install ngspice (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          C:\msys64\usr\bin\pacman.exe -Sy --noconfirm --needed mingw-w64-ucrt-x86_64-ngspice
+          Copy-Item C:\msys64\ucrt64\bin\libngspice-0.dll C:\msys64\ucrt64\bin\ngspice.dll
+          "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Without the KiCad libraries; the XSPICE tests building code models are Linux-only.
+      - run: cargo test --workspace --features shared-ngspice

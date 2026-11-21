@@ -24,3 +24,14 @@ pub use sources::{Ammeter, IndependentSource, SourceKind, Waveform};
 
 #[cfg(test)]
 mod tests;
+
+/// A path as written in a netlist or a command of ngspice: with `/` as the separator on Windows,
+/// since ngspice reads `\\` in commands as an escape.
+pub(crate) fn spice_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
+}

@@ -45,7 +45,9 @@ others get the same environment.
    ```
 
    The `shared-ngspice` tests and `cuprite_wire_embedded_hal` need the ngspice shared library
-   (`libngspice0`), and the XSPICE tests `gcc` and Verilator; the devcontainer has them.
+   (`libngspice0`), and the XSPICE tests `gcc` and Verilator; the devcontainer has them. The
+   XSPICE tests building code models run on Linux only; see `.github/workflows/ci.yml` for how CI
+   installs ngspice on Windows and macOS.
 
    The code is formatted with the default rustfmt settings.
 

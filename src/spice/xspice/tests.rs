@@ -51,6 +51,13 @@ impl Drop for TestDir {
     }
 }
 
+/// An absolute library path, for the tests not loading it.
+const LIBRARY: &str = if cfg!(windows) {
+    "C:/lib/libx.so"
+} else {
+    "/lib/libx.so"
+};
+
 /// Builds `tests/fixtures/xspice/<name>.c` into a shared library in a new temporary directory.
 /// Returns the directory, to be kept while the library is used, and the library.
 fn build_library(name: &str) -> (TestDir, PathBuf) {
@@ -69,7 +76,7 @@ fn build_library(name: &str) -> (TestDir, PathBuf) {
 
 #[test]
 fn test_subcircuit() {
-    let part = DCosim::new("/lib/libx.so")
+    let part = DCosim::new(LIBRARY)
         .with_sim_args(["design.vvp"])
         .with_delay(2e-9)
         .input(
@@ -91,7 +98,7 @@ fn test_subcircuit() {
              AI_clk [clk#ai] [clk#di] adc_clk\n\
              .model adc_clk adc_bridge( in_low=1 in_high=2 )\n\
              AC [clk#di] [q#do] cosim\n\
-             .model cosim d_cosim( simulation=\"/lib/libx.so\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
+             .model cosim d_cosim( simulation=\"{LIBRARY}\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
              AO_q [q#do] [q#ao] dac_q\n\
              .model dac_q dac_bridge( out_low=0 out_high=3.3 out_undef=1.65 t_rise=2e-9 t_fall=2e-9 )\n\
              EO_q q#d ref q#ao 0 1\n\
@@ -99,7 +106,7 @@ fn test_subcircuit() {
              .ends {name}\n"
         )
     );
-    let no_inputs = DCosim::new("/lib/libx.so").output("q", OutputCharacteristics::cmos(3.3));
+    let no_inputs = DCosim::new(LIBRARY).output("q", OutputCharacteristics::cmos(3.3));
     assert!(no_inputs.subcircuit().1.contains("AC NULL [q#do] cosim\n"));
     assert!(matches!(part.spice(), Some(SpicePartInfo::Elements { .. })));
 }
@@ -108,7 +115,7 @@ fn test_subcircuit() {
 /// of the input `a` and the node of the output `ai_a`).
 #[test]
 fn test_internal_nodes_apart_from_pins() {
-    let part = DCosim::new("/lib/libx.so")
+    let part = DCosim::new(LIBRARY)
         .input("a", InputCharacteristics::cmos(3.3))
         .output("ai_a", OutputCharacteristics::cmos(3.3));
     let (_, text) = part.subcircuit();
@@ -119,7 +126,7 @@ fn test_internal_nodes_apart_from_pins() {
 #[test]
 #[should_panic(expected = "the pin name \"REF\" is reserved")]
 fn test_pin_named_ref() {
-    let _ = DCosim::new("/lib/libx.so").input("REF", InputCharacteristics::cmos(3.3));
+    let _ = DCosim::new(LIBRARY).input("REF", InputCharacteristics::cmos(3.3));
 }
 
 #[test]
@@ -131,12 +138,16 @@ fn test_relative_library() {
 #[test]
 #[should_panic(expected = "cannot be written in a model")]
 fn test_quote_in_argument() {
-    let _ = DCosim::new("/lib/libx.so").with_sim_args(["a\"b"]);
+    let _ = DCosim::new(LIBRARY).with_sim_args(["a\"b"]);
 }
 
 /// The C inverter between a driver and a load, with the device's `gnd` 1 V above the ground:
 /// the output follows the inverted input, relative to `gnd`.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+)]
 fn test_simulate_inverter() {
     let (_dir, library) = build_library("inverter");
     let cmos = OutputCharacteristics::cmos(3.3);
@@ -183,6 +194,10 @@ fn test_simulate_inverter() {
 
 /// A model without inputs, configured by its simulation argument: a 250 kHz oscillator.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "builds with gcc and ngspice's headers in /usr/share/ngspice"
+)]
 fn test_simulate_oscillator() {
     let (_dir, library) = build_library("oscillator");
     let mut bench = CircuitBuilder::new();
@@ -214,6 +229,10 @@ fn test_simulate_oscillator() {
 /// A 2-bit counter in Verilog, built with Verilator: clocked every 1 us after a reset, it counts
 /// 1, 2, 3, 0 with the carry at 3. The second build comes from the cache.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_simulate_verilog_counter() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice/counter.v");
     let model = Verilator::new([&source]).build().unwrap();
@@ -290,6 +309,10 @@ fn staging_dirs(cache: &Path) -> Vec<String> {
 
 /// A design Verilator rejects is reported with its log, and its build directory is kept.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_error() {
     let dir = TestDir::new("broken");
     let source = dir.join("broken.v");
@@ -311,6 +334,10 @@ fn test_verilator_error() {
 
 /// A design whose ports cannot be pins is reported, and its build directory is removed.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_port_error() {
     let dir = TestDir::new("gnd-port");
     let source = dir.join("buffer.v");
@@ -335,6 +362,10 @@ fn test_verilator_port_error() {
 /// (the library is absolute) and the include directories in the arguments. A change to an
 /// included file is a new build.
 #[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "needs Verilator and ngspice's sources in /usr/share/ngspice"
+)]
 fn test_verilator_relative_paths_and_includes() {
     let dir = TestDir::new("include");
     std::fs::create_dir(dir.join("inc")).unwrap();

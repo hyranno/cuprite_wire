@@ -557,6 +557,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(target_os = "linux"), ignore = "Verilator is used on Linux only")]
     fn test_record_inputs() {
         let files = "# DESCRIPTION: ...\nC \"--cc top.v\"\n\
             S       108  3116647  1795221207   251409447  1795221207   251409447 \"sp ace/top.v\"\n\
