@@ -39,6 +39,8 @@ exclude = [
 
 [package.metadata.docs.rs]
 features = ["shared-ngspice"]
+# Marks the items needing a feature in the documentation (`doc_cfg` in src/lib.rs).
+rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-shear]
 # Compile-fail cases for trybuild (tests/kicad_part_errors.rs), not modules.
