@@ -75,7 +75,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::bench::{Bench, assert_near};
+    use crate::bench::{Bench, StageNodes, assert_near};
 
     #[test]
     fn erc() {
@@ -93,18 +93,22 @@ mod tests {
 
     /// The filter on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
     fn bench(input: Box<IndependentSource>) -> Bench {
-        let mut bench = Bench::new(IndependentSource::voltage(5.0));
-        let ports = bench
-            .circuit
-            .instantiate_subcircuit_named("filter", LowPass);
-        bench.circuit.connect(ports.vcc, bench.vcc);
-        bench.circuit.connect(ports.gnd, bench.gnd);
-        let vref = bench.source("vref", IndependentSource::voltage(2.5));
-        bench.circuit.connect(ports.vref, vref);
-        let input = bench.source("input", input);
-        bench.circuit.connect(ports.input, input);
-        bench.probe(ports.output, "OUT");
-        bench
+        Bench::stage(input, |circuit| {
+            let LowPassPorts {
+                input,
+                vref,
+                vcc,
+                gnd,
+                output,
+            } = circuit.instantiate_subcircuit_named("filter", LowPass);
+            StageNodes {
+                input,
+                vref,
+                vcc,
+                gnd,
+                output,
+            }
+        })
     }
 
     #[test]

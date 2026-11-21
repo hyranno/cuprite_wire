@@ -648,13 +648,11 @@ mod tests {
     use crate::{
         sim::{Args, ElementDef},
         spice_lib::Dialect,
+        test_util::{fixture_resolver, strings},
     };
 
     fn resolver() -> Resolver {
-        let mut resolver = Resolver::new(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
-            |_| None,
-        );
+        let mut resolver = fixture_resolver();
         resolver.symbol_dir = Some("symbols".into());
         resolver.footprint_dir = Some("footprints".into());
         resolver
@@ -670,10 +668,6 @@ mod tests {
             footprint: FootprintOption::Given(footprint.into()),
             ..Default::default()
         }
-    }
-
-    fn strings(s: &[&str]) -> Vec<String> {
-        s.iter().map(|s| s.to_string()).collect()
     }
 
     #[test]

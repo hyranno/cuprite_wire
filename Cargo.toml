@@ -24,8 +24,18 @@ description = "Describe electronic circuits in Rust, test them with ERC and SPIC
 readme = "README.md"
 keywords = ["kicad", "spice", "circuit-design", "netlist", "eda"]
 categories = ["simulation", "science"]
-# Development environment and repository tooling; not needed to build or use the crate.
-exclude = [".claude/", ".devcontainer/", ".github/", ".gitattributes", ".gitignore", "tools/"]
+# Development environment, repository tooling, tests and examples; not needed to build or use the
+# crate. The tests and examples need files outside the package and are read in the repository.
+exclude = [
+    ".claude/",
+    ".devcontainer/",
+    ".github/",
+    ".gitattributes",
+    ".gitignore",
+    "examples/",
+    "tests/",
+    "tools/",
+]
 
 [package.metadata.docs.rs]
 features = ["shared-ngspice"]

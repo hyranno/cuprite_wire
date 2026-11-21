@@ -96,6 +96,7 @@ mod tests {
         naming::NetLabel,
         parts::Part,
         spice::{IndependentSource, SpicePartInfo},
+        test_parts::{self, deck_of},
     };
 
     #[test]
@@ -127,14 +128,7 @@ mod tests {
 
     /// Runs an operating point analysis and returns `v("/OUT")`.
     fn out_voltage(circuit: &CircuitBuilder) -> f64 {
-        let deck = circuit
-            .build(&())
-            .to_netlist()
-            .unwrap()
-            .to_spice()
-            .unwrap()
-            .deck()
-            .control(["op", r#"let out = v("/OUT")"#, "print out"]);
+        let deck = deck_of(circuit).control(["op", r#"let out = v("/OUT")"#, "print out"]);
         let sim = deck.run().unwrap();
         sim.expect_value("out")
     }
@@ -236,8 +230,8 @@ mod tests {
             .with_source("src/basic.rs")
             .write(&mut out)
             .unwrap();
-        crate::test_parts::check_golden("basic_parts.net", &String::from_utf8(out).unwrap());
+        test_parts::check_golden("basic_parts.net", &String::from_utf8(out).unwrap());
         let spice = netlist.to_spice().unwrap().with_title("basic_parts");
-        crate::test_parts::check_golden("basic_parts.cir", &spice.to_string());
+        test_parts::check_golden("basic_parts.cir", &spice.to_string());
     }
 }

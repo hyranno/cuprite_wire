@@ -7,6 +7,15 @@ use cuprite_wire::{
 };
 use petgraph::graph::NodeIndex;
 
+/// The nodes of a signal stage (the preamp, the filter) for [`Bench::stage`].
+pub struct StageNodes {
+    pub input: NodeIndex,
+    pub vref: NodeIndex,
+    pub vcc: NodeIndex,
+    pub gnd: NodeIndex,
+    pub output: NodeIndex,
+}
+
 pub struct Bench {
     pub circuit: CircuitBuilder,
     /// The positive supply, driven by an ideal source.
@@ -34,6 +43,24 @@ impl Bench {
         let pins = self.circuit.instantiate_part_named(name, source);
         self.circuit.connect(pins[IndependentSource::N], self.gnd);
         pins[IndependentSource::P]
+    }
+
+    /// A signal stage on a 5 V supply with an ideal 2.5 V reference, driven by `input`, with its
+    /// output probed as `OUT`. `instantiate` adds the stage and returns its nodes.
+    pub fn stage(
+        input: Box<IndependentSource>,
+        instantiate: impl FnOnce(&mut CircuitBuilder) -> StageNodes,
+    ) -> Self {
+        let mut bench = Self::new(IndependentSource::voltage(5.0));
+        let nodes = instantiate(&mut bench.circuit);
+        bench.circuit.connect(nodes.vcc, bench.vcc);
+        bench.circuit.connect(nodes.gnd, bench.gnd);
+        let vref = bench.source("vref", IndependentSource::voltage(2.5));
+        bench.circuit.connect(nodes.vref, vref);
+        let input = bench.source("input", input);
+        bench.circuit.connect(nodes.input, input);
+        bench.probe(nodes.output, "OUT");
+        bench
     }
 
     /// Names a node, so that the deck can refer to it as `v("/<name>")`.

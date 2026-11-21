@@ -956,13 +956,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn resolver() -> Resolver {
-        Resolver::new(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
-            |_| None,
-        )
-    }
+    use crate::test_util::{fixture_resolver, pairs, strings};
 
     /// The pins of a TPS3899-like symbol: neither the order nor all names match VSUP01's ports
     /// (`CTR CTS GND RESET_B SENSE VDD`).
@@ -975,16 +969,6 @@ mod tests {
                 name: Some(name.to_string()),
             })
             .collect()
-    }
-
-    fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
-        p.iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect()
-    }
-
-    fn strings(s: &[&str]) -> Vec<String> {
-        s.iter().map(|s| s.to_string()).collect()
     }
 
     const VSUP_PINS: &[(&str, &str)] = &[
@@ -1016,7 +1000,7 @@ mod tests {
             internal_connections: &[],
             mode,
         };
-        bind(bindings, &options, &mut resolver())
+        bind(bindings, &options, &mut fixture_resolver())
     }
 
     fn error(bindings: &[ModelBinding]) -> (usize, BindingField, String) {
@@ -1045,7 +1029,7 @@ mod tests {
         assert_eq!(
             element.models,
             vec![ModelDef::Include(
-                resolver().manifest_dir.join("models/vsup01.lib")
+                fixture_resolver().manifest_dir.join("models/vsup01.lib")
             )]
         );
         assert!(unused.is_empty());
@@ -1093,8 +1077,12 @@ mod tests {
             internal_connections: &[],
             mode: ModelMode::Include,
         };
-        let (elements, unused) =
-            bind(std::slice::from_ref(&binding), &options, &mut resolver()).unwrap();
+        let (elements, unused) = bind(
+            std::slice::from_ref(&binding),
+            &options,
+            &mut fixture_resolver(),
+        )
+        .unwrap();
         assert_eq!(
             (elements[0].device, &elements[0].nodes),
             ('D', &strings(&["2", "1"]))
@@ -1123,10 +1111,14 @@ mod tests {
             mode: ModelMode::Include,
         };
         assert!(
-            bind(std::slice::from_ref(&binding), &options, &mut resolver())
-                .unwrap()
-                .1
-                .is_empty()
+            bind(
+                std::slice::from_ref(&binding),
+                &options,
+                &mut fixture_resolver()
+            )
+            .unwrap()
+            .1
+            .is_empty()
         );
         // Positional without any mapping.
         let mut positional = binding;
@@ -1138,7 +1130,10 @@ mod tests {
             mode: ModelMode::Include,
         };
         assert_eq!(
-            bind(&[positional], &options, &mut resolver()).unwrap().0[0].nodes,
+            bind(&[positional], &options, &mut fixture_resolver())
+                .unwrap()
+                .0[0]
+                .nodes,
             ["1", "2"]
         );
     }
