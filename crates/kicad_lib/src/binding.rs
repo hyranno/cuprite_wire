@@ -100,6 +100,8 @@ pub struct ModelInfo {
     pub name: String,
     /// The type of a `.model` (lowercase); `None` for a `.subckt`.
     pub model_type: Option<String>,
+    /// KiCad's `Sim.Device` for the model: `SUBCKT`, or that of the [`ModelDevice`].
+    pub sim_device: &'static str,
     /// The ports in node order.
     pub ports: Vec<String>,
     /// The parameters of the `.subckt` with their defaults.
@@ -189,7 +191,21 @@ pub fn bind(
                 list.join(", "),
                 ids.join(", ")
             );
-            message.push_str(&pin_table(pins, &elements));
+            message.push_str(&pin_table(pins, |id| {
+                elements
+                    .iter()
+                    .filter_map(|element| {
+                        let info = element.info.as_ref()?;
+                        let index = element.nodes.iter().position(|node| node == id)?;
+                        let port = &info.ports[index];
+                        Some(if element.suffix.is_empty() {
+                            port.clone()
+                        } else {
+                            format!("{port} ({})", element.suffix)
+                        })
+                    })
+                    .collect()
+            }));
             return Err(BindingError {
                 element: 0,
                 field: BindingField::Pins,
@@ -202,110 +218,206 @@ pub fn bind(
 
 type FieldError = (BindingField, Error);
 
+fn fail(field: BindingField, message: String) -> FieldError {
+    (field, Error::new(message))
+}
+
 fn bind_one(
     binding: &ModelBinding,
     options: &BindOptions,
     resolver: &mut Resolver,
 ) -> Result<(ElementDef, Vec<String>), FieldError> {
-    use BindingField::{Library, Name, Params, Pins, Unused};
-    let fail = |field, message: String| (field, Error::new(message));
+    use BindingField::Library;
     let path = resolver
         .sim_library_path(&binding.library)
         .map_err(|e| (Library, e))?;
     let libs = read_library(&path, resolver).map_err(|e| (Library, e))?;
-    let found = libs
-        .iter()
-        .find_map(|(lib, section, _)| lib.find_in(&binding.name, section.as_deref()))
-        .cloned()
-        .ok_or_else(|| (Name, not_found(&binding.name, &path, &libs)))?;
-    let what = match &found.kind {
-        DefinitionKind::Model { .. } => format!("model {}", found.name),
-        _ => format!("subcircuit {}", found.name),
-    };
-
-    // The device and its ports.
-    let (device, ports, model_type, defaults) = match &found.kind {
-        DefinitionKind::Subckt {
-            ports,
-            optional_ports,
-            params,
-        } => {
-            if !optional_ports.is_empty() {
-                let names: Vec<&str> = optional_ports
-                    .iter()
-                    .map(|(name, _)| name.as_str())
-                    .collect();
-                return Err(fail(
-                    Name,
-                    format!(
-                        "{what} has `OPTIONAL:` ports ({}), which ngspice does not support",
-                        names.join(", ")
-                    ),
-                ));
-            }
-            ('X', ports.clone(), None, params.clone())
-        }
-        DefinitionKind::Model { model_type } => {
-            let (device, terminals) = model_device(model_type).ok_or_else(|| {
-                fail(
-                    Name,
-                    format!(
-                        "{what} has the type {model_type:?}; supported types are D, NPN, PNP, NMOS, PMOS, VDMOS, NJF and PJF"
-                    ),
-                )
-            })?;
-            (
-                device,
-                terminals.iter().map(|t| t.to_string()).collect(),
-                Some(model_type.clone()),
-                Vec::new(),
-            )
-        }
-        _ => unreachable!("find_in returns subcircuits and models"),
-    };
+    let found = find_definition(&binding.name, &path, &libs)?;
+    let model = model_of(&found)?;
     let dependencies = dependencies(&found, &libs);
-    if let Some(locked) = dependencies.iter().find(|d| d.encrypted) {
-        let detail = if locked.name.eq_ignore_ascii_case(&found.name) {
-            String::new()
-        } else {
-            format!(" (used by {})", found.name)
-        };
-        return Err(fail(
-            Name,
-            format!(
-                "{} {}{detail} is encrypted, which ngspice cannot read; ask the vendor for an unencrypted model",
-                if matches!(locked.kind, DefinitionKind::Model { .. }) {
-                    "model"
-                } else {
-                    "subcircuit"
-                },
-                locked.name
-            ),
-        ));
-    }
+    check_encrypted(&found, &dependencies)?;
 
-    // Pins to ports.
-    let (part_pins, mapping): (Vec<PartPin>, Vec<(String, String)>) = match options.pins {
+    let (part_pins, mapping) = match options.pins {
         PartPins::Given(pins) => (pins.to_vec(), binding.pins.clone()),
         PartPins::Ports => (
-            ports
+            model
+                .ports
                 .iter()
                 .map(|port| PartPin {
                     id: port.clone(),
                     name: None,
                 })
                 .collect(),
-            ports
+            model
+                .ports
                 .iter()
                 .map(|port| (port.clone(), port.clone()))
                 .collect(),
         ),
     };
-    let part_pins = part_pins.as_slice();
+    let (nodes, unmapped_pins) = map_ports(
+        &part_pins,
+        &mapping,
+        &binding.unused,
+        &model.ports,
+        options.strict,
+        &model.what,
+    )?;
+    let args = instance_args(&found.name, &model, &binding.params)?;
+    let (dialect, dialect_reason) = choose_dialect(binding.dialect, &libs)?;
+    let models = match options.mode {
+        ModelMode::Include => {
+            check_includes(&libs, dialect)?;
+            vec![ModelDef::Include(path.clone())]
+        }
+        ModelMode::Inline => {
+            let mut definitions = dependencies;
+            definitions.sort_by_key(|d| d.name.to_ascii_lowercase());
+            definitions
+                .into_iter()
+                .map(|d| ModelDef::Inline {
+                    name: d.name,
+                    text: d.text,
+                })
+                .collect()
+        }
+    };
+    let element = ElementDef {
+        device: model.device,
+        suffix: binding.suffix.clone(),
+        nodes,
+        args: Args::Fixed(args),
+        models,
+        dialect,
+        info: Some(ModelInfo {
+            path,
+            name: found.name.clone(),
+            model_type: model.model_type,
+            sim_device: model.sim_device,
+            ports: model.ports,
+            params: model.defaults,
+            dialect,
+            dialect_reason,
+        }),
+    };
+    Ok((element, unmapped_pins))
+}
+
+/// The `.subckt` or `.model` named `name` in the library or the files it includes.
+fn find_definition(name: &str, path: &Path, libs: &[LibFile]) -> Result<Definition, FieldError> {
+    libs.iter()
+        .find_map(|(lib, section, _)| lib.find_in(name, section.as_deref()))
+        .cloned()
+        .ok_or_else(|| (BindingField::Name, not_found(name, path, libs)))
+}
+
+/// What a definition is as a device.
+struct Model {
+    /// `subcircuit NAME` / `model NAME`, for messages.
+    what: String,
+    device: char,
+    /// The ports of the `.subckt`, or the terminals of the device.
+    ports: Vec<String>,
+    model_type: Option<String>,
+    sim_device: &'static str,
+    /// The parameters of the `.subckt` with their defaults.
+    defaults: Vec<(String, String)>,
+}
+
+fn model_of(found: &Definition) -> Result<Model, FieldError> {
+    match &found.kind {
+        DefinitionKind::Subckt {
+            ports,
+            optional_ports,
+            params,
+        } => {
+            let what = format!("subcircuit {}", found.name);
+            if !optional_ports.is_empty() {
+                let names: Vec<&str> = optional_ports
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect();
+                return Err(fail(
+                    BindingField::Name,
+                    format!(
+                        "{what} has `OPTIONAL:` ports ({}), which ngspice does not support",
+                        names.join(", ")
+                    ),
+                ));
+            }
+            Ok(Model {
+                what,
+                device: 'X',
+                ports: ports.clone(),
+                model_type: None,
+                sim_device: "SUBCKT",
+                defaults: params.clone(),
+            })
+        }
+        DefinitionKind::Model { model_type } => {
+            let what = format!("model {}", found.name);
+            let device = model_device(model_type, &found.text).ok_or_else(|| {
+                fail(
+                    BindingField::Name,
+                    format!(
+                        "{what} has the type {model_type:?}; supported types are D, NPN, PNP, NMOS, PMOS, VDMOS, NJF and PJF"
+                    ),
+                )
+            })?;
+            Ok(Model {
+                what,
+                device: device.letter,
+                ports: device.terminals.iter().map(|t| t.to_string()).collect(),
+                model_type: Some(model_type.clone()),
+                sim_device: device.sim_device,
+                defaults: Vec::new(),
+            })
+        }
+        _ => unreachable!("find_in returns subcircuits and models"),
+    }
+}
+
+/// An error if the definition or one it uses is encrypted.
+fn check_encrypted(found: &Definition, dependencies: &[Definition]) -> Result<(), FieldError> {
+    let Some(locked) = dependencies.iter().find(|d| d.encrypted) else {
+        return Ok(());
+    };
+    let detail = if locked.name.eq_ignore_ascii_case(&found.name) {
+        String::new()
+    } else {
+        format!(" (used by {})", found.name)
+    };
+    Err(fail(
+        BindingField::Name,
+        format!(
+            "{} {}{detail} is encrypted, which ngspice cannot read; ask the vendor for an unencrypted model",
+            if matches!(locked.kind, DefinitionKind::Model { .. }) {
+                "model"
+            } else {
+                "subcircuit"
+            },
+            locked.name
+        ),
+    ))
+}
+
+/// Maps the pins of a part to the ports of a model (`what`, for messages): `mapping` is pin =>
+/// port, ports are matched case-insensitively, and every port needs a pin. Not `strict`, an empty
+/// mapping connects the pins in order (KiCad without `Sim.Pins`).
+///
+/// Returns the pins in port order and, not `strict`, the pins neither mapped nor in `unused`.
+pub(crate) fn map_ports(
+    part_pins: &[PartPin],
+    mapping: &[(String, String)],
+    unused: &[String],
+    ports: &[String],
+    strict: bool,
+    what: &str,
+) -> Result<(Vec<String>, Vec<String>), FieldError> {
+    use BindingField::{Pins, Unused};
     let part_pin = |id: &str| part_pins.iter().any(|pin| pin.id == id);
     let mut nodes: Vec<Option<String>> = vec![None; ports.len()];
-    if mapping.is_empty() && !options.strict {
-        // KiCad without `Sim.Pins`: the pins in order.
+    if mapping.is_empty() && !strict {
         if part_pins.len() != ports.len() {
             return Err(fail(
                 Pins,
@@ -322,7 +434,7 @@ fn bind_one(
         }
     }
     let mut seen_pins = BTreeSet::new();
-    for (pin, port) in &mapping {
+    for (pin, port) in mapping {
         if !part_pin(pin) {
             return Err(fail(Pins, format!("the part has no pin {pin:?}")));
         }
@@ -351,16 +463,8 @@ fn bind_one(
             ));
         }
     }
-    for pin in &binding.unused {
-        if !part_pin(pin) {
-            return Err(fail(Unused, format!("the part has no pin {pin:?}")));
-        }
-        if seen_pins.contains(pin) {
-            return Err(fail(
-                Unused,
-                format!("pin {pin:?} is mapped to a port, so it cannot be unused"),
-            ));
-        }
+    if let Some(pin) = unused.iter().find(|pin| !part_pin(pin)) {
+        return Err(fail(Unused, format!("the part has no pin {pin:?}")));
     }
     let unmapped_ports: Vec<&str> = ports
         .iter()
@@ -373,84 +477,91 @@ fn bind_one(
             "no pin is mapped to the ports {} of {what}",
             unmapped_ports.join(", ")
         );
-        let partial = ElementDef {
-            device,
-            suffix: binding.suffix.clone(),
-            nodes: nodes
+        message.push_str(&pin_table(part_pins, |pin| {
+            nodes
                 .iter()
-                .map(|n| n.clone().unwrap_or_default())
-                .collect(),
-            args: Args::Fixed(String::new()),
-            models: Vec::new(),
-            dialect: Dialect::Ngspice,
-            info: Some(ModelInfo {
-                path: path.clone(),
-                name: found.name.clone(),
-                model_type: None,
-                ports: ports.clone(),
-                params: Vec::new(),
-                dialect: Dialect::Ngspice,
-                dialect_reason: String::new(),
-            }),
-        };
-        message.push_str(&pin_table(part_pins, std::slice::from_ref(&partial)));
+                .position(|node| node.as_deref() == Some(pin))
+                .map(|index| ports[index].clone())
+                .into_iter()
+                .collect()
+        }));
         let free_pins: Vec<&PartPin> = part_pins
             .iter()
-            .filter(|pin| !seen_pins.contains(&pin.id) && !binding.unused.contains(&pin.id))
+            .filter(|pin| !seen_pins.contains(&pin.id) && !unused.contains(&pin.id))
             .collect();
         message.push_str(&suggestions(&free_pins, &unmapped_ports));
         return Err(fail(Pins, message));
     }
     let nodes: Vec<String> = nodes.into_iter().map(Option::unwrap).collect();
-    let unmapped_pins: Vec<String> = if options.strict {
+    let unmapped_pins = if strict {
         Vec::new()
     } else {
         part_pins
             .iter()
-            .filter(|pin| !nodes.contains(&pin.id) && !binding.unused.contains(&pin.id))
+            .filter(|pin| !nodes.contains(&pin.id) && !unused.contains(&pin.id))
             .map(|pin| pin.id.clone())
             .collect()
     };
+    Ok((nodes, unmapped_pins))
+}
 
-    // Parameters.
-    if model_type.is_some() && !binding.params.is_empty() {
-        return Err(fail(
-            Params,
-            format!("{what} is a .model; parameters are for subcircuits"),
-        ));
+/// The arguments of the element: the name of the model and the parameters of the `.subckt`.
+fn instance_args(
+    name: &str,
+    model: &Model,
+    params: &[(String, String)],
+) -> Result<String, FieldError> {
+    let what = &model.what;
+    let fail = |message| fail(BindingField::Params, message);
+    if model.model_type.is_some() && !params.is_empty() {
+        return Err(fail(format!(
+            "{what} is a .model; parameters are for subcircuits"
+        )));
     }
-    let mut args = found.name.clone();
-    let mut seen_params = BTreeSet::new();
-    for (name, value) in &binding.params {
+    let mut args = name.to_string();
+    let mut seen = BTreeSet::new();
+    for (name, value) in params {
+        let defaults = &model.defaults;
         if !defaults.iter().any(|(p, _)| p.eq_ignore_ascii_case(name)) {
             let known: Vec<String> = defaults.iter().map(|(p, v)| format!("{p}={v}")).collect();
-            return Err(fail(
-                Params,
-                if known.is_empty() {
-                    format!("{what} has no parameters")
-                } else {
-                    format!(
-                        "{what} has no parameter {name:?}; its parameters are {}",
-                        known.join(" ")
-                    )
-                },
-            ));
+            return Err(fail(if known.is_empty() {
+                format!("{what} has no parameters")
+            } else {
+                format!(
+                    "{what} has no parameter {name:?}; its parameters are {}",
+                    known.join(" ")
+                )
+            }));
         }
-        if !seen_params.insert(name.to_ascii_lowercase()) {
-            return Err(fail(Params, format!("parameter {name:?} is given twice")));
+        if !seen.insert(name.to_ascii_lowercase()) {
+            return Err(fail(format!("parameter {name:?} is given twice")));
         }
-        if value.is_empty()
-            || value.contains(|c: char| c.is_whitespace() || c.is_control() || c == ';' || c == '$')
-        {
-            return Err(fail(
-                Params,
-                format!("the value {value:?} of {name} cannot be written in a deck"),
-            ));
-        }
+        check_param_value(name, value).map_err(|e| (BindingField::Params, e))?;
         args.push_str(&format!(" {name}={value}"));
     }
+    Ok(args)
+}
 
-    // Dialect.
+/// Checks that a parameter value can be written in a deck as one token. Expressions (`{...}`,
+/// `'...'`) are left to ngspice.
+pub(crate) fn check_param_value(name: &str, value: &str) -> Result<(), Error> {
+    if value.is_empty()
+        || value.contains(|c: char| {
+            c.is_whitespace() || c.is_control() || matches!(c, ';' | '$' | '\\' | '"')
+        })
+    {
+        return Err(Error::new(format!(
+            "the value {value:?} of {name} cannot be written in a deck"
+        )));
+    }
+    Ok(())
+}
+
+/// The dialect of the model, and why it was chosen.
+fn choose_dialect(
+    option: DialectOption,
+    libs: &[LibFile],
+) -> Result<(Dialect, String), FieldError> {
     let hints: Vec<(&Path, &DialectHint)> = libs
         .iter()
         .flat_map(|(lib, _, file)| lib.hints.iter().map(move |hint| (file.as_path(), hint)))
@@ -475,7 +586,7 @@ fn bind_one(
             .collect::<Vec<_>>()
     };
     let (pspice, ltspice) = (of(Dialect::Pspice), of(Dialect::Ltspice));
-    let (dialect, dialect_reason) = match binding.dialect {
+    Ok(match option {
         DialectOption::Given(dialect) => (dialect, "given".to_string()),
         DialectOption::Auto => match (pspice.is_empty(), ltspice.is_empty()) {
             (true, true) => (
@@ -502,87 +613,106 @@ fn bind_one(
                 ));
             }
         },
-    };
-    if options.mode == ModelMode::Include {
-        let includes = libs
-            .iter()
-            .flat_map(|(lib, section, _)| lib.includes(section.as_deref()));
-        for include in includes {
-            if include.pspice && dialect != Dialect::Pspice {
-                return Err(fail(
-                    BindingField::Dialect,
-                    format!(
-                        "the library includes {:?} with `.LIB`, which ngspice reads only in its PSpice mode; \
-                         use `dialect: pspice` or `sim_model: inline`",
-                        include.path
-                    ),
-                ));
-            }
-            if let Some(section) = &include.section
-                && dialect == Dialect::Pspice
-            {
-                return Err(fail(
-                    BindingField::Dialect,
-                    format!(
-                        "the library reads section {section} of {:?} with `.lib`, which ngspice's PSpice mode \
-                         does not support; use `sim_model: inline`",
-                        include.path
-                    ),
-                ));
-            }
-        }
-    }
-
-    let models = match options.mode {
-        ModelMode::Include => vec![ModelDef::Include(path.clone())],
-        ModelMode::Inline => {
-            let mut definitions = dependencies;
-            definitions.sort_by_key(|d| d.name.to_ascii_lowercase());
-            definitions
-                .into_iter()
-                .map(|d| ModelDef::Inline {
-                    name: d.name,
-                    text: d.text,
-                })
-                .collect()
-        }
-    };
-    let element = ElementDef {
-        device,
-        suffix: binding.suffix.clone(),
-        nodes,
-        args: Args::Fixed(args),
-        models,
-        dialect,
-        info: Some(ModelInfo {
-            path,
-            name: found.name.clone(),
-            model_type,
-            ports,
-            params: defaults,
-            dialect,
-            dialect_reason,
-        }),
-    };
-    Ok((element, unmapped_pins))
+    })
 }
 
-/// The element letter and terminals of a device with a `.model` of `model_type` (lowercase).
-pub fn model_device(model_type: &str) -> Option<(char, &'static [&'static str])> {
-    Some(
-        match model_type.split_whitespace().next().unwrap_or_default() {
-            "d" => ('D', &["A", "K"]),
-            "npn" | "pnp" => ('Q', &["C", "B", "E"]),
-            "vdmos" => ('M', &["D", "G", "S"]),
-            "nmos" | "pmos" => ('M', &["D", "G", "S", "B"]),
-            "njf" | "pjf" => ('J', &["D", "G", "S"]),
-            _ => return None,
-        },
-    )
+/// An error if ngspice cannot read the includes of an included library in `dialect`.
+fn check_includes(libs: &[LibFile], dialect: Dialect) -> Result<(), FieldError> {
+    let includes = libs
+        .iter()
+        .flat_map(|(lib, section, _)| lib.includes(section.as_deref()));
+    for include in includes {
+        if include.pspice && dialect != Dialect::Pspice {
+            return Err(fail(
+                BindingField::Dialect,
+                format!(
+                    "the library includes {:?} with `.LIB`, which ngspice reads only in its PSpice mode; \
+                     use `dialect: pspice` or `sim_model: inline`",
+                    include.path
+                ),
+            ));
+        }
+        if let Some(section) = &include.section
+            && dialect == Dialect::Pspice
+        {
+            return Err(fail(
+                BindingField::Dialect,
+                format!(
+                    "the library reads section {section} of {:?} with `.lib`, which ngspice's PSpice mode \
+                     does not support; use `sim_model: inline`",
+                    include.path
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// A device with a `.model`: its KiCad `Sim.Device`, element letter and terminals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelDevice {
+    pub sim_device: &'static str,
+    pub letter: char,
+    pub terminals: &'static [&'static str],
+}
+
+const DIODE: &[&str] = &["A", "K"];
+const BJT: &[&str] = &["C", "B", "E"];
+const MOSFET: &[&str] = &["D", "G", "S", "B"];
+const THREE_TERMINAL_FET: &[&str] = &["D", "G", "S"];
+
+/// `.model` types (lowercase), with their devices.
+const MODEL_DEVICES: &[(&str, ModelDevice)] = &[
+    ("d", device("D", 'D', DIODE)),
+    ("npn", device("NPN", 'Q', BJT)),
+    ("pnp", device("PNP", 'Q', BJT)),
+    ("nmos", device("NMOS", 'M', MOSFET)),
+    ("pmos", device("PMOS", 'M', MOSFET)),
+    // N-channel unless the parameters have `pchan`.
+    ("vdmos", device("NMOS", 'M', THREE_TERMINAL_FET)),
+    ("njf", device("NJFET", 'J', THREE_TERMINAL_FET)),
+    ("pjf", device("PJFET", 'J', THREE_TERMINAL_FET)),
+];
+
+const fn device(
+    sim_device: &'static str,
+    letter: char,
+    terminals: &'static [&'static str],
+) -> ModelDevice {
+    ModelDevice {
+        sim_device,
+        letter,
+        terminals,
+    }
+}
+
+/// The device of a `.model` of `model_type` (lowercase) defined by `text` (the `.model`
+/// statement, which tells the channel of a VDMOS).
+pub fn model_device(model_type: &str, text: &str) -> Option<ModelDevice> {
+    let (_, mut device) = *MODEL_DEVICES.iter().find(|(t, _)| *t == model_type)?;
+    if model_type == "vdmos" && has_pchan(text) {
+        device.sim_device = "PMOS";
+    }
+    Some(device)
+}
+
+/// Whether the parameters of a `.model` have the `pchan` flag.
+fn has_pchan(text: &str) -> bool {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('*'))
+        .map(|line| line.split(';').next().unwrap_or_default())
+        .flat_map(|line| line.split(|c: char| c.is_whitespace() || "(),=".contains(c)))
+        .filter(|word| !word.is_empty())
+        .skip(3)
+        .any(|word| word.eq_ignore_ascii_case("pchan"))
 }
 
 /// A library file, the section that is read (`None`: outside the sections) and its path.
 type LibFile = (Arc<SpiceLib>, Option<String>, PathBuf);
+
+/// The most files a library may read with its includes, to stop include loops through paths that
+/// keep growing (`.include sub/self.lib` with `sub` a link to `.`).
+const MAX_LIBRARY_FILES: usize = 256;
 
 /// Reads a library and the files it includes, each with the section that is read.
 fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Error> {
@@ -594,8 +724,14 @@ fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Er
             file.clone(),
             section.as_ref().map(|s| s.to_ascii_lowercase()),
         );
-        if !seen.insert(key) || seen.len() > 32 {
+        if !seen.insert(key) {
             continue;
+        }
+        if seen.len() > MAX_LIBRARY_FILES {
+            return Err(Error::new(format!(
+                "{} includes more than {MAX_LIBRARY_FILES} files; do the includes loop?",
+                path.display()
+            )));
         }
         let lib = resolver.spice_lib(&file)?;
         if let Some(section) = &section
@@ -739,23 +875,12 @@ fn describe_pin(pin: &PartPin) -> String {
     }
 }
 
-/// A table of the pins and the ports they are mapped to, appended to an error message.
-fn pin_table(pins: &[PartPin], elements: &[ElementDef]) -> String {
+/// A table of the pins and the ports they are mapped to (`ports_of` a pin ID), appended to an
+/// error message.
+fn pin_table(pins: &[PartPin], ports_of: impl Fn(&str) -> Vec<String>) -> String {
     let mut text = String::from("\npins and ports:");
     for pin in pins {
-        let ports: Vec<String> = elements
-            .iter()
-            .filter_map(|element| {
-                let info = element.info.as_ref()?;
-                let index = element.nodes.iter().position(|node| node == &pin.id)?;
-                let port = &info.ports[index];
-                Some(if element.suffix.is_empty() {
-                    port.clone()
-                } else {
-                    format!("{port} ({})", element.suffix)
-                })
-            })
-            .collect();
+        let ports = ports_of(&pin.id);
         let ports = if ports.is_empty() {
             "-".to_string()
         } else {
@@ -1170,6 +1295,57 @@ suggested from the names (not applied; check them against the datasheet):
             e.error
         );
         assert!(run(&[ngspice], &symbol_pins(), ModelMode::Inline).is_ok());
+    }
+
+    #[test]
+    fn test_include_loop() {
+        // A chain of includes longer than the limit is an error, not a silently cut search.
+        let dir = std::env::temp_dir().join(format!("cuprite_include_loop_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let count = MAX_LIBRARY_FILES + 1;
+        for i in 0..count {
+            let text = if i + 1 < count {
+                format!(".include l{}.lib\n", i + 1)
+            } else {
+                ".model clamp D\n".to_string()
+            };
+            std::fs::write(dir.join(format!("l{i}.lib")), text).unwrap();
+        }
+        let binding = ModelBinding {
+            library: dir.join("l0.lib").to_string_lossy().into_owned(),
+            name: "clamp".into(),
+            pins: pairs(&[("1", "A"), ("2", "K")]),
+            ..Default::default()
+        };
+        let pins = &symbol_pins()[..2];
+        let e = run(&[binding], pins, ModelMode::Include).unwrap_err();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(e.field, BindingField::Library);
+        assert!(
+            e.error
+                .message
+                .ends_with("includes more than 256 files; do the includes loop?"),
+            "{}",
+            e.error
+        );
+    }
+
+    #[test]
+    fn test_model_devices() {
+        let device = |text: &str| {
+            let model_type = text.split([' ', '(']).nth(2).unwrap().to_ascii_lowercase();
+            model_device(&model_type, text).map(|d| (d.sim_device, d.letter, d.terminals.len()))
+        };
+        assert_eq!(device(".model a D"), Some(("D", 'D', 2)));
+        assert_eq!(device(".model a NMOS level=1"), Some(("NMOS", 'M', 4)));
+        assert_eq!(device(".model a VDMOS(Kp=1)"), Some(("NMOS", 'M', 3)));
+        assert_eq!(
+            device(".model a VDMOS(Kp=1\n+ PCHAN)"),
+            Some(("PMOS", 'M', 3))
+        );
+        assert_eq!(device(".model pchan VDMOS NCHAN"), Some(("NMOS", 'M', 3)));
+        assert_eq!(device(".model a VDMOS PCHAN"), Some(("PMOS", 'M', 3)));
+        assert_eq!(device(".model a SW"), None);
     }
 
     #[test]

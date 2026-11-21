@@ -61,6 +61,7 @@ with the same nickname.
 
 - `pub struct Name;` with `const fn new()` and `Default`, or `pub struct Name { value }` with
   `fn new(value: impl Into<String>)` for `value: param`. It derives `Debug`, `Clone`, `PartialEq` and `Eq`.
+  When the simulation writes the value (section 4), `new` panics if it is not a number.
 - `Name::PINS`: the pin IDs. Each pin renamed with `pins` also gets a constant (`out_a` -> `Name::OUT_A`).
 - The documentation of the type gets the symbol, the footprint, the symbol's description and
   datasheet, and a table of the pins (ID, pad, name, electrical type, unit), shown by rust-analyzer.
@@ -98,13 +99,19 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
 | Symbol | Element |
 |---|---|
 | `exclude_from_sim` or `Sim.Enable` `0` | `SpicePartInfo::Excluded` |
-| no `Sim.*` fields, reference `R`, `C` or `L`, two pins | inferred: the value as is (`value` must be a number, or `param`) |
+| no `Sim.*` fields, reference `R`, `C` or `L`, two pins | inferred: the value (`value` must be a number, or `param`) |
 | no `Sim.*` fields, other references | no model: `spice()` returns `None` |
 | `Sim.Device` `R` `C` `L` | the value, or `Sim.Params` `r=` / `c=` / `l=` |
 | `Sim.Device` `V` `I` with `Sim.Type` `DC` | `DC <value>`, or `Sim.Params` `dc=` |
 | `Sim.Device` `D`, `NPN` `PNP` (Gummel-Poon), `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges) | a built-in model `.model __<TypeName> <type> <Sim.Params>`, or the `.model` `Sim.Name` of `Sim.Library` |
 | `Sim.Device` `SUBCKT` with `Sim.Library` and `Sim.Name` | `X` element with the `.subckt` and `Sim.Params` as parameters |
 
+- Values (the `Value`, and `Sim.Params` `r=` / `c=` / `l=` / `dc=`) are numbers in KiCad's notation,
+  converted to SPICE's as KiCad does: SI prefixes with `M` for mega (`1M` -> `1Meg`; SPICE reads `M`
+  as milli), the RKM code (`4k7` -> `4.7k`, `2R2` -> `2.2`), and an optional unit (`100nF`, `1kΩ`).
+  Other text is an error (at compile time, or in `new` for `value: param`). The parameters of
+  built-in models are converted when they are such numbers, and written as is otherwise
+  (expressions); the parameters of subcircuits are written as is.
 - The device letter comes from the model (`Q` for `NPN`, `M` for `NMOS`, `X` for `SUBCKT`), and the
   element name gets it prepended when the reference does not start with it (`XU1`, `MQ2`), as in KiCad.
 - Nodes follow the model's pin order (D: A K, Q: C B E, M: D G S [B], J: D G S, two-terminal: + -,

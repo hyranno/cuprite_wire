@@ -90,6 +90,25 @@ fn test_resistor() {
 }
 
 #[test]
+fn test_value_in_kicad_notation() {
+    // The netlist for KiCad keeps the value; the deck has it in SPICE's notation, in which `4k7`
+    // would be 4k and `1M` milli.
+    let r = Resistor::new("4k7");
+    assert_eq!(r.value(), "4k7");
+    let args = |r: Resistor| match r.spice() {
+        Some(SpicePartInfo::Elements { elements, .. }) => elements[0].args.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(args(r), "4.7k");
+    assert_eq!(args(Resistor::new("1M")), "1Meg");
+    let panic = std::panic::catch_unwind(|| Resistor::new("R47")).unwrap_err();
+    assert_eq!(
+        panic.downcast_ref::<String>().unwrap(),
+        "the value \"R47\" is not a number (like 10k, 4k7 or 1M for mega)"
+    );
+}
+
+#[test]
 fn test_dual_amp() {
     let amp = DualAmp::new();
     assert_eq!(

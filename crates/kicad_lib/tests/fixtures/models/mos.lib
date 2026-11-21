@@ -1,0 +1,4 @@
+* VDMOS models written for cuprite_wire (MIT): the channel is a flag among the parameters.
+.model NVD VDMOS(Rd=10m Rs=5m Vto=3 Kp=20)
+.model PVD VDMOS(Rd=10m Rs=5m Vto=-3
++ Kp=20 pchan)

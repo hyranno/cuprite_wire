@@ -212,6 +212,20 @@ fn check_args(args: &str) -> Option<&'static str> {
     }
 }
 
+/// Converts a value in KiCad's notation (SI prefixes with `M` for mega, the RKM code like `4k7`,
+/// an optional unit like `100nF`) to SPICE (`4.7k`, `1Meg`, `100n`), for an element of `device`
+/// (`R`, `C`, `L`, `V`, `I`), as KiCad does when it writes a SPICE netlist. Parts made by
+/// [`kicad_part!`](crate::kicad_part) with `value: param` write their value with it.
+///
+/// # Errors
+///
+/// If the value is not such a number.
+pub fn spice_value(device: char, value: &str) -> Result<String, String> {
+    cuprite_wire_kicad_lib::value::to_spice(value, device).ok_or_else(|| {
+        format!("the value {value:?} is not a number (like 10k, 4k7 or 1M for mega)")
+    })
+}
+
 /// A model definition required by an element.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ModelSource {

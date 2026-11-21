@@ -215,16 +215,55 @@ fn generate(
         });
 
     let (fields, constructor, value_fn) = match &part.value {
-        Value::Param => (
-            quote!({ value: String }),
-            quote! {
-                /// Creates the part with the given value (e.g. `"10k"`).
-                pub fn new(value: impl Into<String>) -> Self {
-                    #name { value: value.into() }
-                }
-            },
-            quote!(self.value.clone()),
-        ),
+        Value::Param => {
+            // The devices that write the value, which must be a number they read.
+            let mut devices: Vec<char> = match &part.spice {
+                SpiceDef::Elements { elements, .. } => elements
+                    .iter()
+                    .filter(|element| matches!(element.args, Args::Value { .. }))
+                    .map(|element| element.device)
+                    .collect(),
+                _ => Vec::new(),
+            };
+            devices.sort_unstable();
+            devices.dedup();
+            let (check, panics) = if devices.is_empty() {
+                (None, None)
+            } else {
+                (
+                    Some(quote! {
+                        #(
+                            if let ::core::result::Result::Err(error) =
+                                #krate::spice::part::spice_value(#devices, &value)
+                            {
+                                ::core::panic!("{}", error);
+                            }
+                        )*
+                    }),
+                    Some(quote! {
+                        ///
+                        /// # Panics
+                        ///
+                        /// If the value is not a number in KiCad's notation (e.g. `"4k7"`, `"1M"`
+                        /// for mega), which the simulation needs.
+                        #[track_caller]
+                    }),
+                )
+            };
+            (
+                quote!({ value: ::std::string::String }),
+                quote! {
+                    /// Creates the part with the given value (e.g. `"10k"`).
+                    #panics
+                    pub fn new(value: impl ::core::convert::Into<::std::string::String>) -> Self {
+                        let value = value.into();
+                        #check
+                        #name { value }
+                    }
+                },
+                quote!(self.value.clone()),
+            )
+        }
         Value::Fixed(value) => (
             quote!(;),
             quote! {
@@ -364,7 +403,15 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
     let nodes = &element.nodes;
     let args = match &element.args {
         Args::Fixed(text) => quote!(#text),
-        Args::Value { prefix } => quote!(format!("{}{}", #prefix, self.value)),
+        Args::Value { prefix } => quote! {
+            ::std::format!(
+                "{}{}",
+                #prefix,
+                // Checked by `new`.
+                #krate::spice::part::spice_value(#device, &self.value)
+                    .unwrap_or_else(|error| ::core::panic!("{}", error))
+            )
+        },
     };
     let dialect = match element.dialect {
         Dialect::Ngspice => None,

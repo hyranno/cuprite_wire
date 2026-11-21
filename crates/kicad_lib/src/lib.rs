@@ -12,6 +12,7 @@ pub mod sexpr;
 pub mod sim;
 pub mod spice_lib;
 pub mod symbol;
+pub mod value;
 
 use std::fmt;
 
