@@ -60,10 +60,28 @@ jobs:
       - run: cargo "+${MSRV}" check --workspace --all-targets --features shared-ngspice
 
   test:
-    name: test
+    name: test (KiCad ${{ matrix.kicad }})
     runs-on: ubuntu-latest
-    # Debian trixie provides ngspice 44 and the KiCad 9 libraries, as in the devcontainer.
-    container: rust:trixie
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Debian trixie provides ngspice 44 and the KiCad 9 libraries.
+          - kicad: 9
+            image: rust:trixie
+            packages: kicad-symbols kicad-footprints
+            features: kicad-libraries,shared-ngspice
+          # The base image of the devcontainer, with the KiCad 10 libraries; Rust is installed below.
+          # tests/kicad_libraries.rs uses Device:Opamp_Dual, which KiCad 10 moved to
+          # Amplifier_Operational, so the kicad-libraries feature is left out for now.
+          - kicad: 10
+            image: kicad/kicad:10.0
+            packages: build-essential ca-certificates curl
+            features: shared-ngspice
+    container:
+      image: ${{ matrix.image }}
+      # kicad/kicad runs as the user `kicad` by default.
+      options: --user root
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,8 +91,15 @@ jobs:
       - name: Install ngspice, Verilator and the KiCad libraries
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ngspice libngspice0 verilator kicad-symbols kicad-footprints
+          apt-get install -y --no-install-recommends ngspice libngspice0 verilator ${{ matrix.packages }}
+      - name: Install Rust
+        if: matrix.kicad == 10
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo test --workspace --features kicad-libraries,shared-ngspice
+        with:
+          key: kicad${{ matrix.kicad }}
+      - run: cargo test --workspace --features ${{ matrix.features }}
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored
