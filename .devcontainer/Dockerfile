@@ -10,6 +10,7 @@ ENV PYTHONIOENCODING=utf-8
 USER root
 SHELL ["/bin/bash", "-c"]
 
+# pkg-config and libssl-dev build the refactoring aids below (rust:trixie had them).
 RUN \
   apt-get update && \
   apt-get install -y -q --no-install-recommends \
@@ -17,7 +18,9 @@ RUN \
     ca-certificates \
     curl \
     libngspice0 \
+    libssl-dev \
     ngspice \
+    pkg-config \
     verilator \
     xvfb \
   && \
