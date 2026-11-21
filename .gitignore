@@ -6,6 +6,13 @@
 
 # Personal secrets, such as a GitHub token loaded by hand
 .env
+.env.*
+
+# Files KiCad creates next to the libraries and boards it opens
+fp-info-cache
+*.lck
+*-backups/
+_autosave-*
 
 # Personal devcontainer configuration
 /.devcontainer/local/
