@@ -1,10 +1,11 @@
 # Electrical Rules Check (ERC)
 
-`Netlist::erc` checks a circuit by the electrical types of its pins, following the rules of KiCad 9's
-ERC that depend only on the netlist. The checks follow KiCad 9.0's source (`eeschema/erc/erc.cpp`,
+`Netlist::erc` checks a circuit by the electrical types of its pins, following the rules of KiCad 10's
+ERC that depend only on the netlist. The checks follow KiCad 10.0's source (`eeschema/erc/erc.cpp`,
 `eeschema/connection_graph.cpp`). Rules about schematic drawings (wires, buses, sheets, label
 placement, annotation) do not apply, and since one part holds all units of a symbol, neither do
-the multi-unit rules.
+the multi-unit rules. ERC does not depend on the installed KiCad, so the KiCad 10 rules apply to
+circuits exported for KiCad 9 as well (see [Differences from KiCad 9](#differences-from-kicad-9)).
 
 ## 1. Running ERC
 
@@ -38,7 +39,7 @@ Each net is checked for:
 | Rule | Default | Violation |
 |---|---|---|
 | `PinToPin` | see below | two pins whose types conflict |
-| `PinNotConnected` | error | the only pin of the net (except `no_connect` and `free` pins) |
+| `PinNotConnected` | error | the only pin of an unlabeled net (except `no_connect` and `free` pins) |
 | `PinNotDriven` | error | an `input` pin on a net without `output`, `power_out`, `passive`, `tri_state` or `bidirectional` pins |
 | `PowerPinNotDriven` | error | a net with a `power_in` pin and without a `power_out` pin |
 | `NoConnectConnected` | warning | a net marked no-connect with more than one pin |
@@ -47,12 +48,21 @@ Each net is checked for:
 | `SimilarNetNames` | warning | net names differing only in case |
 | `MultipleNetNames` | warning | a net with several names (from `to_netlist`) |
 | `LabelOnlyNet` | warning | a labeled net without part pins (from `to_netlist`; an error in KiCad) |
+| `LabelSinglePin` | warning | a labeled net with only one pin |
+| `GroundPinNotGround` | warning | a power pin named like a ground on a net that is not a ground, see below |
 
 Notes:
 
 - On a net with a `power_in` pin, only `power_out` pins count as drivers, and the net is reported
   as `PowerPinNotDriven` (on one of its `power_in` pins) even if it also has `input` pins.
-- A no-connect mark silences `PinNotConnected`, `PinNotDriven` and `PowerPinNotDriven` on its net.
+- A no-connect mark silences `PinNotConnected`, `PinNotDriven`, `PowerPinNotDriven` and
+  `LabelSinglePin` on its net.
+- As in KiCad, a label counts as a connection: the only pin of a labeled net is reported as
+  `LabelSinglePin` (for pins of any type) instead of `PinNotConnected`. Virtual pins count as pins.
+- `GroundPinNotGround` looks at the `power_in` and `power_out` pins of each part. A name is a ground
+  if it contains `GND`, or is `EARTH` (or starts with `EARTH_`), `VSS` or `VSSA`, ignoring case;
+  pin names come from `Part::kicad`. If one of the power pins of a part is on a ground net, each
+  power pin with a ground name on another net is reported.
 - Pins of one part in the same group of `Part::internal_connections` and of the same type are
   treated like KiCad's stacked pins: they never conflict with each other and count as one pin.
 - A lone `input` pin is reported both as not connected and as not driven, as KiCad does.
@@ -72,6 +82,14 @@ settings.pin_map.set(PinType::Output, PinType::Output, Severity::Ignore);
 
 The severity of `PinToPin` (`Error` by default) is the highest a pin conflict can be: `Warning`
 reports the errors of the pin map as warnings, and `Ignore` turns pin conflicts off.
+
+### Differences from KiCad 9
+
+KiCad 10 added `LabelSinglePin` (`isolated_pin_label`) and `GroundPinNotGround`
+(`ground_pin_not_ground`). A label on a net with only one pin was `global_label_dangling` (a
+warning) for a global label and `label_dangling` (an error) for a local one in KiCad 9; KiCad 10
+reports both as `isolated_pin_label`. Before following KiCad 10, this crate reported the pin as
+`PinNotConnected`. The pin conflict matrix is the same.
 
 ## 4. Marks
 
@@ -95,9 +113,9 @@ As in KiCad, a supply that enters the board through a connector (a `passive` pin
 circuit.erc_allow(bus, ErcRule::PinToPin);   // outputs connected on purpose
 ```
 
-`SimilarNetNames` is left out if either of the two nets allows it. Nothing is reported for an
-`erc_allow` without violations: a subcircuit may have them when checked alone but not on the
-board, or the other way around. The rules about nets without part pins (`NoConnectDangling`,
+`SimilarNetNames` is left out if either of the two nets allows it, and `GroundPinNotGround` if
+the net of the reported pin does. Nothing is reported for an `erc_allow` without violations: a
+subcircuit may have them when checked alone but not on the board, or the other way around. The rules about nets without part pins (`NoConnectDangling`,
 `VirtualPinDangling`, `LabelOnlyNet`) cannot be allowed; remove the mark or the label instead, or
 change their severity.
 

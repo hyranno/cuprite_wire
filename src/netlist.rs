@@ -84,6 +84,8 @@ pub struct Net {
     pub nodes: Vec<NetNode>,
     /// The location of the label giving the name, or of the first node for unnamed nets.
     pub trace: Trace,
+    /// Whether the name is given by a label.
+    pub labeled: bool,
     /// ERC marks attached to the net. The exporters ignore them.
     pub marks: Vec<NodeMark>,
 }
@@ -262,6 +264,7 @@ impl BuiltCircuit {
             name,
             nodes,
             trace,
+            labeled: !labels.is_empty(),
             marks,
         })
     }

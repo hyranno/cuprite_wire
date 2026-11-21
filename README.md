@@ -29,7 +29,7 @@ c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
 - **Parts from libraries.** `kicad_part!` generates a part type from a KiCad symbol and footprint
   at compile time and checks the pins against the pads; `spice_part!` and the `sim` block attach
   vendor SPICE models. `cuprite_wire::basic` has ready-made resistors, capacitors and so on.
-- **ERC.** The electrical rules check of KiCad 9 that depend only on the netlist, on a whole board
+- **ERC.** The electrical rules check of KiCad 10 that depend only on the netlist, on a whole board
   or on a subcircuit alone with its ports given pin types. Violations point to the line of the
   Rust source that made the connection.
 - **SPICE simulation.** A subcircuit is placed in a test bench with simulation-only sources and
