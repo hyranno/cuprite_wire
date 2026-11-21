@@ -1,6 +1,6 @@
 ---
 name: spice
-description: Run and inspect SPICE simulations with ngspice in batch mode, and understand how KiCad 9 turns symbols (Sim.* fields) into a SPICE netlist. Use when checking a generated SPICE netlist, running an operating-point/AC/transient analysis, extracting waveform data, or researching KiCad's SPICE export rules.
+description: Run and inspect SPICE simulations with ngspice in batch mode, and understand how KiCad 10 turns symbols (Sim.* fields) into a SPICE netlist. Use when checking a generated SPICE netlist, running an operating-point/AC/transient analysis, extracting waveform data, or researching KiCad's SPICE export rules.
 ---
 
 # SPICE (ngspice) investigation
@@ -74,7 +74,7 @@ Output shape: `.title`, `.include` lines from `Sim.Library`, analysis directives
 from schematic text items, one element line per symbol, `.end`. Net names: labels become
 `/name` (hierarchical path), unnamed nets `Net-_U1-+_`, power nets their power-symbol value.
 
-Symbol fields that drive the model (KiCad 9):
+Symbol fields that drive the model (KiCad 9 and 10):
 
 | Field | Meaning | Examples |
 |---|---|---|

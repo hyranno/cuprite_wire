@@ -38,10 +38,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from kicad_netlist import project_footprint_libs, project_symbol_libs, read
+from kicad_netlist import KICAD_TEMPLATE_DIR, kicad_version, project_footprint_libs, project_symbol_libs, read
 
 PLUGIN = Path(__file__).resolve().parent / "pcbnew_gui" / "import_netlist_plugin.py"
-KICAD_VERSION = "9.0"
 TOTALS = re.compile(r"Total warnings: (\d+), errors: (\d+)\.")
 
 
@@ -56,18 +55,24 @@ class KicadEnv:
             "XDG_DATA_HOME": str(self.root / "data"),
             "HOME": str(self.root / "home"),
         }
-        config = self.root / "config" / "kicad" / KICAD_VERSION
+        # KiCad keeps its settings in a directory per major version.
+        settings = f"{kicad_version()[0]}.0"
+        config = self.root / "config" / "kicad" / settings
         config.mkdir(parents=True, exist_ok=True)
         # The installed libraries and the project's (libs/).
         for table, libs in (("fp-lib-table", project_footprint_libs()), ("sym-lib-table", project_symbol_libs())):
-            text = Path(f"/usr/share/kicad/template/{table}").read_text().rstrip()
+            text = (KICAD_TEMPLATE_DIR / table).read_text().rstrip()
             assert text.endswith(")"), table
             entries = "".join(f'  (lib (name "{name}")(type "KiCad")(uri "{path}")(options "")(descr ""))\n'
                               for name, path in libs.items())
             (config / table).write_text(text[:-1] + entries + ")\n")
-        # An existing kicad_common.json skips the first-run "Welcome to KiCad" dialog.
-        (config / "kicad_common.json").write_text("{}\n")
-        plugins = self.root / "data" / "kicad" / KICAD_VERSION / "scripting" / "plugins"
+        # An existing kicad_common.json skips the first-run "Welcome to KiCad" dialog (KiCad 9);
+        # KiCad 10 shows its "KiCad Setup" wizard unless these prompts are dismissed and
+        # a design block library table exists.
+        (config / "kicad_common.json").write_text(json.dumps(
+            {"do_not_show_again": {"update_check_prompt": True, "data_collection_prompt": True}}) + "\n")
+        (config / "design-block-lib-table").write_text("(design_block_lib_table\n  (version 7)\n)\n")
+        plugins = self.root / "data" / "kicad" / settings / "scripting" / "plugins"
         plugins.mkdir(parents=True, exist_ok=True)
         shutil.copy(PLUGIN, plugins / PLUGIN.name)
         (self.root / "home").mkdir(exist_ok=True)

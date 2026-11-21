@@ -1,16 +1,21 @@
-FROM rust:trixie
+# KiCad 10 (kicad-cli, pcbnew and its Python module, the symbol and footprint libraries) on Debian trixie.
+# CI also tests with KiCad 9 (Debian's packages on rust:trixie).
+FROM kicad/kicad:10.0
 
 ENV LANG=C.UTF-8
 ENV LC_CTYPE=C.UTF-8
 ENV PYTHONIOENCODING=utf-8
 
+# The image's default user is `kicad`; the devcontainer runs as root.
 USER root
 SHELL ["/bin/bash", "-c"]
 
 RUN \
   apt-get update && \
-  apt-get install -y -q \
-    kicad \
+  apt-get install -y -q --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
     libngspice0 \
     ngspice \
     verilator \
@@ -19,6 +24,16 @@ RUN \
 # clean up
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
+
+# Rust, installed where the rust images put it.
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+RUN \
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- -y --no-modify-path --profile minimal --default-toolchain stable \
+      --component rustfmt,clippy,rust-analyzer && \
+  chmod -R a+w "$RUSTUP_HOME" "$CARGO_HOME"
 
 # Let the ngspice CLI work where /tmp is read-only (see tmpfile_shim.c).
 # The wrapper preloads the shim for ngspice only, not for every process.
@@ -32,7 +47,6 @@ RUN \
     > /usr/local/bin/ngspice && \
   chmod +x /usr/local/bin/ngspice
 
-RUN rustup component add rustfmt clippy rust-analyzer
 # Refactoring aids (not run by CI): duplicate detection, unused dependencies and the public API.
 # cargo-public-api builds rustdoc JSON, which needs a nightly toolchain.
 # cargo-sweep prunes stale artifacts from target/ (see postStartCommand in devcontainer.json).

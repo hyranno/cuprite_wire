@@ -29,6 +29,10 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
 - **S-expression helpers of the tools**: `python3 -m doctest tools/kicad_netlist.py` checks the
   quoting and unescaping shared by the scripts in `tools/` (not run by CI).
 
+The scripts in `tools/` work with KiCad 9 and 10. They take the version from `kicad-cli --version`
+and the library directories from `$KICAD10_SYMBOL_DIR` / `$KICAD9_SYMBOL_DIR` (and `FOOTPRINT`,
+`TEMPLATE`), else `/usr/share/kicad`.
+
 ## 2. Footprints and pads
 
 `python3 tools/check_netlist_footprints.py NETLIST...` checks with KiCad's `pcbnew` Python module
@@ -54,7 +58,9 @@ The libraries of `libs/` and `examples/*/libs/` are added to its library tables.
 `--keep DIR` keeps the boards, the import reports, a screenshot of the dialog (`report.png`) and
 the pcbnew logs. In the Claude Code sandbox, Unix sockets cannot be created, so Xvfb listens on
 TCP (`127.0.0.1`), and its keymap directory `/var/lib/xkb` must be writable
-(`sandbox.filesystem.allowWrite` in `.claude/settings.json`).
+(`sandbox.filesystem.allowWrite` in `.claude/settings.json`). KiCad 10 loads the libraries in the
+background (a progress bar in the status bar), so the plugin waits for it before importing;
+otherwise footprints are "not found in any libraries" on a fresh configuration.
 
 `--relink BEFORE AFTER` imports BEFORE, moves the footprints and imports AFTER, a revised
 circuit, checking that footprints are linked by UUID: footprints of components still in the
@@ -86,6 +92,9 @@ equivalent to each netlist, exports it with `kicad-cli`, and compares the result
   hierarchical labels. Two cases are not checked: an unnamed net crossing sheets (Eeschema needs a
   label to connect sheets, so it is connected by global labels named after it), and the choice
   among several labels of one net (only the label that named the net is in the netlist).
+  cuprite_wire writes the KiCad 9 form of the format, which KiCad 10 reads; with KiCad 10, what
+  only its form has is ignored too: the `units` of components, the empty `groups` and `variants`,
+  and the `_<pin>` suffix of `pinfunction` (KiCad 10 writes `K_1` for the pin `K` numbered `1`).
 - **SPICE** (`--spice`): takes a KiCad netlist and the SPICE deck of the same circuit
   (`NETLIST.cir`), adds `Sim.*` fields from the deck to the synthesized schematic (`Sim.Pins` maps
   the pads to the element's nodes by their nets), exports it with

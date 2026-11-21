@@ -10,7 +10,7 @@ Subcommands:
   libs [--fp]                         list library nicknames
 
 Library directories default to the system install and can be overridden with
-KICAD9_SYMBOL_DIR / KICAD9_FOOTPRINT_DIR. Standard library only.
+KICAD10_SYMBOL_DIR / KICAD10_FOOTPRINT_DIR (or the KICAD9_ ones). Standard library only.
 """
 
 import argparse
@@ -19,8 +19,16 @@ import re
 import sys
 from pathlib import Path
 
-SYM_DIR = Path(os.environ.get("KICAD9_SYMBOL_DIR", "/usr/share/kicad/symbols"))
-FP_DIR = Path(os.environ.get("KICAD9_FOOTPRINT_DIR", "/usr/share/kicad/footprints"))
+
+def _lib_dir(kind, default):
+    for major in (10, 9):
+        if path := os.environ.get(f"KICAD{major}_{kind}_DIR"):
+            return Path(path)
+    return Path(default)
+
+
+SYM_DIR = _lib_dir("SYMBOL", "/usr/share/kicad/symbols")
+FP_DIR = _lib_dir("FOOTPRINT", "/usr/share/kicad/footprints")
 
 
 # ---------------------------------------------------------------- S-expression
