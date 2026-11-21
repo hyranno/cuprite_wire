@@ -1,6 +1,6 @@
 //! Parts, circuits and helpers shared by the unit tests.
 
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
 
 use petgraph::graph::NodeIndex;
 
@@ -9,24 +9,35 @@ use crate::{
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
     naming::NetLabel,
     parts::Part,
-    spice::{ModelSource, SpiceElement, SpicePartInfo},
+    spice::{ModelSource, SimulationError, SpiceDeck, SpiceElement, SpiceNetlist, SpicePartInfo},
     subcircuit::SubcircuitGenerator,
 };
 
-/// Compares `actual` with `tests/golden/<name>`.
-/// Run the tests with `UPDATE_GOLDEN=1` to (re)generate the files.
-pub fn check_golden(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name);
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, actual).unwrap();
-        return;
+#[path = "../tests/common/golden.rs"]
+mod golden;
+
+pub use golden::check_golden;
+
+/// The SPICE netlist of `circuit`.
+pub fn spice_netlist(circuit: &CircuitBuilder) -> SpiceNetlist {
+    circuit.build(&()).to_netlist().unwrap().to_spice().unwrap()
+}
+
+/// The SPICE deck of `circuit`, without front-end commands.
+pub fn deck_of(circuit: &CircuitBuilder) -> SpiceDeck {
+    spice_netlist(circuit).deck()
+}
+
+/// The message of a failed simulation; removes the run directory that ngspice errors keep.
+pub fn simulation_error_message(error: SimulationError) -> String {
+    if let SimulationError::Ngspice { dir, .. } = &error {
+        let _ = std::fs::remove_dir_all(dir);
     }
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
-    assert_eq!(actual, expected, "output differs from {}", path.display());
+    error.to_string()
+}
+
+pub fn strings(s: &[&str]) -> Vec<String> {
+    s.iter().map(|s| s.to_string()).collect()
 }
 
 /// A 10k / 100n RC low-pass filter between the local nets `IN` and `OUT`, with `GND`.

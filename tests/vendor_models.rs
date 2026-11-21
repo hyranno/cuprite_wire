@@ -15,6 +15,9 @@
 //! If a newer model renames something, the compile error lists the names and ports the library has.
 //! The tests check the behavior, not golden files. The LM358 part also needs the KiCad libraries.
 
+mod common;
+
+use common::deck_of;
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
     circuit::CircuitBuilder,
@@ -70,13 +73,7 @@ fn run(
     commands: &[String],
     names: &[&str],
 ) -> Vec<f64> {
-    let mut deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck();
+    let mut deck = deck_of(&circuit);
     for directive in directives {
         deck = deck.directive(*directive);
     }

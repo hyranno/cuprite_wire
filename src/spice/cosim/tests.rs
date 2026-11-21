@@ -11,6 +11,7 @@ use crate::{
             OutputCharacteristics, Pull,
         },
     },
+    test_parts::deck_of,
 };
 
 const LINE: &str = r#"v("/LINE")"#;
@@ -25,17 +26,10 @@ fn line_deck(device: Box<CosimDevice>, pin: &str, load: Box<DigitalLoad>, stop: 
     circuit.label(device[pin], NetLabel::local("LINE"));
     circuit.label(device[CosimDevice::GND], NetLabel::global("GND"));
     circuit.label(load[DigitalLoad::GND], NetLabel::global("GND"));
-    circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control([
-            format!("tran 10n {stop:e}"),
-            format!("wrdata line.txt {LINE}"),
-        ])
+    deck_of(&circuit).control([
+        format!("tran 10n {stop:e}"),
+        format!("wrdata line.txt {LINE}"),
+    ])
 }
 
 fn table(deck: &SpiceDeck, models: DeviceModels<'_>) -> Table {
@@ -160,14 +154,8 @@ fn test_echo_input() {
     ] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 8u".to_string(), format!("wrdata line.txt {LINE}")]);
+    let deck =
+        deck_of(&circuit).control(["tran 10n 8u".to_string(), format!("wrdata line.txt {LINE}")]);
     let table = table(&deck, DeviceModels::new().with("mcu", &mut Echo));
     let read = input.decode(table.scale(), table.column(LINE).unwrap());
     assert_eq!(read.events().len(), sent.events().len(), "{read:?}");
@@ -217,14 +205,7 @@ fn test_edges() {
     for gnd in [driver[DigitalDriver::GND], device[CosimDevice::GND]] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 8u".to_string()]);
+    let deck = deck_of(&circuit).control(["tran 10n 8u".to_string()]);
     deck.run_with(DeviceModels::new().with("mcu", &mut model))
         .unwrap();
     let edges = |level| -> Vec<f64> {
@@ -413,14 +394,8 @@ fn test_reference_above_ground() {
     for gnd in [offset[IndependentSource::N], sense[IndependentSource::N]] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 1u".to_string(), format!("wrdata line.txt {LINE}")]);
+    let deck =
+        deck_of(&circuit).control(["tran 10n 1u".to_string(), format!("wrdata line.txt {LINE}")]);
     let mut probe = Probe { sense: 0.0 };
     let table = table(&deck, DeviceModels::new().with("mcu", &mut probe));
     assert!((probe.sense - 1.5).abs() < 1e-6, "{}", probe.sense);
@@ -484,14 +459,7 @@ fn test_pin_not_saved() {
     for gnd in [device[CosimDevice::GND], sense[IndependentSource::N]] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control([r#"save i(V1)"#, "tran 10n 1u"]);
+    let deck = deck_of(&circuit).control([r#"save i(V1)"#, "tran 10n 1u"]);
     struct Probe;
     impl DeviceModel for Probe {
         fn step(&mut self, io: &mut DeviceIo<'_>) {

@@ -7,14 +7,17 @@ use crate::{
     error::CircuitErrorKind,
     naming::NetLabel,
     spice::{
-        Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpiceNetlist,
-        SpicePartInfo, Table, Waveform,
+        Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpicePartInfo, Table,
+        Waveform,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
         },
     },
-    test_parts::{self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, rc_filter},
+    test_parts::{
+        self, CustomPart, IDEAL_OPAMP, MultiGndIc, OpAmp, RcStage, Resistor, deck_of, rc_filter,
+        simulation_error_message, spice_netlist,
+    },
 };
 
 /// Defines a module per test function, with a test running it on each [`Simulator`]:
@@ -51,10 +54,6 @@ on_each_simulator!(
     simulate_uart,
 );
 
-fn export(circuit: &CircuitBuilder) -> SpiceNetlist {
-    circuit.build(&()).to_netlist().unwrap().to_spice().unwrap()
-}
-
 fn check_golden(name: &str, text: &impl ToString) {
     test_parts::check_golden(name, &text.to_string());
 }
@@ -70,7 +69,7 @@ fn rc_filter_bench(source: Box<IndependentSource>) -> CircuitBuilder {
 
 #[test]
 fn test_golden_rc_filter() {
-    let netlist = export(&rc_filter_bench(
+    let netlist = spice_netlist(&rc_filter_bench(
         IndependentSource::voltage(0.0).with_ac(1.0),
     ))
     .with_title("rc_filter");
@@ -102,7 +101,7 @@ fn test_golden_hierarchy() {
     );
     circuit.connect(connector["1"], second[1]);
     circuit.label(connector["2"], NetLabel::global("GND"));
-    check_golden("hierarchy_bench.cir", &export(&circuit));
+    check_golden("hierarchy_bench.cir", &spice_netlist(&circuit));
 }
 
 /// A dual op-amp written as two elements sharing an inline model, an included model library,
@@ -158,7 +157,7 @@ fn test_golden_multi_element() {
         circuit.label(dual[pin], NetLabel::global(net));
         circuit.label(single[pin], NetLabel::global(net));
     }
-    check_golden("multi_element.cir", &export(&circuit));
+    check_golden("multi_element.cir", &spice_netlist(&circuit));
 }
 
 #[test]
@@ -281,7 +280,7 @@ fn test_ground_is_required() {
 
 #[test]
 fn test_deck() {
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
+    let deck = spice_netlist(&rc_filter_bench(IndependentSource::voltage(1.0)))
         .with_title("deck")
         .deck()
         .directive(".options reltol=1e-4")
@@ -293,10 +292,9 @@ fn test_deck() {
 
 /// The -3 dB frequency of the RC filter is 1 / (2 pi R C).
 fn simulate_ac(simulator: &dyn Simulator) {
-    let deck = export(&rc_filter_bench(
+    let deck = deck_of(&rc_filter_bench(
         IndependentSource::voltage(0.0).with_ac(1.0),
     ))
-    .deck()
     .control([
         "ac dec 50 1 100k",
         r#"meas ac f3db WHEN vdb("/OUT")=-3"#,
@@ -330,10 +328,9 @@ fn simulate_transient(simulator: &dyn Simulator) {
         width: 1.0,
         period: 2.0,
     };
-    let deck = export(&rc_filter_bench(
+    let deck = deck_of(&rc_filter_bench(
         IndependentSource::voltage(0.0).with_waveform(step),
     ))
-    .deck()
     .control(["tran 10u 5m", r#"wrdata tran.txt v("/OUT")"#]);
     let sim = simulator.run(&deck).unwrap();
     let table = sim.table("tran.txt").unwrap();
@@ -356,7 +353,7 @@ fn simulate_operating_point(simulator: &dyn Simulator) {
     circuit.label(bottom["1"], NetLabel::local("MID"));
     circuit.label(bottom["2"], NetLabel::global("GND"));
     circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
-    let deck = export(&circuit).deck().control([
+    let deck = deck_of(&circuit).control([
         "op",
         r#"let mid = v("/MID")"#,
         "let current = i(VM1)",
@@ -394,9 +391,7 @@ fn simulate_subcircuit_model(simulator: &dyn Simulator) {
     circuit.connect(supply[IndependentSource::N], amp["vss"]);
     circuit.label(supply[IndependentSource::N], NetLabel::global("GND"));
 
-    let deck = export(&circuit)
-        .deck()
-        .control(["op", r#"let out = v("/OUT")"#, "print out"]);
+    let deck = deck_of(&circuit).control(["op", r#"let out = v("/OUT")"#, "print out"]);
     let sim = simulator.run(&deck).unwrap();
     let out = sim.expect_value("out");
     assert!((out - 1.0).abs() < 1e-3, "out = {out}");
@@ -428,9 +423,7 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
         circuit.label(window["out"], NetLabel::local("OUT"));
         circuit.label(input[IndependentSource::N], NetLabel::global("GND"));
         circuit.label(load["2"], NetLabel::global("GND"));
-        export(&circuit)
-            .deck()
-            .control(["op", r#"let out = v("/OUT")"#, "print out"])
+        deck_of(&circuit).control(["op", r#"let out = v("/OUT")"#, "print out"])
     };
     let pspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW).pspice());
     // Inline models need the mode for the whole deck (`a`), not only for included files.
@@ -450,18 +443,16 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
     let ngspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW));
     assert_eq!(ngspice.netlist().ngbehavior(), None);
     assert!(!ngspice.to_string().contains("requires"));
-    assert!(
-        simulator.run(&ngspice).is_err(),
-        "the default mode does not read the PSpice syntax"
-    );
+    // The default mode does not read the PSpice syntax.
+    let error = simulation_error_message(simulator.run(&ngspice).unwrap_err());
+    assert!(error.contains("ngspice reported an error"), "{error}");
 }
 
 /// A deck that ngspice rejects is reported with its log.
 fn simulation_error(simulator: &dyn Simulator) {
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
-        .deck()
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)))
         .control(["op", r#"wrdata x.txt v("/nothing")"#]);
-    let error = simulator.run(&deck).unwrap_err().to_string();
+    let error = simulation_error_message(simulator.run(&deck).unwrap_err());
     assert!(error.contains("no such vector"), "{error}");
 }
 
@@ -551,7 +542,7 @@ fn simulate_line(
     circuit.label(driver[DigitalDriver::OUT], NetLabel::local("LINE"));
     circuit.label(driver[DigitalDriver::GND], NetLabel::global("GND"));
     circuit.label(load[DigitalLoad::GND], NetLabel::global("GND"));
-    let deck = export(&circuit).deck().control([
+    let deck = deck_of(&circuit).control([
         format!("tran {step:e} {stop:e}"),
         format!("wrdata line.txt {LINE}"),
     ]);
@@ -643,15 +634,13 @@ fn simulate_uart(simulator: &dyn Simulator) {
 #[test]
 fn test_shared_library_matches_cli() {
     use crate::spice::{Ngspice, SharedNgspice};
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
-        .deck()
-        .control([
-            "op",
-            r#"print v("/OUT")"#,
-            "tran 10u 2m uic",
-            r#"wrdata tran.txt v("/OUT")"#,
-            r#"meas tran half WHEN v("/OUT")=0.5"#,
-        ]);
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).control([
+        "op",
+        r#"print v("/OUT")"#,
+        "tran 10u 2m uic",
+        r#"wrdata tran.txt v("/OUT")"#,
+        r#"meas tran half WHEN v("/OUT")=0.5"#,
+    ]);
     let cli = Ngspice::default().run(&deck).unwrap();
     let shared = SharedNgspice::default().run(&deck).unwrap();
     assert_eq!(
@@ -679,8 +668,7 @@ fn test_shared_library_matches_cli() {
 #[test]
 fn test_shared_library_runs_dot_analyses() {
     use crate::spice::{Ngspice, SharedNgspice};
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
-        .deck()
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)))
         .directive(".tran 10u 2m uic")
         .directive(".meas tran half WHEN v(/OUT)=0.5");
     let cli = Ngspice::default().run(&deck).unwrap();
@@ -695,9 +683,7 @@ fn test_shared_library_runs_dot_analyses() {
 #[test]
 fn test_shared_library_writes_default_raw_file() {
     use crate::spice::SharedNgspice;
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
-        .deck()
-        .control(["op", "write"]);
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).control(["op", "write"]);
     let shared = SharedNgspice::default().run(&deck).unwrap();
     assert!(
         shared.dir().join("rawspice.raw").is_file(),
@@ -709,8 +695,7 @@ fn test_shared_library_writes_default_raw_file() {
 /// A measurement whose name starts with `error` is a value, not an error of ngspice.
 #[test]
 fn test_measurement_named_error() {
-    let deck = export(&rc_filter_bench(IndependentSource::voltage(1.0)))
-        .deck()
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)))
         .control(["tran 10u 2m uic", r#"meas tran error_max MAX v("/OUT")"#]);
     let sim = deck.run().unwrap();
     assert!((sim.expect_value("error_max") - 1.0).abs() < 0.2);
@@ -736,14 +721,9 @@ fn test_shared_library_recovers() {
         circuit.label(source["1"], NetLabel::local("OUT"));
         circuit.label(source["2"], NetLabel::global("GND"));
         circuit.label(load["2"], NetLabel::global("GND"));
-        export(&circuit)
-            .deck()
-            .control(["op", r#"let out = v("/OUT")"#, "print out"])
+        deck_of(&circuit).control(["op", r#"let out = v("/OUT")"#, "print out"])
     };
-    let error = simulator
-        .run(&deck("V = { 1 + * 2 }"))
-        .unwrap_err()
-        .to_string();
+    let error = simulation_error_message(simulator.run(&deck("V = { 1 + * 2 }")).unwrap_err());
     assert!(error.contains("cannot recover"), "{error}");
     let sim = simulator.run(&deck("V = { 1 + 2 }")).unwrap();
     assert_eq!(sim.expect_value("out"), 3.0);
@@ -766,7 +746,7 @@ fn test_digital_driver_reference() {
     circuit.label(load["2"], NetLabel::local("VSS"));
     circuit.label(offset[IndependentSource::P], NetLabel::local("VSS"));
     circuit.label(offset[IndependentSource::N], NetLabel::global("GND"));
-    let deck = export(&circuit).deck().control([
+    let deck = deck_of(&circuit).control([
         "tran 10n 2u",
         r#"let low = v("/LINE")[1]"#,
         r#"let high = v("/LINE")[length(time) - 1]"#,

@@ -654,6 +654,7 @@ fn windows_1252(byte: u8) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_util::pairs;
 
     const LIB: &str = "\
 * A test library
@@ -685,12 +686,6 @@ R1 a b 1k
             } => (ports, optional_ports, params),
             other => panic!("{other:?}"),
         }
-    }
-
-    fn pairs(p: &[(&str, &str)]) -> Vec<(String, String)> {
-        p.iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect()
     }
 
     #[test]

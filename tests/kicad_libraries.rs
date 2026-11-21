@@ -5,8 +5,9 @@
 //! of a circuit designed with them (`tests/golden/kicad_libraries.{net,cir}`).
 //! Run with `UPDATE_GOLDEN=1` to (re)generate them.
 
-use std::path::Path;
+mod common;
 
+use common::{check_golden, deck_of};
 use cuprite_wire::{
     circuit::CircuitBuilder, kicad_part, naming::NetLabel, spice::IndependentSource,
 };
@@ -133,19 +134,6 @@ fn circuit() -> CircuitBuilder {
     c
 }
 
-fn check_golden(name: &str, actual: &str) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name);
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        std::fs::write(&path, actual).unwrap();
-        return;
-    }
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
-    assert_eq!(actual, expected, "output differs from {}", path.display());
-}
-
 #[test]
 fn test_golden() {
     let netlist = circuit().build(&()).to_netlist().unwrap();
@@ -172,19 +160,12 @@ fn test_simulate() {
     let input = bench.instantiate_part_named("input", IndependentSource::voltage(0.2));
     bench.label(input[IndependentSource::P], NetLabel::local("IN"));
     bench.label(input[IndependentSource::N], NetLabel::global("GND"));
-    let deck = bench
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control([
-            "op",
-            r#"let amp = v("/AMP")"#,
-            r#"let out = v("/OUT")"#,
-            "print amp out",
-        ]);
+    let deck = deck_of(&bench).control([
+        "op",
+        r#"let amp = v("/AMP")"#,
+        r#"let out = v("/OUT")"#,
+        "print amp out",
+    ]);
     let sim = deck.run().unwrap();
     let amp = sim.expect_value("amp");
     assert!(

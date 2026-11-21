@@ -1,6 +1,7 @@
 //! Tests with models in C, built with `gcc` against the `cosim.h` of ngspice.
 
 use std::{
+    ops::Deref,
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -17,17 +18,44 @@ use crate::{
             OutputCharacteristics,
         },
     },
+    test_parts::deck_of,
 };
 
+/// A new empty temporary directory for a test, removed when dropped.
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "{}-xspice-{}-{name}",
+            env!("CARGO_PKG_NAME"),
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        TestDir(dir)
+    }
+}
+
+impl Deref for TestDir {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// Builds `tests/fixtures/xspice/<name>.c` into a shared library in a new temporary directory.
-fn build_library(name: &str) -> PathBuf {
+/// Returns the directory, to be kept while the library is used, and the library.
+fn build_library(name: &str) -> (TestDir, PathBuf) {
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice");
-    let dir = std::env::temp_dir().join(format!(
-        "{}-xspice-{}-{name}",
-        env!("CARGO_PKG_NAME"),
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = TestDir::new(name);
     let library = dir.join(format!("lib{name}.so"));
     let status = Command::new("gcc")
         .args(["-shared", "-fPIC", "-I/usr/share/ngspice/scripts/src", "-o"])
@@ -36,7 +64,7 @@ fn build_library(name: &str) -> PathBuf {
         .status()
         .expect("gcc runs");
     assert!(status.success(), "gcc failed for {name}.c");
-    library
+    (dir, library)
 }
 
 #[test]
@@ -110,7 +138,7 @@ fn test_quote_in_argument() {
 /// the output follows the inverted input, relative to `gnd`.
 #[test]
 fn test_simulate_inverter() {
-    let library = build_library("inverter");
+    let (_dir, library) = build_library("inverter");
     let cmos = OutputCharacteristics::cmos(3.3);
     let input = InputCharacteristics::cmos(3.3);
     let mut bench = CircuitBuilder::new();
@@ -135,14 +163,7 @@ fn test_simulate_inverter() {
         bench.label(gnd, NetLabel::local("VSS"));
     }
     bench.label(offset[IndependentSource::N], NetLabel::global("GND"));
-    let deck = bench
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 6u", r#"wrdata y.txt v("/Y","/VSS")"#]);
+    let deck = deck_of(&bench).control(["tran 10n 6u", r#"wrdata y.txt v("/Y","/VSS")"#]);
     let sim = deck.run().unwrap();
     let table = sim.table("y.txt").unwrap();
     let y = table.column(r#"v("/Y","/VSS")"#).unwrap();
@@ -163,7 +184,7 @@ fn test_simulate_inverter() {
 /// A model without inputs, configured by its simulation argument: a 250 kHz oscillator.
 #[test]
 fn test_simulate_oscillator() {
-    let library = build_library("oscillator");
+    let (_dir, library) = build_library("oscillator");
     let mut bench = CircuitBuilder::new();
     let oscillator = bench.instantiate_part(
         DCosim::new(&library)
@@ -176,14 +197,7 @@ fn test_simulate_oscillator() {
     bench.label(oscillator["q"], NetLabel::local("Q"));
     bench.label(oscillator[DCosim::GND], NetLabel::global("GND"));
     bench.label(load[DigitalLoad::GND], NetLabel::global("GND"));
-    let deck = bench
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 9u", r#"wrdata q.txt v("/Q")"#]);
+    let deck = deck_of(&bench).control(["tran 10n 9u", r#"wrdata q.txt v("/Q")"#]);
     let sim = deck.run().unwrap();
     let table = sim.table("q.txt").unwrap();
     let read = input.decode(table.scale(), table.column(r#"v("/Q")"#).unwrap());
@@ -235,17 +249,10 @@ fn test_simulate_verilog_counter() {
     for gnd in gnds {
         bench.label(gnd, NetLabel::global("GND"));
     }
-    let deck = bench
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control([
-            "tran 10n 5.5u",
-            r#"wrdata out.txt v("/Q1") v("/Q0") v("/C")"#,
-        ]);
+    let deck = deck_of(&bench).control([
+        "tran 10n 5.5u",
+        r#"wrdata out.txt v("/Q1") v("/Q0") v("/C")"#,
+    ]);
     let sim = deck.run().unwrap();
     let table = sim.table("out.txt").unwrap();
     let level = |node: &str, time: f64| {
@@ -272,18 +279,6 @@ fn test_simulate_verilog_counter() {
     }
 }
 
-/// A new empty temporary directory for a test.
-fn test_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "{}-xspice-{}-{name}",
-        env!("CARGO_PKG_NAME"),
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
 /// The entries of a cache directory that are builds in progress (or kept after a failure).
 fn staging_dirs(cache: &Path) -> Vec<String> {
     std::fs::read_dir(cache)
@@ -296,7 +291,7 @@ fn staging_dirs(cache: &Path) -> Vec<String> {
 /// A design Verilator rejects is reported with its log, and its build directory is kept.
 #[test]
 fn test_verilator_error() {
-    let dir = test_dir("broken");
+    let dir = TestDir::new("broken");
     let source = dir.join("broken.v");
     std::fs::write(
         &source,
@@ -312,13 +307,12 @@ fn test_verilator_error() {
             if log.contains("broken.v:2") && dir.is_dir()),
         "{error}"
     );
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// A design whose ports cannot be pins is reported, and its build directory is removed.
 #[test]
 fn test_verilator_port_error() {
-    let dir = test_dir("gnd-port");
+    let dir = TestDir::new("gnd-port");
     let source = dir.join("buffer.v");
     std::fs::write(
         &source,
@@ -335,7 +329,6 @@ fn test_verilator_port_error() {
         "{error}"
     );
     assert_eq!(staging_dirs(&cache), Vec::<String>::new());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Relative paths are resolved against the current directory: the sources, the cache directory
@@ -343,7 +336,7 @@ fn test_verilator_port_error() {
 /// included file is a new build.
 #[test]
 fn test_verilator_relative_paths_and_includes() {
-    let dir = test_dir("include");
+    let dir = TestDir::new("include");
     std::fs::create_dir(dir.join("inc")).unwrap();
     std::fs::write(
         dir.join("top.v"),
@@ -379,5 +372,4 @@ fn test_verilator_relative_paths_and_includes() {
     assert_eq!(changed.library(), model.library());
     assert_eq!(changed.outputs()[0].width(), 3);
     assert_eq!(staging_dirs(&dir.join("cache")), Vec::<String>::new());
-    std::fs::remove_dir_all(&dir).unwrap();
 }

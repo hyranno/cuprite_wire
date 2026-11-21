@@ -16,19 +16,14 @@
 //! `cargo run --example pwm_dac_feedback --features shared-ngspice`, test with
 //! `cargo test --example pwm_dac_feedback --features shared-ngspice`.
 
-use cuprite_wire::{
-    basic::{Capacitor0603, Resistor0603},
-    circuit::CircuitBuilder,
-    naming::NetLabel,
-    spice::{
-        SpiceDeck,
-        cosim::{
-            CosimDevice, DeviceIo, DeviceModel, DeviceModels,
-            peripherals::{Adc, Periodic, Pwm},
-        },
-        digital::{InputCharacteristics, OutputCharacteristics},
-    },
+#[path = "common/pwm_dac.rs"]
+mod pwm_dac;
+
+use cuprite_wire::spice::cosim::{
+    DeviceIo, DeviceModel, DeviceModels,
+    peripherals::{Adc, Periodic, Pwm},
 };
+use pwm_dac::bench;
 
 /// The voltage `OUT` is regulated to.
 const TARGET: f64 = 1.0;
@@ -63,29 +58,6 @@ impl DeviceModel for Controller {
         }
         self.pwm.update(io);
     }
-}
-
-/// The test bench: the microcontroller (`mcu`), the RC filter, and a transient analysis writing
-/// `OUT` to `out.txt`.
-fn bench(stop: f64) -> Result<SpiceDeck, Box<dyn std::error::Error>> {
-    let mcu = CosimDevice::new("mcu")
-        .output("pwm", OutputCharacteristics::cmos(3.3))
-        .input("adc", InputCharacteristics::cmos(3.3));
-    let mut bench = CircuitBuilder::new();
-    let mcu = bench.instantiate_part_named("mcu", mcu);
-    let r = bench.instantiate_part_named("r", Box::new(Resistor0603::new("1k")));
-    let c = bench.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
-    bench.connect(mcu["pwm"], r["1"]);
-    bench.connect(r["2"], c["1"]);
-    bench.connect(c["1"], mcu["adc"]);
-    bench.label(c["1"], NetLabel::local("OUT"));
-    bench.label(c["2"], NetLabel::global("GND"));
-    bench.label(mcu[CosimDevice::GND], NetLabel::global("GND"));
-    let netlist = bench.build(&()).to_netlist()?.to_spice()?;
-    Ok(netlist.deck().control([
-        format!("tran 100n {stop:e}"),
-        r#"wrdata out.txt v("/OUT")"#.to_string(),
-    ]))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

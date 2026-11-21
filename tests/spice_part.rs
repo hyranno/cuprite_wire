@@ -6,8 +6,9 @@
 //! 1 `CTR`, 2 `CTS`, 3 `GND`, 4 `VDD`, 5 `SENSE`, 6 `~{RESET_N}`: neither the order nor all the names
 //! match, so the mapping is written by hand.
 
-use std::path::Path;
+mod common;
 
+use common::{check_golden, deck_of, strings};
 use cuprite_wire::{
     circuit::CircuitBuilder,
     kicad_part,
@@ -104,10 +105,6 @@ kicad_part! {
         symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
         sim_library_dir: "crates/kicad_lib/tests/fixtures",
     }
-}
-
-fn strings(s: &[&str]) -> Vec<String> {
-    s.iter().map(|s| s.to_string()).collect()
 }
 
 #[test]
@@ -247,15 +244,8 @@ fn reset_voltage(part: Box<dyn Part>, pins: SupervisorPins, sense: f64) -> Resul
         circuit.label(pin, NetLabel::global("GND"));
     }
     circuit.label(u[reset], NetLabel::local("RESET"));
-    let deck = circuit
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["op", r#"let reset = v("/RESET")"#, "print reset"]);
-    let sim = deck.run().map_err(|e| e.to_string())?;
+    let deck = deck_of(&circuit).control(["op", r#"let reset = v("/RESET")"#, "print reset"]);
+    let sim = deck.run().map_err(common::simulation_error_message)?;
     sim.value("reset").ok_or_else(|| sim.log().to_string())
 }
 
@@ -332,18 +322,4 @@ fn test_golden() {
             .with_title("spice_part")
             .to_string(),
     );
-}
-
-fn check_golden(name: &str, actual: &str) {
-    let actual = actual.replace(env!("CARGO_MANIFEST_DIR"), "${CARGO_MANIFEST_DIR}");
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name);
-    if std::env::var_os("UPDATE_GOLDEN").is_some() {
-        std::fs::write(&path, actual).unwrap();
-        return;
-    }
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("{} is missing; run with UPDATE_GOLDEN=1", path.display()));
-    assert_eq!(actual, expected, "output differs from {}", path.display());
 }

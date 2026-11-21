@@ -13,6 +13,8 @@ pub mod sexpr;
 pub mod sim;
 pub mod spice_lib;
 pub mod symbol;
+#[cfg(test)]
+mod test_util;
 pub mod value;
 
 use std::fmt;

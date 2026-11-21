@@ -474,7 +474,10 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbol::SymbolLib;
+    use crate::{
+        symbol::SymbolLib,
+        test_util::{fixture_resolver, strings},
+    };
 
     fn symbol(fields: &str, pins: &[(&str, &str)]) -> Symbol {
         let pins: String = pins
@@ -513,17 +516,6 @@ mod tests {
         )
     }
 
-    fn resolver() -> Resolver {
-        Resolver::new(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"),
-            |_| None,
-        )
-    }
-
-    fn strings(s: &[&str]) -> Vec<String> {
-        s.iter().map(|s| s.to_string()).collect()
-    }
-
     /// The element of a part with a single element, and the unused pins.
     fn single(def: SpiceDef) -> (ElementDef, Vec<String>) {
         match def {
@@ -538,7 +530,7 @@ mod tests {
     #[test]
     fn test_inferred() {
         let r = symbol("", &[("1", "~"), ("2", "~")]);
-        let def = convert(&r, "R", Value::Param, &mut resolver()).unwrap();
+        let def = convert(&r, "R", Value::Param, &mut fixture_resolver()).unwrap();
         assert_eq!(
             single(def),
             (
@@ -554,14 +546,14 @@ mod tests {
                 vec![]
             )
         );
-        assert!(convert(&r, "R", Value::Fixed("R".into()), &mut resolver()).is_err());
+        assert!(convert(&r, "R", Value::Fixed("R".into()), &mut fixture_resolver()).is_err());
         assert_eq!(
-            convert(&r, "U", Value::Param, &mut resolver()).unwrap(),
+            convert(&r, "U", Value::Param, &mut fixture_resolver()).unwrap(),
             SpiceDef::Unsupported
         );
         let excluded = symbol("(exclude_from_sim yes)", &[("1", "~")]);
         assert_eq!(
-            convert(&excluded, "R", Value::Param, &mut resolver()).unwrap(),
+            convert(&excluded, "R", Value::Param, &mut fixture_resolver()).unwrap(),
             SpiceDef::Excluded
         );
     }
@@ -576,8 +568,15 @@ mod tests {
             ]),
             &[("1", "K"), ("2", "A")],
         );
-        let (element, _) =
-            single(convert(&d, "D", Value::Fixed("1N4148".into()), &mut resolver()).unwrap());
+        let (element, _) = single(
+            convert(
+                &d,
+                "D",
+                Value::Fixed("1N4148".into()),
+                &mut fixture_resolver(),
+            )
+            .unwrap(),
+        );
         assert_eq!(element.device, 'D');
         assert_eq!(element.nodes, strings(&["2", "1"]));
         assert_eq!(element.args, Args::Fixed("__S".into()));
@@ -601,11 +600,11 @@ mod tests {
             &[("1", "~"), ("2", "~")],
         );
         let (element, _) =
-            single(convert(&v, "V", Value::Fixed("5".into()), &mut resolver()).unwrap());
+            single(convert(&v, "V", Value::Fixed("5".into()), &mut fixture_resolver()).unwrap());
         assert_eq!(element.args, Args::Fixed("DC 5".into()));
         let error = |fields: &[(&str, &str)]| {
             let s = symbol(&props(fields), &[("1", "~"), ("2", "~"), ("3", "~")]);
-            convert(&s, "Q", Value::Param, &mut resolver())
+            convert(&s, "Q", Value::Param, &mut fixture_resolver())
                 .unwrap_err()
                 .to_string()
         };
@@ -644,14 +643,22 @@ mod tests {
     fn test_values_in_kicad_notation() {
         let r = symbol("", &[("1", "~"), ("2", "~")]);
         let args = |symbol: &Symbol, value: &str| {
-            single(convert(symbol, "R", Value::Fixed(value.into()), &mut resolver()).unwrap())
-                .0
-                .args
+            single(
+                convert(
+                    symbol,
+                    "R",
+                    Value::Fixed(value.into()),
+                    &mut fixture_resolver(),
+                )
+                .unwrap(),
+            )
+            .0
+            .args
         };
         // RKM and `M` (mega), which ngspice would read as 4k and milli.
         assert_eq!(args(&r, "4k7"), Args::Fixed("4.7k".into()));
         assert_eq!(args(&r, "1M"), Args::Fixed("1Meg".into()));
-        let message = convert(&r, "R", Value::Fixed("R47".into()), &mut resolver())
+        let message = convert(&r, "R", Value::Fixed("R47".into()), &mut fixture_resolver())
             .unwrap_err()
             .to_string();
         assert!(
@@ -668,7 +675,7 @@ mod tests {
             &props(&[("Sim.Device", "D"), ("Sim.Params", "bv=1M rs={x}")]),
             &[("1", "A"), ("2", "K")],
         );
-        let (element, _) = single(convert(&d, "D", Value::Param, &mut resolver()).unwrap());
+        let (element, _) = single(convert(&d, "D", Value::Param, &mut fixture_resolver()).unwrap());
         assert_eq!(
             element.models,
             vec![ModelDef::Inline {
@@ -689,7 +696,7 @@ mod tests {
                 ]),
                 &[("1", "D"), ("2", "G"), ("3", "S")],
             );
-            convert(&s, "Q", Value::Param, &mut resolver())
+            convert(&s, "Q", Value::Param, &mut fixture_resolver())
         };
         let (element, _) = single(mos("PMOS", "PVD").unwrap());
         assert_eq!(
@@ -726,7 +733,7 @@ mod tests {
                 ("6", "NC"),
             ],
         );
-        let mut r = resolver();
+        let mut r = fixture_resolver();
         let (element, unused_pins) =
             single(convert(&amp, "U", Value::Fixed("AMP".into()), &mut r).unwrap());
         assert_eq!(element.device, 'X');
@@ -743,7 +750,7 @@ mod tests {
         // Included files are read to find definitions, and tracked too.
         assert_eq!(r.files, vec![lib, r.manifest_dir.join("models/clamp.lib")]);
 
-        let mut r = resolver();
+        let mut r = fixture_resolver();
         let (element, _) = single(
             spice_def(
                 &SimInput {

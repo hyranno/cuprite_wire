@@ -304,10 +304,7 @@ pub enum SpiceProblem {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn strings(s: &[&str]) -> Vec<String> {
-        s.iter().map(|s| s.to_string()).collect()
-    }
+    use crate::test_parts::strings;
 
     #[test]
     fn test_check_pins() {
