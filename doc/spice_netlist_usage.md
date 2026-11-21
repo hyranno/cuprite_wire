@@ -210,10 +210,12 @@ co-simulation with Rust models; plain runs should keep using the CLI:
 - The run directory holds `deck.cir`, which `ngspice -b deck.cir` runs as the CLI would, and
   `shared.cir`, the form the library runs: without `quit`, and with the relative output files of
   `wrdata`, `write` and `wrs2p` made absolute, since the library runs in the working directory of
-  the process. Other commands writing files (`print ... > file`) need absolute paths. The run
-  directory must not contain whitespace or `"` (ngspice takes them literally).
+  the process (`write` without a file writes `rawspice.raw` in the run directory, as the CLI does).
+  Other commands writing files (`print ... > file`) need absolute paths, and `wrs2p` needs a file.
+  The run directory must not contain whitespace or `"` (ngspice takes them literally).
 - The compatibility mode is set by `set ngbehavior=<mode>` (or `unset ngbehavior`) before the deck
-  is read.
+  is read. A deck without a control block is run with `run` after it is read, so the analyses of
+  its dot directives (`.tran`, `.meas`) run as in the CLI.
 - After an error ngspice cannot recover from (it reports `cannot recover and awaits to be reset`),
   the library is unloaded and loaded again for the next run.
 

@@ -243,8 +243,15 @@ Notes (verified with ngspice 44.2):
   To measure a current elsewhere, insert a 0 V source in series.
 - `wrdata` output: a header line (with `wr_vecnames`), then whitespace-separated columns,
   the first being the scale (time/frequency); paths are relative to the working directory.
-- Errors are printed as `Error ...` lines; warnings do not stop the run. A test harness should
-  treat any `Error` line as a failure.
+- Errors are printed as `Error ...` lines (`Error: unknown subckt: ...`, `Error: measure  half
+  when(WHEN) : out of interval`); warnings do not stop the run. A test harness should treat any
+  line starting with the word `Error` as a failure, but not a value whose name starts with it
+  (`meas tran error_max ...` prints `error_max = 1.0e+00`), nor `PPerror: ...`, which is followed by
+  an `Error` line.
+- Without a `.control` block, `ngspice -b` runs the analyses of the dot directives and prints the
+  `.meas` results. With one, only the commands of the block run
+  (`Note: Simulation executed from .control section`).
+- `write` without a file writes `rawspice.raw` in the working directory.
 
 KiCad copies `.control` blocks from schematic text items verbatim; cuprite_wire tests can instead
 append a generated control block to the netlist body.
@@ -255,6 +262,8 @@ Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Comman
 
 - `source <path>` reads a deck and runs its `.control` block, as `ngspice -b` does. `quit` in the
   block calls the `ControlledExit` callback instead of returning, so a deck for the library has none.
+  Unlike `ngspice -b`, it does not run the dot analyses of a deck without a `.control` block;
+  `run` after it does, and prints the `.meas` results.
 - The library runs in the working directory of the process (`cd` would change it for every thread),
   so relative `wrdata` paths land there. Paths with quotes are taken literally (`"a b/x.txt"`
   fails with `"a b/x.txt": No such file or directory`, which is not an `Error` line), so paths
