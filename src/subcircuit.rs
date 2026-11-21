@@ -24,8 +24,7 @@ pub use cuprite_wire_macros::Interface;
 /// [`check_subcircuit`](crate::erc::check_subcircuit):
 ///
 /// ```
-/// use cuprite_wire::subcircuit::Interface;
-/// use petgraph::graph::NodeIndex;
+/// use cuprite_wire::{circuit::NodeIndex, subcircuit::Interface};
 ///
 /// #[derive(Interface)]
 /// pub struct FollowerPorts<T = NodeIndex> {

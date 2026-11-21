@@ -2,10 +2,9 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, NodeIndex},
     subcircuit::{Interface, SubcircuitGenerator},
 };
-use petgraph::graph::NodeIndex;
 
 use crate::parts::RrioOpAmp;
 

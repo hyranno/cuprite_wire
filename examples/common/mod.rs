@@ -2,11 +2,10 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, NodeIndex},
     naming::NetLabel,
     subcircuit::SubcircuitGenerator,
 };
-use petgraph::graph::NodeIndex;
 
 /// One RC stage. Interface nodes: 0 = input, 1 = output.
 #[derive(Debug, Clone)]
