@@ -1,8 +1,29 @@
 /target
+# rustfmt backups and dumps of internal compiler errors
+**/*.rs.bk
+rustc-ice-*.txt
 
 *.local.*
 *_local.*
 *.local/
+
+# Personal secrets, such as a GitHub token loaded by hand
+.env
+.env.*
+
+# Files KiCad creates next to the libraries and boards it opens
+fp-info-cache
+*.lck
+*-backups/
+_autosave-*
+*.kicad_prl
+.history
+
+# Files operating systems and editors leave behind (not .vscode/, whose shared settings may be committed)
+.DS_Store
+Thumbs.db
+*~
+.idea/
 
 # Personal devcontainer configuration
 /.devcontainer/local/
