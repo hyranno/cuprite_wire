@@ -56,7 +56,9 @@ import uuid
 from pathlib import Path
 
 import kicad_netlist
-from kicad_netlist import TOKEN, children, parse, project_symbol_libs, read, symbol_lib_path, value
+from kicad_netlist import (
+    children, dump, parse, project_symbol_libs, quote, read, symbol_lib_path, unquote, value,
+)
 
 # Items KiCad writes and cuprite_wire intentionally does not (doc/kicad_netlist_usage.md section 4).
 KNOWN_DIFFERENCES = {
@@ -93,10 +95,6 @@ def kicad_env(root):
         "XDG_DATA_HOME": str(root / "data"),
         "HOME": str(root / "home"),
     }
-
-
-def quote(text):
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def mm(v):
@@ -315,20 +313,6 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
     return "\n".join(out) + "\n"
 
 
-def parse_raw(text):
-    """Parse an S-expression into nested lists, keeping atoms as written (quotes included)."""
-    stack = [[]]
-    for token in TOKEN.findall(text):
-        if token == "(":
-            stack.append([])
-        elif token == ")":
-            done = stack.pop()
-            stack[-1].append(done)
-        else:
-            stack[-1].append(token)
-    return stack[0][0]
-
-
 def normalize(tree, ours, library_symbols=False):
     """Drops what is listed in KNOWN_DIFFERENCES (and LIBRARY_KNOWN_DIFFERENCES with
     `library_symbols`) from KiCad's netlist (`tree`)."""
@@ -403,8 +387,8 @@ def compare(path, work, env, library_symbols=False):
                          env={**os.environ, **env}, capture_output=True, text=True)
     if run.returncode or not exported.exists():
         return [f"kicad-cli failed: {run.stdout}{run.stderr}"], notes
-    ours = parse_raw(Path(path).read_text(encoding="utf-8"))
-    theirs = normalize(parse_raw(exported.read_text(encoding="utf-8")), ours, library_symbols)
+    ours = parse(Path(path).read_text(encoding="utf-8"), raw=True)
+    theirs = normalize(parse(exported.read_text(encoding="utf-8"), raw=True), ours, library_symbols)
     ours = [item for item in ours if not (isinstance(item, list) and item[0] == "design")]
     return list(difflib.unified_diff(lines(ours), lines(theirs), "cuprite_wire", "kicad-cli",
                                      lineterm="")), notes
@@ -518,21 +502,6 @@ def normalize_models(line):
     return re.sub(r"(?<=\s)__\S+", "__model", line)
 
 
-def unquote(atom):
-    return re.sub(r"\\(.)", r"\1", atom[1:-1]) if atom.startswith('"') else atom
-
-
-def dump(tree):
-    """Writes a tree of parse_raw() back (atoms as they were written)."""
-    if not isinstance(tree, list):
-        return tree
-    return "(" + " ".join(dump(item) for item in tree) + ")"
-
-
-def raw_children(node, name):
-    return [item for item in node[1:] if isinstance(item, list) and item and item[0] == name]
-
-
 _LIBRARIES = {}
 
 
@@ -542,25 +511,25 @@ def library_symbol(library, name):
         path = symbol_lib_path(library)
         if not path.exists():
             raise ValueError(f"symbol library {library} not found")
-        tree = parse_raw(path.read_text(encoding="utf-8"))
-        _LIBRARIES[library] = {unquote(s[1]): s for s in raw_children(tree, "symbol")}
+        tree = parse(path.read_text(encoding="utf-8"), raw=True)
+        _LIBRARIES[library] = {unquote(s[1]): s for s in children(tree, "symbol")}
     symbols = _LIBRARIES[library]
     if name not in symbols:
         raise ValueError(f"symbol {library}:{name} not found")
     symbol = [list(item) if isinstance(item, list) else item for item in symbols[name]]
-    extends = raw_children(symbol, "extends")
+    extends = children(symbol, "extends")
     if extends:
         parent = library_symbol(library, unquote(extends[0][1]))
         parent_name = unquote(parent[1]).split(":", 1)[1]
-        overrides = {unquote(p[1]): p for p in raw_children(symbol, "property")}
+        overrides = {unquote(p[1]): p for p in children(symbol, "property")}
         flat = [parent[0], parent[1]]
         for item in parent[2:]:
             if isinstance(item, list) and item[0] == "property" and unquote(item[1]) in overrides:
                 item = overrides.pop(unquote(item[1]))
             elif isinstance(item, list) and item[0] == "symbol":
                 item = [item[0], '"' + name + unquote(item[1])[len(parent_name):] + '"', *item[2:]]
-            elif isinstance(item, list) and raw_children(symbol, item[0]) and item[0] != "property":
-                item = raw_children(symbol, item[0])[0]  # flags overridden by the derived symbol
+            elif isinstance(item, list) and children(symbol, item[0]) and item[0] != "property":
+                item = children(symbol, item[0])[0]  # flags overridden by the derived symbol
             flat.append(item)
         flat[2:2] = list(overrides.values())
         symbol = flat
@@ -572,13 +541,13 @@ def symbol_units(symbol):
     """{unit: [(pin number, x, y)]} of body style 1; unit 0 holds the pins shared by all units."""
     name = unquote(symbol[1]).split(":", 1)[1]
     units = {}
-    for sub in raw_children(symbol, "symbol"):
+    for sub in children(symbol, "symbol"):
         unit, style = (int(n) for n in unquote(sub[1])[len(name) + 1:].split("_"))
         if style > 1:
             continue
-        for pin in raw_children(sub, "pin"):
-            number = unquote(raw_children(pin, "number")[0][1])
-            at = raw_children(pin, "at")[0]
+        for pin in children(sub, "pin"):
+            number = unquote(children(pin, "number")[0][1])
+            at = children(pin, "at")[0]
             units.setdefault(unit, []).append((number, float(at[1]), float(at[2])))
     return units
 
@@ -618,7 +587,7 @@ def synthesize_library(path, project, sim_excluded=None):
     for ref, comp in comps.items():
         lib_id = lib_ids[ref]
         symbol = symbols[lib_id]
-        properties = {unquote(p[1]): unquote(p[2]) for p in raw_children(symbol, "property")}
+        properties = {unquote(p[1]): unquote(p[2]) for p in children(symbol, "property")}
         properties.update({"Reference": ref, "Value": netlist.components[ref].value,
                            "Footprint": netlist.components[ref].footprint})
         properties.update(netlist.components[ref].fields)
@@ -629,10 +598,10 @@ def synthesize_library(path, project, sim_excluded=None):
         flags = netlist.components[ref].properties
         sim_flag = "yes" if sim_excluded is not None and ref in sim_excluded else "no"
         if sim_excluded is None:
-            sim_flag = next((f[1] for f in raw_children(symbol, "exclude_from_sim")), "no")
+            sim_flag = next((f[1] for f in children(symbol, "exclude_from_sim")), "no")
         units = symbol_units(symbol)
         shared = units.pop(0, [])
-        uid = comp_uuid = netlist.components[ref].path.rsplit("/", 1)[1]
+        uid = netlist.components[ref].path.rsplit("/", 1)[1]
         for unit in sorted(units) or [1]:
             out.append(f"(symbol (lib_id {quote(':'.join(lib_id))}) (at {mm(x)} {mm(y)} 0) (unit {unit}) "
                        f"(exclude_from_sim {sim_flag}) "
@@ -659,7 +628,6 @@ def synthesize_library(path, project, sim_excluded=None):
                            f"(effects (font (size 1.27 1.27)) (justify left bottom)) (uuid {quote(new_uuid())}))")
             x += COMPONENT_PITCH
             uid = new_uuid()
-        del comp_uuid
     multi_pin_auto = sorted(n for n, nodes in nets.items()
                             if n.startswith(("Net-(", "unconnected-(")) and len(nodes) > 1)
     if multi_pin_auto:
