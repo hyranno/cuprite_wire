@@ -144,7 +144,7 @@ fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Opt
                 ref_name: ref_name(),
             });
         let pins = info
-            .check_pins(&component.part.pin_ids())
+            .check_pins(&component.pins)
             .into_iter()
             .map(|problem| match problem {
                 PinInfoProblem::Missing { pin_id } => CircuitErrorKind::PinInfoMissing {

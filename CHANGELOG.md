@@ -24,13 +24,17 @@ break the API).
   (`[2,13]`, `[1-4]`) as a pin per pad, connected inside the part, and looks up the library
   directories in `KICAD10_SYMBOL_DIR` / `KICAD10_FOOTPRINT_DIR` before the `KICAD9_` ones. The
   netlist stays in KiCad 9's format, which KiCad 10 reads.
+- `PartPins` (`PartPins::of(&part)`): the pin IDs of a part and its internal connection groups,
+  with overlapping groups merged. `Component::pins` holds those of each component.
 
 ### Changed
 
 - `ErcMark` is `#[non_exhaustive]`.
 - ERC follows KiCad 10: the only pin of a labeled net is reported as `LabelSinglePin` (a warning)
   instead of `PinNotConnected` (an error).
-- `Net` has a new public field (`labeled`).
+- `Net` has a new public field (`labeled`), and `Component` too (`pins`).
+- `KicadPartInfo::check_pins` and `SpicePartInfo::check` take the pins as `&PartPins` (instead of
+  the pin IDs, and the internal connections for `check`).
 - `Ngspice::default()` runs `ngspice_con` on Windows (the console program of ngspice's Windows
   builds; `ngspice` there is the GUI).
 - On Windows, paths in netlists and ngspice commands (`.include`, the `d_cosim` library, the
@@ -45,6 +49,11 @@ break the API).
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
 - The API documentation has `# Errors` and `# Panics` sections for the functions that return a
   `Result` or may panic.
+
+### Fixed
+
+- ERC treated internal connection groups sharing a pin (e.g. `["4", "5"]` and `["4", "ep"]`) as
+  separate stacks, so pins of the same type in them could be reported as conflicting.
 
 ## [0.2.0] - 2026-11-21
 

@@ -8,6 +8,8 @@ use std::{
     path::PathBuf,
 };
 
+use crate::parts::PartPins;
+
 /// How a part is simulated.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpicePartInfo {
@@ -49,11 +51,7 @@ impl SpicePartInfo {
     }
 
     /// Checks the information against the pins of the part.
-    pub fn check(
-        &self,
-        pin_ids: &[String],
-        internal_connections: &[Vec<String>],
-    ) -> Vec<SpiceProblem> {
+    pub fn check(&self, part_pins: &PartPins) -> Vec<SpiceProblem> {
         let SpicePartInfo::Elements {
             elements,
             unused_pins,
@@ -65,7 +63,6 @@ impl SpicePartInfo {
         if elements.is_empty() {
             problems.push(SpiceProblem::NoElements);
         }
-        let pin_id_set: HashSet<&String> = pin_ids.iter().collect();
         let mut suffixes = HashSet::new();
         for element in elements {
             problems.extend(element.check());
@@ -75,25 +72,23 @@ impl SpicePartInfo {
                 });
             }
         }
-        let used: BTreeSet<&String> = elements
+        let used: BTreeSet<&str> = elements
             .iter()
             .flat_map(|element| &element.nodes)
             .chain(unused_pins)
+            .map(String::as_str)
             .collect();
         for pin_id in &used {
-            if !pin_id_set.contains(pin_id) {
+            if !part_pins.contains(pin_id) {
                 problems.push(SpiceProblem::UnknownPin {
                     pin_id: pin_id.to_string(),
                 });
             }
         }
-        let connected_to_used = |pin_id: &String| {
-            internal_connections.iter().any(|group| {
-                group.contains(pin_id) && group.iter().any(|other| used.contains(other))
-            })
-        };
-        for pin_id in pin_ids {
-            if !used.contains(pin_id) && !connected_to_used(pin_id) {
+        for pin_id in part_pins.ids() {
+            if !used.contains(pin_id.as_str())
+                && !part_pins.is_connected_to(pin_id, |other| used.contains(other))
+            {
                 problems.push(SpiceProblem::UnmappedPin {
                     pin_id: pin_id.clone(),
                 });
@@ -338,10 +333,12 @@ mod tests {
     fn test_check_pins() {
         let info = SpicePartInfo::element(SpiceElement::new('X', ["in", "gnd_a", "x"], "AMP"))
             .with_unused_pins(["nc"]);
-        let pin_ids = strings(&["in", "gnd_a", "gnd_b", "nc", "out"]);
-        let internal = vec![strings(&["gnd_a", "gnd_b"])];
+        let pins = PartPins::new(
+            strings(&["in", "gnd_a", "gnd_b", "nc", "out"]),
+            &[strings(&["gnd_a", "gnd_b"])],
+        );
         assert_eq!(
-            info.check(&pin_ids, &internal),
+            info.check(&pins),
             vec![
                 SpiceProblem::UnknownPin { pin_id: "x".into() },
                 SpiceProblem::UnmappedPin {
@@ -349,12 +346,12 @@ mod tests {
                 },
             ]
         );
-        assert!(SpicePartInfo::Excluded.check(&pin_ids, &[]).is_empty());
+        assert!(SpicePartInfo::Excluded.check(&pins).is_empty());
     }
 
     #[test]
     fn test_check_elements() {
-        let pin_ids = strings(&["1", "2"]);
+        let pins = PartPins::new(strings(&["1", "2"]), &[]);
         let info = SpicePartInfo::elements([
             SpiceElement::new('r', ["1", "2"], "10k;1%"),
             SpiceElement::new('C', ["1", "2"], "1n")
@@ -363,7 +360,7 @@ mod tests {
                 .with_model(ModelSource::inline("my model", "")),
         ]);
         let reasons: Vec<_> = info
-            .check(&pin_ids, &[])
+            .check(&pins)
             .into_iter()
             .map(|problem| match problem {
                 SpiceProblem::InvalidElement { reason, .. } => reason,
@@ -382,7 +379,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            SpicePartInfo::elements([]).check(&[], &[]),
+            SpicePartInfo::elements([]).check(&PartPins::new([], &[])),
             vec![SpiceProblem::NoElements]
         );
     }

@@ -10,7 +10,7 @@ use cuprite_wire::{
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags, PinType},
     kicad_part,
     naming::NetLabel,
-    parts::Part,
+    parts::{Part, PartPins},
     spice::{ModelSource, SpiceElement, SpicePartInfo},
 };
 
@@ -144,7 +144,7 @@ fn test_dual_amp() {
         KicadPinInfo::new("9", None, PinType::Passive)
     );
     assert_eq!(info.fields, vec![("MPN".to_string(), "DA-1".to_string())]);
-    assert!(info.check_pins(&amp.pin_ids()).is_empty());
+    assert!(info.check_pins(&PartPins::of(&amp)).is_empty());
     assert_eq!(amp.spice(), None);
 }
 

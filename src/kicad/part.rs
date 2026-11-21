@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
+use crate::parts::PartPins;
 pub use crate::parts::PinType;
 
 pub use cuprite_wire_kicad_lib::naming::{LibId, LibIdError};
@@ -76,21 +77,23 @@ pub enum PinInfoProblem {
 }
 
 impl KicadPartInfo {
-    /// Checks that `pins` has exactly one entry for each of `pin_ids` and that pads are unique.
-    pub fn check_pins(&self, pin_ids: &[String]) -> Vec<PinInfoProblem> {
-        let mut problems = Vec::new();
-        let pin_id_set: HashSet<&String> = pin_ids.iter().collect();
-        let mut missing: Vec<_> = pin_id_set
+    /// Checks that `pins` has exactly one entry for each pin of `part_pins` and that pads are unique.
+    pub fn check_pins(&self, part_pins: &PartPins) -> Vec<PinInfoProblem> {
+        let mut missing: Vec<_> = part_pins
+            .ids()
             .iter()
-            .filter(|id| !self.pins.contains_key(**id))
+            .filter(|id| !self.pins.contains_key(*id))
             .collect();
         missing.sort();
-        problems.extend(missing.into_iter().map(|pin_id| PinInfoProblem::Missing {
-            pin_id: pin_id.to_string(),
-        }));
+        let mut problems: Vec<_> = missing
+            .into_iter()
+            .map(|pin_id| PinInfoProblem::Missing {
+                pin_id: pin_id.clone(),
+            })
+            .collect();
         let mut pads = HashSet::new();
         for (pin_id, pin) in &self.pins {
-            if !pin_id_set.contains(pin_id) {
+            if !part_pins.contains(pin_id) {
                 problems.push(PinInfoProblem::Unknown {
                     pin_id: pin_id.clone(),
                 });
@@ -128,9 +131,9 @@ mod tests {
             ]),
             ..Default::default()
         };
-        let pin_ids = ["a", "b", "c"].map(String::from);
+        let part_pins = PartPins::new(["a", "b", "c"].map(String::from), &[]);
         assert_eq!(
-            info.check_pins(&pin_ids),
+            info.check_pins(&part_pins),
             vec![
                 PinInfoProblem::Missing { pin_id: "c".into() },
                 PinInfoProblem::DuplicatePad { pad: "1".into() },

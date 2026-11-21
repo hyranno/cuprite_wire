@@ -94,7 +94,7 @@ mod tests {
     use crate::{
         circuit::CircuitBuilder,
         naming::NetLabel,
-        parts::Part,
+        parts::{Part, PartPins},
         spice::{IndependentSource, SpicePartInfo},
         test_parts::{self, deck_of},
     };
@@ -111,15 +111,11 @@ mod tests {
             Box::new(DualOpAmpSoic8::new("LM358")),
         ];
         for part in parts {
+            let pins = PartPins::of(part.as_ref());
             let info = part.kicad().unwrap();
-            assert!(info.check_pins(&part.pin_ids()).is_empty(), "{part:?}");
+            assert!(info.check_pins(&pins).is_empty(), "{part:?}");
             let spice = part.spice().unwrap();
-            assert!(
-                spice
-                    .check(&part.pin_ids(), &part.internal_connections())
-                    .is_empty(),
-                "{part:?}"
-            );
+            assert!(spice.check(&pins).is_empty(), "{part:?}");
             assert!(matches!(spice, SpicePartInfo::Elements { .. }));
         }
         assert_eq!(DiodeSod123::A, "a");
