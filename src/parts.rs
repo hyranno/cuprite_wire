@@ -30,9 +30,12 @@ pub trait Part: Debug + DynClone {
     fn internal_connections(&self) -> Vec<Vec<String>> {
         vec![]
     }
+    /// The KiCad information (symbol, footprint, pins) of the part, or `None` if it cannot be
+    /// exported to a KiCad netlist.
     fn kicad(&self) -> Option<KicadPartInfo> {
         None
     }
+    /// The SPICE information of the part, or `None` if it cannot be exported to a SPICE netlist.
     fn spice(&self) -> Option<SpicePartInfo> {
         None
     }
@@ -85,18 +88,31 @@ impl PartInstance {
 /// The types and their names are those of KiCad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PinType {
+    /// `input`: needs a driver on its net.
     Input,
+    /// `output`: drives its net.
     Output,
+    /// `bidirectional`: an input and output, counted as a driver.
     Bidirectional,
+    /// `tri_state`: an output that can be high-impedance, counted as a driver.
     TriState,
+    /// `passive`: e.g. a resistor pin, counted as a driver. The default, and the type ERC uses
+    /// for pins without one.
     #[default]
     Passive,
+    /// `free`: never reported as not connected, and by default conflicts only with `no_connect`.
     Free,
+    /// `unspecified`: by default a warning when connected to anything but a `free` pin.
     Unspecified,
+    /// `power_in`: needs a `power_out` pin on its net.
     PowerIn,
+    /// `power_out`: drives `power_in` pins (and inputs).
     PowerOut,
+    /// `open_collector`: an output that only sinks current.
     OpenCollector,
+    /// `open_emitter`: an output that only sources current.
     OpenEmitter,
+    /// `no_connect`: must be left unconnected; by default an error when connected to any pin.
     NoConnect,
 }
 
@@ -122,6 +138,7 @@ impl PinType {
         self as usize
     }
 
+    /// The KiCad name of the type (e.g. `"power_in"`), as written in the netlist and in ERC messages.
     pub fn as_str(self) -> &'static str {
         match self {
             PinType::Input => "input",

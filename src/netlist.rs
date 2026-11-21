@@ -25,19 +25,26 @@ use crate::{
 /// by name (both in natural order).
 #[derive(Debug, Clone)]
 pub struct Netlist {
+    /// The components (part instances).
     pub components: Vec<Component>,
+    /// The nets with at least one part pin.
     pub nets: Vec<Net>,
     /// ERC marks on nets without part pins (such nets are not in [`Netlist::nets`]).
     pub pinless_marks: Vec<NodeMark>,
+    /// The warnings of the conversion (several names on a net, labels on nets without part pins).
     pub warnings: Vec<CircuitWarning>,
 }
 
+/// A part instance in a [`Netlist`].
 #[derive(Debug, Clone)]
 pub struct Component {
+    /// The reference designator (e.g. `R1`), unique in the netlist.
     pub ref_name: String,
+    /// The part.
     pub part: Box<dyn Part>,
     /// Path of the subcircuit instance containing the component.
     pub path: HierPath,
+    /// Derived from the path and the instance name, so it does not change between builds.
     pub uuid: Uuid,
     /// Where the component was instantiated.
     pub trace: Trace,
@@ -66,8 +73,12 @@ impl Component {
     }
 }
 
+/// A net: a group of connected nodes with at least one part pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Net {
+    /// The net name, unique in the netlist: given by a label (`NAME` for a global one, `/path/NAME`
+    /// for a local one), or, for nets without labels, after one of its pins like KiCad
+    /// (`Net-(R1-Pad2)`, or `unconnected-(U1-NC-Pad7)` for a single pin).
     pub name: String,
     /// Sorted by component, then by pin ID.
     pub nodes: Vec<NetNode>,
@@ -77,10 +88,12 @@ pub struct Net {
     pub marks: Vec<NodeMark>,
 }
 
+/// A part pin on a [`Net`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetNode {
     /// Index into [`Netlist::components`].
     pub component: usize,
+    /// The pin ID of the part.
     pub pin_id: String,
 }
 

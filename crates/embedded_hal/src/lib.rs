@@ -35,6 +35,8 @@
 //!
 //! See the guide [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md).
 
+#![warn(missing_docs)]
+
 use std::{cell::RefCell, convert::Infallible, rc::Rc};
 
 use cuprite_wire::spice::{
@@ -88,6 +90,7 @@ pub struct Board {
 }
 
 impl Board {
+    /// A board without pins.
     pub fn new() -> Self {
         Self::default()
     }
@@ -219,6 +222,7 @@ impl<T, F: FnMut(&mut T)> Firmware<T, F> {
         &self.task
     }
 
+    /// The firmware's state, consuming the firmware.
     pub fn into_task(self) -> T {
         self.task
     }

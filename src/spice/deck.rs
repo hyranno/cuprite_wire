@@ -26,6 +26,7 @@ pub struct SpiceDeck {
 }
 
 impl SpiceDeck {
+    /// A deck of `netlist` without directives or control commands.
     pub fn new(netlist: SpiceNetlist) -> Self {
         SpiceDeck {
             netlist,
@@ -34,6 +35,7 @@ impl SpiceDeck {
         }
     }
 
+    /// The netlist of the circuit.
     pub fn netlist(&self) -> &SpiceNetlist {
         &self.netlist
     }

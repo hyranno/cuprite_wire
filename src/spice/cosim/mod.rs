@@ -303,6 +303,7 @@ pub struct DeviceModels<'a> {
 }
 
 impl<'a> DeviceModels<'a> {
+    /// No models; add them with [`DeviceModels::with`].
     pub fn new() -> Self {
         Self::default()
     }

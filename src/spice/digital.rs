@@ -120,7 +120,9 @@ pub const HIZ_RESISTANCE: f64 = 1e9;
 /// A logic level driven by an output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Level {
+    /// Driven to the low voltage ([`OutputCharacteristics::low`]).
     Low,
+    /// Driven to the high voltage ([`OutputCharacteristics::high`]).
     High,
     /// High impedance: the output is disconnected (an open-drain output that is not pulling low,
     /// a tri-state output that is disabled).
@@ -141,6 +143,7 @@ pub struct DigitalSequence {
 }
 
 impl DigitalSequence {
+    /// A sequence that stays at `initial` from time 0, without changes.
     pub fn new(initial: Level) -> Self {
         DigitalSequence {
             initial,
@@ -176,6 +179,7 @@ impl DigitalSequence {
         }
     }
 
+    /// The level at time 0.
     pub fn initial(&self) -> Level {
         self.initial
     }
@@ -358,7 +362,9 @@ pub struct OutputCharacteristics {
     pub high: f64,
     /// The output resistance in ohms.
     pub resistance: f64,
+    /// The time in seconds of a full edge from `low` to `high` (0-100 %).
     pub rise_time: f64,
+    /// The time in seconds of a full edge from `high` to `low` (0-100 %).
     pub fall_time: f64,
 }
 
@@ -375,11 +381,13 @@ impl OutputCharacteristics {
         }
     }
 
+    /// Sets the output resistance in ohms.
     pub fn with_resistance(mut self, resistance: f64) -> Self {
         self.resistance = resistance;
         self
     }
 
+    /// Sets the full (0-100 %) rise and fall times in seconds.
     pub fn with_edges(mut self, rise_time: f64, fall_time: f64) -> Self {
         self.rise_time = rise_time;
         self.fall_time = fall_time;
@@ -447,10 +455,12 @@ impl OutputCharacteristics {
 pub struct Pull {
     /// The voltage the resistor pulls to, relative to the `gnd` pin.
     pub voltage: f64,
+    /// The resistance in ohms.
     pub resistance: f64,
 }
 
 impl Pull {
+    /// A resistor of `resistance` ohms pulling to `voltage` volts.
     pub fn up(voltage: f64, resistance: f64) -> Self {
         Pull {
             voltage,
@@ -458,6 +468,7 @@ impl Pull {
         }
     }
 
+    /// A resistor of `resistance` ohms pulling to the `gnd` pin (0 V).
     pub fn down(resistance: f64) -> Self {
         Pull::up(0.0, resistance)
     }
@@ -473,6 +484,7 @@ pub struct InputCharacteristics {
     pub threshold_high: f64,
     /// The input capacitance in farads.
     pub capacitance: f64,
+    /// The pull-up or pull-down resistor, if any.
     pub pull: Option<Pull>,
     /// The current flowing into the pin, in amperes.
     pub leakage: f64,
@@ -491,16 +503,19 @@ impl InputCharacteristics {
         }
     }
 
+    /// Sets the input capacitance in farads.
     pub fn with_capacitance(mut self, capacitance: f64) -> Self {
         self.capacitance = capacitance;
         self
     }
 
+    /// Adds a pull-up or pull-down resistor.
     pub fn with_pull(mut self, pull: Pull) -> Self {
         self.pull = Some(pull);
         self
     }
 
+    /// Sets the current flowing into the pin, in amperes.
     pub fn with_leakage(mut self, leakage: f64) -> Self {
         self.leakage = leakage;
         self
@@ -641,7 +656,9 @@ pub struct DigitalDriver {
 }
 
 impl DigitalDriver {
+    /// The output pin.
     pub const OUT: &'static str = "out";
+    /// The reference pin the output voltages are relative to.
     pub const GND: &'static str = "gnd";
 
     /// # Panics
@@ -652,10 +669,12 @@ impl DigitalDriver {
         Box::new(DigitalDriver { output, sequence })
     }
 
+    /// The electrical characteristics of the output.
     pub fn output(&self) -> &OutputCharacteristics {
         &self.output
     }
 
+    /// The levels the output plays.
     pub fn sequence(&self) -> &DigitalSequence {
         &self.sequence
     }
@@ -715,7 +734,9 @@ pub struct DigitalLoad {
 }
 
 impl DigitalLoad {
+    /// The input pin.
     pub const IN: &'static str = "in";
+    /// The reference pin the voltages of the input are relative to.
     pub const GND: &'static str = "gnd";
 
     /// # Panics
@@ -727,6 +748,7 @@ impl DigitalLoad {
         Box::new(DigitalLoad { input })
     }
 
+    /// The electrical characteristics of the input.
     pub fn input(&self) -> &InputCharacteristics {
         &self.input
     }

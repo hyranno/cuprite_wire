@@ -63,6 +63,7 @@ fn string_args<S: Into<String>>(what: &str, args: impl IntoIterator<Item = S>) -
 }
 
 impl DCosim {
+    /// Name of the pin that is the reference of the port voltages.
     pub const GND: &'static str = "gnd";
 
     /// A model in the library at `simulation` (the `simulation` parameter of `d_cosim`).

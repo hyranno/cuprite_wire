@@ -7,19 +7,25 @@ use crate::trace::{Loc, Trace};
 /// An additional location related to a diagnostic (e.g. the other one of two duplicates).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Note {
+    /// What the location is (e.g. "previously used here").
     pub message: String,
+    /// The location the note points to.
     pub trace: Trace,
 }
 
 /// An error or a warning with the trace of its cause.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic<K> {
+    /// What went wrong.
     pub kind: K,
+    /// Where in the circuit description the problem was caused.
     pub trace: Trace,
+    /// Other related locations.
     pub notes: Vec<Note>,
 }
 
 impl<K> Diagnostic<K> {
+    /// Creates a diagnostic without notes.
     pub fn new(kind: K, trace: Trace) -> Self {
         Diagnostic {
             kind,
@@ -28,6 +34,7 @@ impl<K> Diagnostic<K> {
         }
     }
 
+    /// Adds a note pointing to another related location.
     pub fn with_note(mut self, message: impl Into<String>, trace: Trace) -> Self {
         self.notes.push(Note {
             message: message.into(),
@@ -67,47 +74,117 @@ impl<K> Diagnostic<K> {
     }
 }
 
+/// The kinds of errors found in a circuit or while exporting it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CircuitErrorKind {
     /// An instance name or a net label is not allowed.
-    InvalidName { name: String, reason: &'static str },
+    InvalidName {
+        /// The rejected name.
+        name: String,
+        /// Why the name is not allowed.
+        reason: &'static str,
+    },
     /// The same explicit instance name is used twice in one (sub)circuit.
-    DuplicateInstanceName { name: String },
+    DuplicateInstanceName {
+        /// The duplicated instance name.
+        name: String,
+    },
     /// A part lists the same pin ID more than once.
-    DuplicatePinId { ref_name: String, pin_id: String },
+    DuplicatePinId {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The duplicated pin ID.
+        pin_id: String,
+    },
     /// A part refers to a pin ID that it does not have (e.g. in its internal connections).
-    UnknownPinId { ref_name: String, pin_id: String },
+    UnknownPinId {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The pin ID that the part does not have.
+        pin_id: String,
+    },
     /// Two parts get the same reference designator.
-    DuplicateRef { ref_name: String },
+    DuplicateRef {
+        /// The duplicated reference designator.
+        ref_name: String,
+    },
     /// Two different nets get the same name.
-    DuplicateNetName { name: String },
+    DuplicateNetName {
+        /// The duplicated net name.
+        name: String,
+    },
     /// The part has no KiCad information.
-    KicadUnsupported { ref_name: String },
+    KicadUnsupported {
+        /// Reference designator of the part.
+        ref_name: String,
+    },
     /// The part has no footprint assigned.
-    FootprintMissing { ref_name: String },
+    FootprintMissing {
+        /// Reference designator of the part.
+        ref_name: String,
+    },
     /// The KiCad information has no entry for a pin ID of the part.
-    PinInfoMissing { ref_name: String, pin_id: String },
+    PinInfoMissing {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The pin ID without KiCad pin information.
+        pin_id: String,
+    },
     /// Two pins of a part are assigned to the same pad.
-    DuplicatePad { ref_name: String, pad: String },
+    DuplicatePad {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The footprint pad assigned to more than one pin.
+        pad: String,
+    },
     /// The part has no SPICE information.
-    SpiceUnsupported { ref_name: String },
+    SpiceUnsupported {
+        /// Reference designator of the part.
+        ref_name: String,
+    },
     /// An element of the part cannot be written to a SPICE netlist.
-    InvalidSpiceElement { ref_name: String, reason: String },
+    InvalidSpiceElement {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// What is wrong with the element.
+        reason: String,
+    },
     /// A pin of the part is not used by its SPICE model and not declared unused.
-    SpicePinUnmapped { ref_name: String, pin_id: String },
+    SpicePinUnmapped {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The pin ID not used by the SPICE model.
+        pin_id: String,
+    },
     /// The name of a net cannot be used as a SPICE node name.
-    InvalidSpiceNodeName { name: String, reason: String },
+    InvalidSpiceNodeName {
+        /// The net name.
+        name: String,
+        /// Why it cannot be a SPICE node name.
+        reason: String,
+    },
     /// Two nets get the same SPICE node name (SPICE names are case-insensitive).
     SpiceNodeCollision {
+        /// Name of one of the nets.
         name: String,
+        /// Name of the other net.
         other: String,
+        /// The SPICE node name both nets would get.
         node: String,
     },
     /// Two elements get the same name, ignoring case.
-    SpiceElementCollision { name: String, other: String },
+    SpiceElementCollision {
+        /// Name of one of the elements.
+        name: String,
+        /// Name of the other element.
+        other: String,
+    },
     /// Parts define a SPICE model with the same name differently.
-    SpiceModelConflict { name: String },
+    SpiceModelConflict {
+        /// Name of the SPICE model.
+        name: String,
+    },
     /// No net is the ground of the SPICE netlist.
     GroundMissing,
 }
@@ -190,6 +267,7 @@ impl fmt::Display for CircuitErrorKind {
     }
 }
 
+/// An error in a circuit, with the trace of its cause.
 pub type CircuitError = Diagnostic<CircuitErrorKind>;
 
 impl fmt::Display for CircuitError {
@@ -229,13 +307,22 @@ impl fmt::Display for CircuitErrors {
 
 impl std::error::Error for CircuitErrors {}
 
+/// The kinds of warnings found while converting a circuit to a netlist.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CircuitWarningKind {
     /// A net has several names; `used` is used and the others only connect nets.
-    MultipleNetNames { used: String, others: Vec<String> },
+    MultipleNetNames {
+        /// The name used for the net.
+        used: String,
+        /// The other names of the net.
+        others: Vec<String>,
+    },
     /// A labeled net has no part pin, so it does not appear in the netlist.
-    LabelOnlyNet { names: Vec<String> },
+    LabelOnlyNet {
+        /// Names of the net.
+        names: Vec<String>,
+    },
 }
 
 impl fmt::Display for CircuitWarningKind {
@@ -259,6 +346,7 @@ fn quoted_list(names: &[String]) -> String {
         .join(", ")
 }
 
+/// A warning about a circuit, with the trace of its cause.
 pub type CircuitWarning = Diagnostic<CircuitWarningKind>;
 
 impl fmt::Display for CircuitWarning {

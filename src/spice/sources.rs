@@ -31,9 +31,12 @@ fn numbers(values: &[f64]) -> String {
         .join(" ")
 }
 
+/// Whether an [`IndependentSource`] is a voltage or a current source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
+    /// A voltage source (SPICE `V`); its values are in volts.
     Voltage,
+    /// A current source (SPICE `I`); its values are in amperes.
     Current,
 }
 
@@ -42,21 +45,34 @@ pub enum SourceKind {
 pub enum Waveform {
     /// `SIN(offset amplitude frequency delay damping phase)`; phase in degrees.
     Sin {
+        /// The value the wave oscillates around.
         offset: f64,
+        /// The peak deviation from `offset`.
         amplitude: f64,
+        /// The frequency in hertz.
         frequency: f64,
+        /// The time in seconds at which the wave starts.
         delay: f64,
+        /// The damping factor in 1/s: the amplitude decays as `exp(-damping * (t - delay))`.
         damping: f64,
+        /// The phase in degrees.
         phase: f64,
     },
     /// `PULSE(initial pulsed delay rise fall width period)`.
     Pulse {
+        /// The value before `delay`.
         initial: f64,
+        /// The value at the top of the pulse.
         pulsed: f64,
+        /// The time in seconds of the first edge.
         delay: f64,
+        /// The rise time in seconds (from `initial` to `pulsed`).
         rise: f64,
+        /// The fall time in seconds (from `pulsed` back to `initial`).
         fall: f64,
+        /// The time in seconds the value stays at `pulsed`.
         width: f64,
+        /// The repetition period in seconds.
         period: f64,
     },
     /// Piecewise linear: `(time, value)` pairs in strictly increasing time (at least one).
@@ -152,10 +168,14 @@ impl Waveform {
 /// from `p` through the source to `n` (so into the circuit at `n`), as in SPICE.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndependentSource {
+    /// Whether the source drives a voltage or a current.
     pub kind: SourceKind,
+    /// The DC value (volts or amperes, by `kind`), used by the operating point and DC analyses
+    /// and by a transient analysis without `waveform`.
     pub dc: f64,
     /// Magnitude for AC (small-signal) analysis.
     pub ac: Option<f64>,
+    /// The waveform for transient analysis, in the unit of `kind`.
     pub waveform: Option<Waveform>,
 }
 

@@ -343,14 +343,18 @@ fn inputs_unchanged(dir: &Path) -> bool {
 /// A port of the top module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Port {
+    /// Name of the port in the top module.
     pub name: String,
+    /// Index of the most significant bit (`7` of `[7:0]`).
     pub msb: u32,
+    /// Index of the least significant bit (`0` of `[7:0]`).
     pub lsb: u32,
     /// The line for `inputs.h` / `outputs.h`: `VL_DATA(8,clk,0,0)`.
     macro_line: String,
 }
 
 impl Port {
+    /// The number of bits.
     pub fn width(&self) -> u32 {
         self.msb - self.lsb + 1
     }
@@ -430,14 +434,17 @@ pub struct VerilatedModel {
 }
 
 impl VerilatedModel {
+    /// The absolute path of the shared library, the `simulation` parameter of `d_cosim`.
     pub fn library(&self) -> &Path {
         &self.library
     }
 
+    /// The input ports, in the order of the `d_cosim` inputs.
     pub fn inputs(&self) -> &[Port] {
         &self.inputs
     }
 
+    /// The output ports, in the order of the `d_cosim` outputs.
     pub fn outputs(&self) -> &[Port] {
         &self.outputs
     }
@@ -461,15 +468,20 @@ impl VerilatedModel {
     }
 }
 
+/// An error building a design with Verilator.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum VerilatorError {
+    /// A file operation failed, or a program of the build cannot be run.
     Io(io::Error),
     /// A step of the build failed. Its directory is kept (the build directory, or the current
     /// directory for `verilator --version`); other errors remove it.
     Command {
+        /// The command line that failed.
         command: String,
+        /// The directory kept for inspection.
         dir: PathBuf,
+        /// The output of the command.
         log: String,
     },
     /// The ports of the top module cannot be used.
