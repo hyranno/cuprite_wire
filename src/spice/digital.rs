@@ -19,7 +19,8 @@
 use crate::{
     parts::Part,
     spice::{
-        ModelSource, SpiceElement, SpicePartInfo,
+        GROUND, ModelSource, SpiceElement, SpicePartInfo,
+        netlist::write_element_line,
         sources::{Waveform, spice_number},
     },
 };
@@ -27,6 +28,91 @@ use crate::{
 /// The node of the generated subcircuits that their `gnd` pin connects to. ngspice reads a node
 /// named `gnd` as the ground (node 0), even as a port of a subcircuit, so it cannot be used there.
 pub(crate) const SUBCIRCUIT_REFERENCE: &str = "ref";
+
+/// Names written into generated subcircuits: ASCII letters, digits and `_`.
+pub(crate) fn is_identifier(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The node of a generated subcircuit that serves `role` for the pin `pin`: `<pin>#<role>`.
+/// Pin names cannot contain `#` ([`check_subcircuit_pin`]), so it is never a pin's node.
+pub(crate) fn internal_node(pin: &str, role: &str) -> String {
+    format!("{pin}#{role}")
+}
+
+/// Checks the name of a pin added to a generated subcircuit, of a part that has the pins
+/// `existing` and `gnd`: an identifier ([`is_identifier`]), none of the part's pin names
+/// (case-insensitively, as ngspice reads them), and not [`SUBCIRCUIT_REFERENCE`] or [`GROUND`],
+/// which name other nodes of the subcircuit. `owner` names the part in the message.
+pub(crate) fn check_subcircuit_pin<'a>(
+    pin: &str,
+    existing: impl IntoIterator<Item = &'a str>,
+    owner: &str,
+) -> Result<(), String> {
+    if !is_identifier(pin) {
+        Err(format!(
+            "a pin name may only contain ASCII letters, digits and '_': {pin:?}"
+        ))
+    } else if [SUBCIRCUIT_REFERENCE, GROUND]
+        .iter()
+        .any(|node| pin.eq_ignore_ascii_case(node))
+    {
+        Err(format!(
+            "the pin name {pin:?} is reserved for a node of the subcircuit"
+        ))
+    } else if existing
+        .into_iter()
+        .chain(["gnd"])
+        .any(|name| name.eq_ignore_ascii_case(pin))
+    {
+        Err(format!("{owner} already has a pin {pin:?}"))
+    } else {
+        Ok(())
+    }
+}
+
+/// [`check_subcircuit_pin`], panicking on an invalid name.
+#[track_caller]
+pub(crate) fn assert_subcircuit_pin<'a>(
+    pin: &str,
+    existing: impl IntoIterator<Item = &'a str>,
+    owner: &str,
+) {
+    if let Err(message) = check_subcircuit_pin(pin, existing, owner) {
+        panic!("{message}");
+    }
+}
+
+/// The definition of the subcircuit `name` with the ports `ports` and [`SUBCIRCUIT_REFERENCE`].
+pub(crate) fn subcircuit_text(name: &str, ports: &[&str], body: &str) -> String {
+    let mut header = format!(".subckt {name}");
+    for port in ports {
+        header.push(' ');
+        header.push_str(port);
+    }
+    format!("{header} {SUBCIRCUIT_REFERENCE}\n{body}.ends {name}\n")
+}
+
+/// The name `cuprite_<prefix>_<hash>` and the definition ([`subcircuit_text`]) of a subcircuit.
+/// The name is derived from the definition, so equal parts share one definition.
+pub(crate) fn hashed_subcircuit(prefix: &str, ports: &[&str], body: &str) -> (String, String) {
+    let hash = fnv1a(subcircuit_text("", ports, body).as_bytes());
+    let name = format!("cuprite_{prefix}_{hash:016x}");
+    let text = subcircuit_text(&name, ports, body);
+    (name, text)
+}
+
+/// The SPICE information of a part written as the subcircuit `name` defined by `text`, with the
+/// part's pins `pins` as its nodes.
+pub(crate) fn subcircuit_part<S: Into<String>>(
+    pins: impl IntoIterator<Item = S>,
+    name: String,
+    text: String,
+) -> SpicePartInfo {
+    SpicePartInfo::element(
+        SpiceElement::new('X', pins, name.clone()).with_model(ModelSource::inline(name, text)),
+    )
+}
 
 /// The resistance of an output in the high-impedance state.
 pub const HIZ_RESISTANCE: f64 = 1e9;
@@ -431,6 +517,15 @@ impl InputCharacteristics {
         }
     }
 
+    /// The level read from `voltage` by an input that has not read before: between the
+    /// thresholds, the level of the nearer one.
+    pub fn read_initial(&self, voltage: f64) -> bool {
+        self.read(
+            voltage,
+            voltage >= (self.threshold_low + self.threshold_high) / 2.0,
+        )
+    }
+
     /// The levels read from voltage samples (e.g. columns of a transient analysis [`Table`]).
     /// The first sample sets the initial level (between the thresholds, the nearer one);
     /// the times of the changes are interpolated at the threshold crossed.
@@ -449,8 +544,7 @@ impl InputCharacteristics {
         let Some(&first) = voltage.first() else {
             return DigitalSequence::new(Level::Low);
         };
-        let middle = (self.threshold_low + self.threshold_high) / 2.0;
-        let mut high = self.read(first, first >= middle);
+        let mut high = self.read_initial(first);
         let mut sequence = DigitalSequence::new(Level::from(high));
         for i in 1..time.len() {
             let now = self.read(voltage[i], high);
@@ -492,6 +586,18 @@ impl InputCharacteristics {
             );
         }
         elements
+    }
+
+    /// The lines of the load ([`InputCharacteristics::load_elements`]) of the pin `pin` of a
+    /// generated subcircuit, against [`SUBCIRCUIT_REFERENCE`]: `CC_<pin>`, `RP_<pin>`, `II_<pin>`.
+    pub(crate) fn load_lines(&self, pin: &str) -> String {
+        let mut text = String::new();
+        for element in self.load_elements(pin, SUBCIRCUIT_REFERENCE) {
+            let name = format!("{}{}_{pin}", element.device, element.suffix);
+            write_element_line(&mut text, &name, &element.nodes, &element.args)
+                .expect("writing to a String does not fail");
+        }
+        text
     }
 
     #[track_caller]
@@ -552,8 +658,7 @@ impl DigitalDriver {
         &self.sequence
     }
 
-    /// The subcircuit name and definition. The name is derived from the definition, so equal
-    /// drivers share one definition.
+    /// The subcircuit name and definition ([`hashed_subcircuit`]).
     fn subcircuit(&self) -> (String, String) {
         let output = &self.output;
         let mut body = format!(
@@ -570,9 +675,7 @@ impl DigitalDriver {
                 body.push_str(&output.switch_lines("", "d", "out", "e"));
             }
         }
-        let name = format!("cuprite_digital_{:016x}", fnv1a(body.as_bytes()));
-        let text = format!(".subckt {name} out {SUBCIRCUIT_REFERENCE}\n{body}.ends {name}\n");
-        (name, text)
+        hashed_subcircuit("digital", &[Self::OUT], &body)
     }
 }
 
@@ -595,10 +698,7 @@ impl Part for DigitalDriver {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let (name, text) = self.subcircuit();
-        Some(SpicePartInfo::element(
-            SpiceElement::new('X', [Self::OUT, Self::GND], name.clone())
-                .with_model(ModelSource::inline(name, text)),
-        ))
+        Some(subcircuit_part([Self::OUT, Self::GND], name, text))
     }
 }
 
@@ -846,5 +946,63 @@ mod tests {
             DigitalLoad::new(ideal).spice(),
             Some(SpicePartInfo::Excluded)
         );
+    }
+
+    #[test]
+    fn test_check_subcircuit_pin() {
+        let check = |pin| check_subcircuit_pin(pin, ["a", "B"], "the part");
+        assert_eq!(check("c_1"), Ok(()));
+        for (pin, message) in [
+            ("b", "the part already has a pin \"b\""),
+            ("GND", "the part already has a pin \"GND\""),
+            (
+                "Ref",
+                "the pin name \"Ref\" is reserved for a node of the subcircuit",
+            ),
+            (
+                "0",
+                "the pin name \"0\" is reserved for a node of the subcircuit",
+            ),
+            (
+                "a#ai",
+                "a pin name may only contain ASCII letters, digits and '_': \"a#ai\"",
+            ),
+            (
+                "",
+                "a pin name may only contain ASCII letters, digits and '_': \"\"",
+            ),
+        ] {
+            assert_eq!(check(pin), Err(message.to_string()));
+        }
+    }
+
+    #[test]
+    fn test_hashed_subcircuit() {
+        let (name, text) = hashed_subcircuit("x", &["a", "b"], "R1 a b 1k\n");
+        assert!(name.starts_with("cuprite_x_"), "{name}");
+        assert_eq!(
+            text,
+            format!(".subckt {name} a b ref\nR1 a b 1k\n.ends {name}\n")
+        );
+        // The ports are part of the definition.
+        assert_ne!(hashed_subcircuit("x", &["b", "a"], "R1 a b 1k\n").0, name);
+    }
+
+    #[test]
+    fn test_load_lines() {
+        let input = InputCharacteristics::cmos(3.3).with_pull(Pull::up(3.3, 10e3));
+        assert_eq!(
+            input.load_lines("p"),
+            "CC_p p ref 5e-12\nRP_p p ref 10000\nII_p ref p DC 3.3e-4\n"
+        );
+    }
+
+    #[test]
+    fn test_read_initial() {
+        let input = InputCharacteristics::cmos(10.0);
+        assert!(!input.read_initial(4.9));
+        assert!(input.read_initial(5.0));
+        assert!(!input.read_initial(0.0));
+        assert!(input.read_initial(8.0));
     }
 }

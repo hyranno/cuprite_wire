@@ -210,13 +210,13 @@ impl Session for CosimSession<'_> {
             for (pin, &vector) in device.pins.iter_mut().zip(&device.vectors) {
                 pin.voltage = voltage(vector).unwrap_or(0.0) - gnd;
                 if let Some(input) = &pin.pin.input {
-                    let previous = if device.started {
-                        pin.read
+                    if device.started {
+                        pin.previous = pin.read;
+                        pin.read = input.read(pin.voltage, pin.read);
                     } else {
-                        pin.voltage >= (input.threshold_low + input.threshold_high) / 2.0
-                    };
-                    pin.read = input.read(pin.voltage, previous);
-                    pin.previous = if device.started { previous } else { pin.read };
+                        pin.read = input.read_initial(pin.voltage);
+                        pin.previous = pin.read;
+                    }
                 }
                 pin.request = None;
             }

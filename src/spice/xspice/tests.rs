@@ -56,21 +56,39 @@ fn test_subcircuit() {
         text,
         format!(
             ".subckt {name} clk q ref\n\
-             EI_clk ai_clk 0 clk ref 1\n\
-             AI_clk [ai_clk] [di_clk] adc_clk\n\
+             EI_clk clk#ai 0 clk ref 1\n\
+             AI_clk [clk#ai] [clk#di] adc_clk\n\
              .model adc_clk adc_bridge( in_low=1 in_high=2 )\n\
-             AC [di_clk] [do_q] cosim\n\
+             AC [clk#di] [q#do] cosim\n\
              .model cosim d_cosim( simulation=\"/lib/libx.so\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
-             AO_q [do_q] [ao_q] dac_q\n\
+             AO_q [q#do] [q#ao] dac_q\n\
              .model dac_q dac_bridge( out_low=0 out_high=3.3 out_undef=1.65 t_rise=2e-9 t_fall=2e-9 )\n\
-             EO_q d_q ref ao_q 0 1\n\
-             RO_q d_q q 50\n\
+             EO_q q#d ref q#ao 0 1\n\
+             RO_q q#d q 50\n\
              .ends {name}\n"
         )
     );
     let no_inputs = DCosim::new("/lib/libx.so").output("q", OutputCharacteristics::cmos(3.3));
-    assert!(no_inputs.subcircuit().1.contains("AC NULL [do_q] cosim\n"));
+    assert!(no_inputs.subcircuit().1.contains("AC NULL [q#do] cosim\n"));
     assert!(matches!(part.spice(), Some(SpicePartInfo::Elements { .. })));
+}
+
+/// The internal nodes of a pin are not the node of another pin (`ai_a` was both the internal node
+/// of the input `a` and the node of the output `ai_a`).
+#[test]
+fn test_internal_nodes_apart_from_pins() {
+    let part = DCosim::new("/lib/libx.so")
+        .input("a", InputCharacteristics::cmos(3.3))
+        .output("ai_a", OutputCharacteristics::cmos(3.3));
+    let (_, text) = part.subcircuit();
+    assert!(text.contains("EI_a a#ai 0 a ref 1\n"), "{text}");
+    assert!(text.contains("RO_ai_a ai_a#d ai_a 50\n"), "{text}");
+}
+
+#[test]
+#[should_panic(expected = "the pin name \"REF\" is reserved")]
+fn test_pin_named_ref() {
+    let _ = DCosim::new("/lib/libx.so").input("REF", InputCharacteristics::cmos(3.3));
 }
 
 #[test]

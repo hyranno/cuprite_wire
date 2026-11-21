@@ -3,8 +3,11 @@
 use crate::{
     parts::Part,
     spice::{
-        ModelSource, SpiceElement, SpicePartInfo,
-        digital::{InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE},
+        SpicePartInfo,
+        digital::{
+            InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE,
+            assert_subcircuit_pin, internal_node, is_identifier, subcircuit_part, subcircuit_text,
+        },
     },
 };
 
@@ -38,9 +41,10 @@ pub(super) fn find_pin<'a>(
 /// and `gnd`, the reference of their voltages.
 ///
 /// It is written as a subcircuit `cuprite_cosim_<name>` (`XU1 <pins...> gnd cuprite_cosim_<name>`).
-/// An output pin `p` is an `EXTERNAL` source `VD_p` behind the switch `SO_p` of the output
-/// resistance, opened to high impedance by the `EXTERNAL` source `VE_p`; an input pin has the
-/// elements of [`DigitalLoad`](crate::spice::digital::DigitalLoad) (`CC_p`, `RP_p`, `II_p`).
+/// An output pin `p` is an `EXTERNAL` source `VD_p` (at the node `p#d`) behind the switch `SO_p` of
+/// the output resistance, opened to high impedance by the `EXTERNAL` source `VE_p` (at `p#e`); an
+/// input pin has the elements of [`DigitalLoad`](crate::spice::digital::DigitalLoad) (`CC_p`,
+/// `RP_p`, `II_p`).
 ///
 /// Outputs start `Low`, and bidirectional pins `HiZ`, until the model sets them.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,11 +55,6 @@ pub struct CosimDevice {
 
 // The values are checked to be finite, so equality is reflexive.
 impl Eq for CosimDevice {}
-
-/// Names written into the subcircuit: ASCII letters, digits and `_`.
-fn is_identifier(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
 
 impl CosimDevice {
     pub const GND: &'static str = "gnd";
@@ -77,8 +76,8 @@ impl CosimDevice {
     /// Adds an output pin.
     ///
     /// # Panics
-    /// If the name is not made of ASCII letters, digits and `_`, is `gnd` or another pin's name
-    /// (case-insensitively), or the characteristics are invalid.
+    /// If the name is not made of ASCII letters, digits and `_`, is `gnd`, `ref`, `0` or another
+    /// pin's name (case-insensitively), or the characteristics are invalid.
     #[track_caller]
     pub fn output(self: Box<Self>, pin: &str, output: OutputCharacteristics) -> Box<Self> {
         self.pin(pin, Some(output), None)
@@ -114,14 +113,10 @@ impl CosimDevice {
         output: Option<OutputCharacteristics>,
         input: Option<InputCharacteristics>,
     ) -> Box<Self> {
-        assert!(
-            is_identifier(name),
-            "a pin name may only contain ASCII letters, digits and '_': {name:?}"
-        );
-        assert!(
-            !name.eq_ignore_ascii_case(Self::GND) && find_pin(&self.pins, name).is_none(),
-            "the device {:?} already has a pin {name:?}",
-            self.name
+        assert_subcircuit_pin(
+            name,
+            self.pins.iter().map(|pin| pin.name.as_str()),
+            &format!("the device {:?}", self.name),
         );
         if let Some(output) = &output {
             output.validate();
@@ -163,42 +158,23 @@ impl CosimDevice {
     }
 
     fn subcircuit(&self) -> String {
-        let name = self.subcircuit_name();
         let ports: Vec<&str> = self.pins.iter().map(|p| p.name.as_str()).collect();
-        let mut text = format!(
-            ".subckt {name} {} {SUBCIRCUIT_REFERENCE}\n",
-            ports.join(" ")
-        );
+        let mut body = String::new();
         for pin in &self.pins {
             let p = &pin.name;
             if let Some(output) = &pin.output {
-                text.push_str(&format!(
-                    "VD_{p} d_{p} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
+                let (drive, enable) = (internal_node(p, "d"), internal_node(p, "e"));
+                body.push_str(&format!(
+                    "VD_{p} {drive} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n\
+                     VE_{p} {enable} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
                 ));
-                text.push_str(&format!(
-                    "VE_{p} e_{p} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
-                ));
-                text.push_str(&output.switch_lines(
-                    &format!("_{p}"),
-                    &format!("d_{p}"),
-                    p,
-                    &format!("e_{p}"),
-                ));
+                body.push_str(&output.switch_lines(&format!("_{p}"), &drive, p, &enable));
             }
             if let Some(input) = &pin.input {
-                for element in input.load_elements(p, SUBCIRCUIT_REFERENCE) {
-                    text.push_str(&format!(
-                        "{}{}_{p} {} {}\n",
-                        element.device,
-                        element.suffix,
-                        element.nodes.join(" "),
-                        element.args
-                    ));
-                }
+                body.push_str(&input.load_lines(p));
             }
         }
-        text.push_str(&format!(".ends {name}\n"));
-        text
+        subcircuit_text(&self.subcircuit_name(), &ports, &body)
     }
 
     /// The name of the `EXTERNAL` source of a pin (`VD_p` drive, `VE_p` enable) as the callbacks
@@ -223,10 +199,10 @@ impl Part for CosimDevice {
         self.name.clone()
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        let name = self.subcircuit_name();
-        Some(SpicePartInfo::element(
-            SpiceElement::new('X', self.pin_ids(), name.clone())
-                .with_model(ModelSource::inline(name, self.subcircuit())),
+        Some(subcircuit_part(
+            self.pin_ids(),
+            self.subcircuit_name(),
+            self.subcircuit(),
         ))
     }
     fn cosim_device(&self) -> Option<&CosimDevice> {
@@ -250,9 +226,9 @@ mod tests {
         assert_eq!(
             device.subcircuit(),
             ".subckt cuprite_cosim_mcu pa0 adc ref\n\
-             VD_pa0 d_pa0 ref DC 0 EXTERNAL\n\
-             VE_pa0 e_pa0 ref DC 0 EXTERNAL\n\
-             SO_pa0 d_pa0 pa0 e_pa0 ref hiz_pa0\n\
+             VD_pa0 pa0#d ref DC 0 EXTERNAL\n\
+             VE_pa0 pa0#e ref DC 0 EXTERNAL\n\
+             SO_pa0 pa0#d pa0 pa0#e ref hiz_pa0\n\
              .model hiz_pa0 SW( vt=0.5 vh=0 ron=50 roff=1e9 )\n\
              CC_adc adc ref 1e-11\n\
              .ends cuprite_cosim_mcu\n"
@@ -264,6 +240,23 @@ mod tests {
     #[should_panic(expected = "already has a pin \"GND\"")]
     fn test_pin_named_gnd() {
         let _ = CosimDevice::new("mcu").input("GND", InputCharacteristics::cmos(3.3));
+    }
+
+    /// The node of the pin `d_p` is not the drive node of the output `p` (both were `d_p`).
+    #[test]
+    fn test_internal_nodes_apart_from_pins() {
+        let device = CosimDevice::new("mcu")
+            .output("p", OutputCharacteristics::cmos(3.3))
+            .input("d_p", InputCharacteristics::cmos(3.3));
+        let text = device.subcircuit();
+        assert!(text.contains("VD_p p#d ref DC 0 EXTERNAL\n"), "{text}");
+        assert!(text.contains("CC_d_p d_p ref 5e-12\n"), "{text}");
+    }
+
+    #[test]
+    #[should_panic(expected = "the pin name \"0\" is reserved")]
+    fn test_pin_named_0() {
+        let _ = CosimDevice::new("mcu").output("0", OutputCharacteristics::cmos(3.3));
     }
 
     #[test]
