@@ -184,8 +184,8 @@ fn tracking(resolver: &Resolver) -> TokenStream {
     let vars = &resolver.env_vars;
     quote! {
         const _: () = {
-            #( const _: &[u8] = include_bytes!(#files); )*
-            #( const _: Option<&str> = option_env!(#vars); )*
+            #( const _: &[u8] = ::core::include_bytes!(#files); )*
+            #( const _: ::core::option::Option<&str> = ::core::option_env!(#vars); )*
         };
     }
 }
@@ -271,7 +271,7 @@ fn generate(
                     #name
                 }
             },
-            quote!(#value.to_string()),
+            quote!(::std::string::String::from(#value)),
         ),
     };
     let default_impl = matches!(part.value, Value::Fixed(_)).then(|| {
@@ -288,14 +288,19 @@ fn generate(
     let groups = part
         .internal_connections
         .iter()
-        .map(|group| quote!(vec![#(#group.to_string()),*]));
+        .map(|group| quote!(::std::vec![#(::std::string::String::from(#group)),*]));
     let kicad_fn = kicad_fn(part, &krate);
     let spice_fn = spice_fn(part, &krate);
 
     quote! {
         #(#attrs)*
         #(#[doc = #doc])*
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(
+            ::core::fmt::Debug,
+            ::core::clone::Clone,
+            ::core::cmp::PartialEq,
+            ::core::cmp::Eq,
+        )]
         #vis struct #name #fields
 
         impl #name {
@@ -308,17 +313,17 @@ fn generate(
         #default_impl
 
         impl #krate::parts::Part for #name {
-            fn get_ref_base_name(&self) -> String {
-                #ref_base.to_string()
+            fn get_ref_base_name(&self) -> ::std::string::String {
+                ::std::string::String::from(#ref_base)
             }
-            fn pin_ids(&self) -> Vec<String> {
-                Self::PINS.iter().map(|id| id.to_string()).collect()
+            fn pin_ids(&self) -> ::std::vec::Vec<::std::string::String> {
+                Self::PINS.iter().copied().map(::std::string::String::from).collect()
             }
-            fn value(&self) -> String {
+            fn value(&self) -> ::std::string::String {
                 #value_fn
             }
-            fn internal_connections(&self) -> Vec<Vec<String>> {
-                vec![#(#groups),*]
+            fn internal_connections(&self) -> ::std::vec::Vec<::std::vec::Vec<::std::string::String>> {
+                ::std::vec![#(#groups),*]
             }
             #kicad_fn
             #spice_fn
@@ -333,35 +338,35 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let footprint = match &kicad.footprint {
         Some(id) => {
             let (library, name) = (id.library(), id.name());
-            quote!(Some(#krate::kicad::LibId::new(#library, #name).unwrap()))
+            quote!(::core::option::Option::Some(#krate::kicad::LibId::new(#library, #name).unwrap()))
         }
-        None => quote!(None),
+        None => quote!(::core::option::Option::None),
     };
     let (symbol_library, symbol_name) = (kicad.symbol.library(), kicad.symbol.name());
     let pin_entries = part.pins.iter().map(|pin| {
         let id = &pin.id;
         let pad = &pin.pad;
         let pin_name = match &pin.name {
-            Some(n) => quote!(Some(#n)),
-            None => quote!(None),
+            Some(n) => quote!(::core::option::Option::Some(#n)),
+            None => quote!(::core::option::Option::None),
         };
         let pin_type = format_ident!("{}", pin_type_variant(pin.electrical_type.as_str()));
         quote! {
-            (#id.to_string(), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::kicad::PinType::#pin_type))
+            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::kicad::PinType::#pin_type))
         }
     });
     let field_entries = kicad
         .fields
         .iter()
-        .map(|(key, value)| quote!((#key.to_string(), #value.to_string())));
+        .map(|(key, value)| quote!((::std::string::String::from(#key), ::std::string::String::from(#value))));
     let (exclude_from_bom, exclude_from_board) = (kicad.exclude_from_bom, kicad.exclude_from_board);
     Some(quote! {
-        fn kicad(&self) -> Option<#krate::kicad::KicadPartInfo> {
-            Some(#krate::kicad::KicadPartInfo {
+        fn kicad(&self) -> ::core::option::Option<#krate::kicad::KicadPartInfo> {
+            ::core::option::Option::Some(#krate::kicad::KicadPartInfo {
                 footprint: #footprint,
                 pins: [#(#pin_entries),*].into_iter().collect(),
-                lib_source: Some(#krate::kicad::LibId::new(#symbol_library, #symbol_name).unwrap()),
-                fields: vec![#(#field_entries),*],
+                lib_source: ::core::option::Option::Some(#krate::kicad::LibId::new(#symbol_library, #symbol_name).unwrap()),
+                fields: ::std::vec![#(#field_entries),*],
                 flags: #krate::kicad::PartFlags {
                     dnp: false,
                     exclude_from_bom: #exclude_from_bom,
@@ -392,8 +397,8 @@ fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
         }
     };
     Some(quote! {
-        fn spice(&self) -> Option<#krate::spice::SpicePartInfo> {
-            Some(#body)
+        fn spice(&self) -> ::core::option::Option<#krate::spice::SpicePartInfo> {
+            ::core::option::Option::Some(#body)
         }
     })
 }
@@ -500,8 +505,8 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 };
                 lines.push(format!(
                     "| `{}` | {} | {} | {} | {} |{port}",
-                    pin.id,
-                    pin.pad,
+                    escape(&pin.id),
+                    escape(&pin.pad),
                     pin.name
                         .as_deref()
                         .map_or("".into(), |n| format!("`{}`", escape(n))),
@@ -583,4 +588,44 @@ fn is_identifier(text: &str) -> bool {
         && text != "_"
         && syn::parse_str::<syn::Ident>(&text.to_ascii_uppercase()).is_ok()
         && !text.eq_ignore_ascii_case("PINS")
+}
+
+#[cfg(test)]
+mod tests {
+    use cuprite_wire_kicad_lib::{
+        part::{KicadDef, PinDef},
+        symbol::ElectricalType,
+    };
+
+    use super::*;
+
+    /// `|` in any cell of the pin table is escaped, so it does not split the cell.
+    #[test]
+    fn test_doc_pin_table_escapes_pipes() {
+        let part = PartDef {
+            kicad: Some(KicadDef {
+                symbol: "lib:PART".parse().unwrap(),
+                footprint: None,
+                fields: Vec::new(),
+                exclude_from_bom: false,
+                exclude_from_board: false,
+                description: None,
+                datasheet: None,
+            }),
+            ref_base: "U".into(),
+            value: Value::Fixed("PART".into()),
+            pins: vec![PinDef {
+                id: "a|b".into(),
+                pad: "1|2".into(),
+                name: Some("c|d".into()),
+                electrical_type: ElectricalType::Passive,
+                unit: 0,
+            }],
+            internal_connections: Vec::new(),
+            spice: SpiceDef::Unsupported,
+        };
+        let lines = doc_lines(&part);
+        let row = lines.last().unwrap();
+        assert_eq!(row, r" | `a\|b` | 1\|2 | `c\|d` | passive | - |");
+    }
 }

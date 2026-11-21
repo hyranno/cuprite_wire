@@ -61,6 +61,25 @@ impl Spans {
     fn has(&self, key: OptionKey) -> bool {
         self.options.iter().any(|(k, _)| *k == key)
     }
+
+    /// An error at `span` if the `library` or `name` of the model `element` is not written;
+    /// `message` makes it from the key.
+    fn require_library_and_name(
+        &self,
+        element: usize,
+        span: Span,
+        message: impl Fn(&str) -> String,
+    ) -> syn::Result<()> {
+        for (field, key) in [
+            (BindingField::Library, "library"),
+            (BindingField::Name, "name"),
+        ] {
+            if !self.has(OptionKey::Model { element, field }) {
+                return Err(syn::Error::new(span, message(key)));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `#[attrs] vis struct Name { key: value, ... }` of `kicad_part!`.
@@ -214,17 +233,10 @@ impl Parse for SpicePartInput {
             },
             &mut spans,
         )?;
-        for (field, what) in [
-            (BindingField::Library, "library: \"path\""),
-            (BindingField::Name, "name: \"NAME\""),
-        ] {
-            if !spans.has(OptionKey::Model { element: 0, field }) {
-                return Err(syn::Error::new(
-                    header.name.span(),
-                    format!("`{what}` is required"),
-                ));
-            }
-        }
+        spans.require_library_and_name(0, header.name.span(), |key| match key {
+            "library" => "`library: \"path\"` is required".into(),
+            _ => "`name: \"NAME\"` is required".into(),
+        })?;
         end(input)?;
         Ok(SpicePartInput {
             header,
@@ -254,17 +266,9 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
             },
             spans,
         )?;
-        for (field, what) in [
-            (BindingField::Library, "library"),
-            (BindingField::Name, "name"),
-        ] {
-            if !spans.has(OptionKey::Model { element, field }) {
-                return Err(syn::Error::new(
-                    block,
-                    format!("`{what}` is required in `sim`"),
-                ));
-            }
-        }
+        spans.require_library_and_name(element, block, |key| {
+            format!("`{key}` is required in `sim`")
+        })?;
         spans.models.push(block);
         bindings.push(binding);
         Ok(())
@@ -272,13 +276,7 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
     if input.peek(syn::token::Bracket) {
         let list;
         bracketed!(list in input);
-        while !list.is_empty() {
-            one(&list)?;
-            if list.is_empty() {
-                break;
-            }
-            list.parse::<Token![,]>()?;
-        }
+        comma_separated(&list, one)?;
     } else {
         one(input)?;
     }
@@ -293,7 +291,7 @@ fn parse_keys(
     spans: &mut Spans,
 ) -> syn::Result<()> {
     let mut seen: Vec<String> = Vec::new();
-    while !content.is_empty() {
+    comma_separated(content, |content| {
         let key: Ident = content.parse()?;
         let key_name = key.to_string();
         if seen.contains(&key_name) {
@@ -310,10 +308,22 @@ fn parse_keys(
             .token_tree()
             .map_or_else(|| content.span(), |(tree, _)| tree.span());
         spans.options.extend(handle(&key, content, span)?);
-        if content.is_empty() {
+        Ok(())
+    })
+}
+
+/// Calls `item` for each item of the comma-separated list filling `input`; a trailing comma is
+/// allowed.
+fn comma_separated(
+    input: ParseStream,
+    mut item: impl FnMut(ParseStream) -> syn::Result<()>,
+) -> syn::Result<()> {
+    while !input.is_empty() {
+        item(input)?;
+        if input.is_empty() {
             break;
         }
-        content.parse::<Token![,]>()?;
+        input.parse::<Token![,]>()?;
     }
     Ok(())
 }
@@ -346,15 +356,10 @@ fn common_key(
         "internal_connections" => {
             let groups;
             bracketed!(groups in content);
-            let mut out = Vec::new();
-            while !groups.is_empty() {
-                out.push(string_list(&groups)?);
-                if groups.is_empty() {
-                    break;
-                }
-                groups.parse::<Token![,]>()?;
-            }
-            options.internal_connections = out;
+            options.internal_connections =
+                Punctuated::<_, Token![,]>::parse_terminated_with(&groups, string_list)?
+                    .into_iter()
+                    .collect();
             Some(OptionKey::InternalConnections)
         }
         "sim_model" => {
