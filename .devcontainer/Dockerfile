@@ -33,5 +33,15 @@ RUN \
   chmod +x /usr/local/bin/ngspice
 
 RUN rustup component add rustfmt clippy rust-analyzer
+# Refactoring aids (not run by CI): duplicate detection, unused dependencies and the public API.
+# cargo-public-api builds rustdoc JSON, which needs a nightly toolchain.
+RUN \
+  cargo install --locked \
+    similarity-rs@0.5.0 \
+    cargo-shear@1.14.1 \
+    cargo-public-api@0.52.0 \
+  && \
+  rustup toolchain install nightly --profile minimal && \
+  rm -rf "$CARGO_HOME/registry"
 # To deny claude from writing to the cargo config
 RUN touch "$CARGO_HOME/config.toml"

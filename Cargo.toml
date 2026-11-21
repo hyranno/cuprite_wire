@@ -40,6 +40,10 @@ exclude = [
 [package.metadata.docs.rs]
 features = ["shared-ngspice"]
 
+[package.metadata.cargo-shear]
+# Compile-fail cases for trybuild (tests/kicad_part_errors.rs), not modules.
+ignored-paths = ["tests/ui/*.rs"]
+
 [dependencies]
 cuprite_wire_kicad_lib.workspace = true
 cuprite_wire_macros.workspace = true

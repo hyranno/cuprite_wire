@@ -51,6 +51,19 @@ others get the same environment.
    `CUPRITE_VENDOR_MODELS_DIR=/path/to/models cargo test --features vendor-models --test vendor_models`
    (see `doc/spice_part_macro.md`).
 
+## Refactoring aids
+
+The devcontainer also has these tools. CI does not run them, and their findings are hints to
+review, not rules.
+
+- `similarity-rs --skip-test -m 10 -t 0.9 .` lists similar functions. Many hits are thin
+  wrappers (`foo` / `foo_named`) or trait implementations in tests; look for the longer ones.
+- `cargo shear` finds unused or misplaced dependencies and source files that no module includes.
+- `cargo public-api -p cuprite_wire --simplified` lists the public API (it switches to the nightly
+  toolchain for rustdoc JSON by itself). Use it to spot items that should not be public. To compare
+  with a release, save the list for both versions and diff the files; its own `diff` subcommand
+  checks out each commit in the working tree.
+
 ## Developer documentation
 
 | Document | Contents |
