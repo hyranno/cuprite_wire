@@ -462,6 +462,7 @@ impl VerilatedModel {
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum VerilatorError {
     Io(io::Error),
     /// A step of the build failed. Its directory is kept (the build directory, or the current

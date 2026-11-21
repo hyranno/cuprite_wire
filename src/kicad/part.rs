@@ -48,6 +48,7 @@ pub struct KicadPartInfo {
 
 /// A mismatch between the pin IDs of a part and its KiCad pin information.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum PinInfoProblem {
     /// A pin ID of the part has no entry.
     Missing { pin_id: String },

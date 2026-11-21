@@ -38,7 +38,7 @@ pub mod kicad;
 pub mod naming;
 pub mod netlist;
 pub mod parts;
-pub mod sexpr;
+mod sexpr;
 pub mod spice;
 pub mod subcircuit;
 pub mod trace;

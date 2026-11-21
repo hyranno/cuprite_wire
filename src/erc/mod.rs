@@ -115,6 +115,7 @@ impl Default for PinMap {
 
 /// The rules other than pin conflicts, whose severities are given by [`PinMap`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
 pub enum ErcRule {
     /// A pin is not connected to anything (`pin_not_connected`).
     PinNotConnected,
