@@ -7,6 +7,9 @@ repository.workspace = true
 keywords = ["embedded-hal", "spice", "simulation", "firmware", "testing"]
 categories = ["simulation", "embedded", "development-tools::testing"]
 description = "embedded-hal implementations that run firmware against a cuprite_wire circuit simulated with ngspice"
+# The tests and the example are not published, as in cuprite_wire (the example includes the test
+# bench of cuprite_wire's examples by path).
+exclude = ["examples/", "tests/"]
 
 [dependencies]
 cuprite_wire = { workspace = true, features = ["shared-ngspice"] }
