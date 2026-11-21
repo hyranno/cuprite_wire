@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (tool "cuprite_wire 0.1.0"))
+  (design (tool "cuprite_wire 0.2.0"))
   (components
     (comp (ref "X1")
       (value "custom")

@@ -10,6 +10,8 @@ break the API).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-21
+
 ### Added
 
 - `cuprite_wire_embedded_hal`: a new crate implementing the `embedded-hal` 1.0 digital and PWM
@@ -27,6 +29,8 @@ break the API).
   and `InputCharacteristics::decode` to read simulated voltages back as logic levels.
 - Typed subcircuit interfaces: the `subcircuit::Interface` trait and `#[derive(Interface)]`.
 - `Simulation::expect_value`, which panics with the output of ngspice when a value is missing.
+- All public items are documented, and the documentation on docs.rs shows which items need a
+  feature (such as `shared-ngspice`).
 - Pin name constants `IndependentSource::P` / `N` and `Ammeter::P` / `N`.
 - `circuit::NodeIndex` is re-exported, so naming it no longer needs a dependency on `petgraph`.
 - KiCad value notation is converted to SPICE's as KiCad does (SI prefixes with `M` for mega, the
@@ -35,6 +39,7 @@ break the API).
 
 ### Changed
 
+- The minimum supported Rust version (MSRV) is 1.89, declared as `rust-version` and checked in CI.
 - **Breaking:** `SubcircuitGenerator` has an `Interface` type. The generator gets its interface
   nodes in `construct_subcircuit` and returns them; `instantiate_subcircuit*` returns the outer
   nodes in the same type instead of a map. `check_subcircuit` takes the pin types in the interface
@@ -84,5 +89,6 @@ Initial release: describing circuits in Rust, ERC, export to KiCad 9 (pcbnew) an
 simulation with ngspice, and parts generated from KiCad libraries and SPICE models
 (`kicad_part!`, `spice_part!`).
 
-[Unreleased]: https://github.com/hyranno/cuprite_wire/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hyranno/cuprite_wire/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hyranno/cuprite_wire/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hyranno/cuprite_wire/releases/tag/v0.1.0
