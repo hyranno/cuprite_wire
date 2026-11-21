@@ -4,9 +4,10 @@ use super::*;
 use crate::{
     basic::{OpAmpSot23, Resistor0603},
     circuit::CircuitBuilder,
+    kicad::{KicadPartInfo, KicadPinInfo},
     naming::NetLabel,
     subcircuit::{Interface, SubcircuitGenerator},
-    test_parts::rc_filter,
+    test_parts::{CustomPart, rc_filter},
 };
 
 fn erc_with<B>(circuit: &CircuitBuilder<B>, options: &B, settings: &ErcSettings) -> ErcReport {
@@ -110,7 +111,7 @@ fn test_power_pins_need_a_power_flag() {
             error(
                 "net \"VCC\": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)"
             ),
-            error("net \"VCC\": U1.vcc (power_in) is not connected to anything"),
+            warning("label \"VCC\" is connected only to U1.vcc (power_in)"),
         ]
     );
     // The trace goes through the subcircuit instantiation to the part.
@@ -118,16 +119,105 @@ fn test_power_pins_need_a_power_flag() {
 }
 
 #[test]
-fn test_unconnected_pin() {
+fn test_label_single_pin() {
+    // A labeled pin is reported as such instead of as not connected.
     let report = erc(&rc_filter());
     assert_eq!(
         summary(&report),
         vec![
-            error("net \"/IN\": R1.1 (passive) is not connected to anything"),
-            error("net \"GND\": C1.2 (passive) is not connected to anything"),
+            warning("label \"/IN\" is connected only to R1.1 (passive)"),
+            warning("label \"GND\" is connected only to C1.2 (passive)"),
         ]
     );
-    assert!(report.has_errors());
+    // Traced to the label, with a note at the pin.
+    let diagnostic = &report.violations[0].diagnostic;
+    assert_eq!(diagnostic.trace.0[0].line(), 48);
+    assert_eq!(diagnostic.notes[0].message, "R1.1 (passive) is here");
+    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 46);
+
+    // A no-connect mark or an allow mark silences it.
+    let mut circuit = CircuitBuilder::new();
+    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    circuit.label(r["1"], NetLabel::global("A"));
+    circuit.label(r["2"], NetLabel::global("B"));
+    circuit.no_connect(r["1"]);
+    assert_eq!(
+        summary(&erc(&circuit)),
+        vec![warning("label \"B\" is connected only to R1.2 (passive)")]
+    );
+    circuit.erc_allow(r["2"], ErcRule::LabelSinglePin);
+    erc(&circuit).assert_clean();
+}
+
+/// A part with power pins named `VCC`, `GND` and `AGND`, and a passive `GND` pin.
+fn ground_pins_part() -> CustomPart {
+    let pins = [
+        ("vcc", "1", "VCC", PinType::PowerIn),
+        ("gnd", "2", "GND", PinType::PowerIn),
+        ("agnd", "3", "AGND", PinType::PowerIn),
+        ("shield", "4", "GND", PinType::Passive),
+    ];
+    CustomPart {
+        ref_base_name: "U",
+        pin_ids: pins.iter().map(|pin| pin.0).collect(),
+        internal_connections: vec![],
+        kicad: Some(KicadPartInfo {
+            pins: pins
+                .into_iter()
+                .map(|(id, pad, name, pin_type)| {
+                    (id.to_string(), KicadPinInfo::new(pad, Some(name), pin_type))
+                })
+                .collect(),
+            ..Default::default()
+        }),
+        spice: None,
+    }
+}
+
+#[test]
+fn test_ground_pin_not_ground() {
+    let build = |ground: &str| {
+        let mut circuit = CircuitBuilder::new();
+        let u = circuit.instantiate_part(Box::new(ground_pins_part()));
+        circuit.label(u["vcc"], NetLabel::global("VCC"));
+        circuit.power_flag(u["vcc"]);
+        circuit.label(u["gnd"], NetLabel::global(ground));
+        circuit.power_flag(u["gnd"]);
+        // The passive pin is not checked.
+        circuit.connect(u["agnd"], u["vcc"]);
+        circuit.connect(u["shield"], u["vcc"]);
+        (circuit, u)
+    };
+    let (mut circuit, u) = build("GND");
+    let report = erc(&circuit);
+    assert_eq!(
+        summary(&report),
+        vec![warning(
+            "ground pin \"AGND\" U1.agnd (power_in) is on net \"VCC\", which is not a ground net, while another power pin of the part is on one"
+        )]
+    );
+    circuit.erc_allow(u["agnd"], ErcRule::GroundPinNotGround);
+    erc(&circuit).assert_clean();
+    // Nothing is reported if no power pin of the part is on a ground net.
+    erc(&build("0V").0).assert_clean();
+}
+
+#[test]
+fn test_ground_names() {
+    for name in [
+        "GND",
+        "agnd",
+        "/sub/GND_A",
+        "EARTH",
+        "Earth_1",
+        "VSS",
+        "vssa",
+    ] {
+        assert!(is_ground_name(name), "{name}");
+    }
+    for name in ["0V", "/sub/EARTH", "VSSD", "VCC", "VEE"] {
+        assert!(!is_ground_name(name), "{name}");
+    }
 }
 
 #[test]
@@ -299,7 +389,7 @@ fn test_similar_net_names() {
     assert_eq!(
         summary(&report),
         vec![
-            error("net \"out\": R1.1 (passive) is not connected to anything"),
+            warning("label \"out\" is connected only to R1.1 (passive)"),
             warning("net names \"out\" and \"OUT\" differ only in case"),
         ]
     );
@@ -307,14 +397,16 @@ fn test_similar_net_names() {
 
 #[test]
 fn test_severities() {
-    let settings =
-        ErcSettings::default().with_severity(ErcRule::PinNotConnected, Severity::Warning);
-    let report = erc_with(&rc_filter(), &(), &settings);
-    assert!(!report.has_errors());
+    let report = erc(&rc_filter());
     assert_eq!(report.warnings().count(), 2);
     report.assert_no_errors();
 
-    let settings = settings.with_severity(ErcRule::PinNotConnected, Severity::Ignore);
+    let settings = ErcSettings::default().with_severity(ErcRule::LabelSinglePin, Severity::Error);
+    let report = erc_with(&rc_filter(), &(), &settings);
+    assert!(report.has_errors());
+    assert_eq!(report.errors().count(), 2);
+
+    let settings = settings.with_severity(ErcRule::LabelSinglePin, Severity::Ignore);
     erc_with(&rc_filter(), &(), &settings).assert_clean();
 }
 
@@ -364,7 +456,9 @@ fn test_display() {
     let report = erc(&rc_filter());
     let text = report.to_string();
     assert!(
-        text.starts_with("error: net \"/IN\": R1.1 (passive) is not connected to anything\n  at src/test_parts.rs:"),
+        text.starts_with(
+            "warning: label \"/IN\" is connected only to R1.1 (passive)\n  at src/test_parts.rs:"
+        ),
         "{text}"
     );
 }

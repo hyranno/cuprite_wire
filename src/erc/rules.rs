@@ -1,7 +1,8 @@
 //! The checks made on each net, as pure functions of the electrical types of its pins.
 //!
-//! They follow KiCad 9's `ERC_TESTER::TestPinToPin` (`eeschema/erc/erc.cpp`) and
-//! `CONNECTION_GRAPH::ercCheckNoConnects` (`eeschema/connection_graph.cpp`).
+//! They follow KiCad 10's `ERC_TESTER::TestPinToPin` (`eeschema/erc/erc.cpp`),
+//! `CONNECTION_GRAPH::ercCheckNoConnects` and `CONNECTION_GRAPH::ercCheckLabels`
+//! (`eeschema/connection_graph.cpp`).
 
 use std::collections::HashSet;
 
@@ -43,6 +44,18 @@ pub(crate) enum NetFinding {
     NoConnectConnected {
         pins: Vec<usize>,
     },
+    LabelSinglePin {
+        pin: usize,
+    },
+}
+
+/// What a net has besides its pins.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct NetFlags {
+    /// The net has a no-connect mark.
+    pub no_connect: bool,
+    /// The net has a label.
+    pub labeled: bool,
 }
 
 /// Pin types driving a net without `power_in` pins.
@@ -79,9 +92,13 @@ fn is_stacked(a: &NetPin, b: &NetPin) -> bool {
     a.stack.is_some() && a.stack == b.stack && a.pin_type == b.pin_type
 }
 
-/// Checks one net. `pins` are its part pins followed by its virtual pins, and `no_connect` tells
-/// whether the net has a no-connect mark. Findings are in a deterministic order.
-pub(crate) fn check_net(pins: &[NetPin], no_connect: bool, pin_map: &PinMap) -> Vec<NetFinding> {
+/// Checks one net. `pins` are its part pins followed by its virtual pins. Findings are in a
+/// deterministic order.
+pub(crate) fn check_net(pins: &[NetPin], flags: NetFlags, pin_map: &PinMap) -> Vec<NetFinding> {
+    let NetFlags {
+        no_connect,
+        labeled,
+    } = flags;
     let mut findings = pin_to_pin(pins, pin_map);
 
     // Pins needing a driver. A net with a `power_in` pin is a power net, which only `power_out`
@@ -119,8 +136,11 @@ pub(crate) fn check_net(pins: &[NetPin], no_connect: bool, pin_map: &PinMap) -> 
             findings.push(NetFinding::NoConnectConnected { pins: unique });
         }
     } else if unique.len() == 1 && !pins.iter().any(NetPin::is_virtual) {
+        // Like KiCad, a label counts as a connection of the pin, and is reported instead.
         let pin = unique[0];
-        if !matches!(pins[pin].pin_type, PinType::NoConnect | PinType::Free) {
+        if labeled {
+            findings.push(NetFinding::LabelSinglePin { pin });
+        } else if !matches!(pins[pin].pin_type, PinType::NoConnect | PinType::Free) {
             findings.push(NetFinding::PinNotConnected { pin });
         }
     }
@@ -193,12 +213,20 @@ mod tests {
     }
 
     fn check(pins: &[NetPin]) -> Vec<NetFinding> {
-        check_net(pins, false, &PinMap::default())
+        check_net(pins, NetFlags::default(), &PinMap::default())
+    }
+
+    fn check_with(pins: &[NetPin], no_connect: bool, labeled: bool) -> Vec<NetFinding> {
+        let flags = NetFlags {
+            no_connect,
+            labeled,
+        };
+        check_net(pins, flags, &PinMap::default())
     }
 
     #[test]
     fn test_pin_map_is_kicads_default() {
-        // erc.pin_map of a KiCad 9 project, in the order of PinType::ALL.
+        // erc.pin_map of a KiCad 9 or 10 project, in the order of PinType::ALL.
         let kicad = [
             [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2],
             [0, 2, 0, 1, 0, 0, 1, 0, 2, 2, 2, 2],
@@ -362,16 +390,42 @@ mod tests {
 
     #[test]
     fn test_no_connect_mark() {
-        let pin_map = PinMap::default();
         // The mark silences unconnected and undriven pins.
-        assert_eq!(check_net(&pins(&[Input]), true, &pin_map), vec![]);
+        assert_eq!(check_with(&pins(&[Input]), true, false), vec![]);
         assert_eq!(
-            check_net(&pins(&[Input, Passive]), true, &pin_map),
+            check_with(&pins(&[Input, Passive]), true, false),
             vec![NetFinding::NoConnectConnected { pins: vec![0, 1] }]
         );
         // Virtual pins do not count as connections.
         assert_eq!(
-            check_net(&[pins(&[Passive])[0], virtual_pin(Output)], true, &pin_map),
+            check_with(&[pins(&[Passive])[0], virtual_pin(Output)], true, false),
+            vec![]
+        );
+        // Nor does a label on a single pin.
+        assert_eq!(check_with(&pins(&[Passive]), true, true), vec![]);
+    }
+
+    #[test]
+    fn test_label_single_pin() {
+        // Reported instead of the unconnected pin, for any pin type.
+        for pin_type in [Passive, NoConnect, Free] {
+            assert_eq!(
+                check_with(&pins(&[pin_type]), false, true),
+                vec![NetFinding::LabelSinglePin { pin: 0 }],
+                "{pin_type}"
+            );
+        }
+        let stacked = [NetPin {
+            pin_type: Passive,
+            stack: Some((0, 0)),
+        }; 2];
+        assert_eq!(
+            check_with(&stacked, false, true),
+            vec![NetFinding::LabelSinglePin { pin: 0 }]
+        );
+        assert_eq!(check_with(&pins(&[Passive, Passive]), false, true), vec![]);
+        assert_eq!(
+            check_with(&[pins(&[Passive])[0], virtual_pin(PowerOut)], false, true),
             vec![]
         );
     }

@@ -16,10 +16,17 @@ break the API).
   net out of the report, like excluding a KiCad ERC marker.
 - `ErcRule::PinToPin`: its severity caps those of the pin map (`Warning` reports pin conflicts as
   warnings at most, `Ignore` turns them off).
+- The ERC rules of KiCad 10 `ErcRule::LabelSinglePin` (a labeled net with only one pin) and
+  `ErcRule::GroundPinNotGround` (a power pin named like a ground, such as `GND`, not on a ground
+  net while another power pin of the part is), both warnings by default.
+- `Net::labeled`: whether the net name is given by a label.
 
 ### Changed
 
 - `ErcMark` is `#[non_exhaustive]`.
+- ERC follows KiCad 10: the only pin of a labeled net is reported as `LabelSinglePin` (a warning)
+  instead of `PinNotConnected` (an error).
+- `Net` has a new public field (`labeled`).
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.

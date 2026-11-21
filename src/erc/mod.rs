@@ -1,4 +1,4 @@
-//! Electrical rules check (ERC) of a netlist, following the netlist-level rules of KiCad 9's ERC.
+//! Electrical rules check (ERC) of a netlist, following the netlist-level rules of KiCad 10's ERC.
 //!
 //! The electrical types of pins come from [`Part::pin_types`](crate::parts::Part::pin_types).
 //! Marks attached to nodes stand for the schematic items KiCad uses: a no-connect flag
@@ -32,7 +32,7 @@ use crate::{
     parts::PinType,
     trace::Trace,
 };
-use rules::{NetFinding, NetPin, check_net};
+use rules::{NetFinding, NetFlags, NetPin, check_net};
 
 /// A mark attached to a node for ERC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +89,7 @@ impl PinMap {
 }
 
 impl Default for PinMap {
-    /// KiCad 9's default (`erc.pin_map` of a new project).
+    /// KiCad's default (`erc.pin_map` of a new project, the same in KiCad 9 and 10).
     fn default() -> Self {
         use PinType::*;
         let mut map = PinMap([[Severity::Ignore; 12]; 12]);
@@ -156,6 +156,12 @@ pub enum ErcRule {
     MultipleNetNames,
     /// A labeled net has no part pins (`label_dangling`, reported by [`Netlist`] too).
     LabelOnlyNet,
+    /// A labeled net has only one pin (`isolated_pin_label`, KiCad 10). Reported instead of
+    /// [`ErcRule::PinNotConnected`].
+    LabelSinglePin,
+    /// A power pin named like a ground (`GND`, ...) is not on a ground net while another power pin
+    /// of the part is (`ground_pin_not_ground`, KiCad 10).
+    GroundPinNotGround,
 }
 
 impl ErcRule {
@@ -171,12 +177,14 @@ impl ErcRule {
             | ErcRule::VirtualPinDangling
             | ErcRule::SimilarNetNames
             | ErcRule::MultipleNetNames
-            | ErcRule::LabelOnlyNet => Severity::Warning,
+            | ErcRule::LabelOnlyNet
+            | ErcRule::LabelSinglePin
+            | ErcRule::GroundPinNotGround => Severity::Warning,
         }
     }
 }
 
-/// The severities ERC uses; the default is KiCad 9's (see [`ErcRule::default_severity`]).
+/// The severities ERC uses; the default is KiCad 10's (see [`ErcRule::default_severity`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErcSettings {
     /// The severities of pin conflicts.
@@ -301,6 +309,22 @@ pub enum ErcViolationKind {
         /// The first net name that differs from it only in case.
         other: String,
     },
+    /// [`ErcRule::LabelSinglePin`]. Traced to the label, with a note at the pin.
+    LabelSinglePin {
+        /// The name of the net.
+        net: String,
+        /// The only pin of the net.
+        pin: ErcPin,
+    },
+    /// [`ErcRule::GroundPinNotGround`]. Traced to the part.
+    GroundPinNotGround {
+        /// The name of the net the pin is on.
+        net: String,
+        /// The power pin.
+        pin: ErcPin,
+        /// The name of the pin.
+        pin_name: String,
+    },
     /// A warning of the netlist conversion ([`ErcRule::MultipleNetNames`] or [`ErcRule::LabelOnlyNet`]).
     Netlist(CircuitWarningKind),
 }
@@ -342,6 +366,13 @@ impl fmt::Display for ErcViolationKind {
             ErcViolationKind::SimilarNetNames { name, other } => {
                 write!(f, "net names {name:?} and {other:?} differ only in case")
             }
+            ErcViolationKind::LabelSinglePin { net, pin } => {
+                write!(f, "label {net:?} is connected only to {pin}")
+            }
+            ErcViolationKind::GroundPinNotGround { net, pin, pin_name } => write!(
+                f,
+                "ground pin {pin_name:?} {pin} is on net {net:?}, which is not a ground net, while another power pin of the part is on one"
+            ),
             ErcViolationKind::Netlist(kind) => kind.fmt(f),
         }
     }
@@ -445,7 +476,9 @@ impl Netlist {
             settings,
             violations: Vec::new(),
         };
-        self.check_nets(&mut report);
+        let pin_types: Vec<_> = self.components.iter().map(|c| c.part.pin_types()).collect();
+        self.check_nets(&pin_types, &mut report);
+        self.check_ground_pins(&pin_types, &mut report);
         self.check_pinless_marks(&mut report);
         self.check_similar_net_names(&mut report);
         self.report_warnings(&mut report);
@@ -455,8 +488,7 @@ impl Netlist {
     }
 
     /// Checks the pins and marks on each net.
-    fn check_nets(&self, report: &mut Reporter) {
-        let pin_types: Vec<_> = self.components.iter().map(|c| c.part.pin_types()).collect();
+    fn check_nets(&self, pin_types: &[BTreeMap<String, PinType>], report: &mut Reporter) {
         // Pin ID -> index of its internal connection group, for each component.
         let stack_groups: Vec<HashMap<String, usize>> = self
             .components
@@ -470,13 +502,16 @@ impl Netlist {
             .collect();
 
         for net in &self.nets {
-            let (pins, net_pins, traces) = self.net_pins(net, &pin_types, &stack_groups);
+            let (pins, net_pins, traces) = self.net_pins(net, pin_types, &stack_groups);
             let no_connect = net
                 .marks
                 .iter()
                 .find(|mark| mark.mark == ErcMark::NoConnect);
-            let pin_map = &report.settings.pin_map;
-            for finding in check_net(&net_pins, no_connect.is_some(), pin_map) {
+            let flags = NetFlags {
+                no_connect: no_connect.is_some(),
+                labeled: net.labeled,
+            };
+            for finding in check_net(&net_pins, flags, &report.settings.pin_map) {
                 report.net_finding(net, finding, &pins, &traces, no_connect);
             }
         }
@@ -528,6 +563,64 @@ impl Netlist {
             }
         }
         (pins, net_pins, traces)
+    }
+
+    /// Reports the power pins named like a ground that are not on a ground net, on parts with
+    /// another power pin on one (KiCad 10's `ERC_TESTER::TestGroundPins`).
+    fn check_ground_pins(&self, pin_types: &[BTreeMap<String, PinType>], report: &mut Reporter) {
+        let net_of: HashMap<(usize, &str), &Net> = self
+            .nets
+            .iter()
+            .flat_map(|net| {
+                net.nodes
+                    .iter()
+                    .map(move |node| ((node.component, node.pin_id.as_str()), net))
+            })
+            .collect();
+        for (index, component) in self.components.iter().enumerate() {
+            let Some(info) = component.part.kicad() else {
+                continue;
+            };
+            let mut has_ground_net = false;
+            let mut mismatched = Vec::new();
+            for (pin_id, &pin_type) in &pin_types[index] {
+                if !matches!(pin_type, PinType::PowerIn | PinType::PowerOut) {
+                    continue;
+                }
+                let Some(&net) = net_of.get(&(index, pin_id.as_str())) else {
+                    continue;
+                };
+                let net_is_ground = is_ground_name(&net.name);
+                has_ground_net |= net_is_ground;
+                let pin_name = info.pins.get(pin_id).and_then(|pin| pin.name.as_deref());
+                if let Some(pin_name) = pin_name.filter(|name| is_ground_name(name))
+                    && !net_is_ground
+                {
+                    mismatched.push((pin_id, pin_type, pin_name, net));
+                }
+            }
+            if !has_ground_net {
+                continue;
+            }
+            for (pin_id, pin_type, pin_name, net) in mismatched {
+                if net.allows(ErcRule::GroundPinNotGround) {
+                    continue;
+                }
+                let kind = ErcViolationKind::GroundPinNotGround {
+                    net: net.name.clone(),
+                    pin: ErcPin::Part {
+                        ref_name: component.ref_name.clone(),
+                        pin_id: pin_id.clone(),
+                        pin_type,
+                    },
+                    pin_name: pin_name.to_string(),
+                };
+                report.push(
+                    report.settings.severity(ErcRule::GroundPinNotGround),
+                    Diagnostic::new(kind, component.trace.clone()),
+                );
+            }
+        }
     }
 
     /// Reports the marks on nets without part pins.
@@ -671,6 +764,17 @@ impl Reporter<'_> {
                     Diagnostic::new(kind, traces[pin].clone()),
                 )
             }
+            NetFinding::LabelSinglePin { pin } => {
+                let kind = ErcViolationKind::LabelSinglePin {
+                    net: name,
+                    pin: pins[pin].clone(),
+                };
+                let note = format!("{} is here", pins[pin]);
+                (
+                    ErcRule::LabelSinglePin,
+                    Diagnostic::new(kind, net.trace.clone()).with_note(note, traces[pin].clone()),
+                )
+            }
             NetFinding::NoConnectConnected { pins: connected } => {
                 let kind = ErcViolationKind::NoConnectConnected {
                     net: name,
@@ -696,6 +800,17 @@ impl Reporter<'_> {
             diagnostic,
         );
     }
+}
+
+/// Whether KiCad takes a net or pin name for a ground: it contains `GND`, or is `EARTH`
+/// (`EARTH_...`), `VSS` or `VSSA`, ignoring case.
+fn is_ground_name(name: &str) -> bool {
+    let upper = name.to_uppercase();
+    upper.contains("GND")
+        || upper == "EARTH"
+        || upper.starts_with("EARTH_")
+        || upper == "VSS"
+        || upper == "VSSA"
 }
 
 impl Net {
