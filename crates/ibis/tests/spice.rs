@@ -151,6 +151,29 @@ print hiz
 }
 
 #[test]
+fn test_driver_reference_not_ground() {
+    // All the voltages of the model, the weights included, are relative to the port `ref`.
+    let dut = out_3s();
+    let values = run(&format!(
+        "driver
+{}X1 pin r ku kd dut
+Vr r 0 1
+Vku ku r 1
+Vkd kd r 0
+Rload pin r 50
+.control
+op
+let high = v(pin) - v(r)
+print high
+.endc
+.end
+",
+        dut.text
+    ));
+    assert_close(value(&values, "high"), 3.3 * 50.0 / 132.5, 1e-4);
+}
+
+#[test]
 fn test_receiver_clamps() {
     // The tables span the voltages of the test, as those of real models do: beyond them, `pwl`
     // extrapolates the end segments.
@@ -175,7 +198,7 @@ C_comp 1p NA NA
     )
     .unwrap();
     let dut = subcircuit("dut", &ibs.models[0], &Parasitics::NONE, Corner::Min).unwrap();
-    assert_eq!(dut.ports, ["pin", "gnd"]);
+    assert_eq!(dut.ports, ["pin", "ref"]);
     assert!(!dut.is_driver());
     // -i(Vpin) is the current into the pin. The reference of [POWER Clamp] is the min of
     // [Voltage Range], 3.0 V, and the min of its currents is NA.
@@ -261,9 +284,9 @@ fn test_package() {
     let model = ibs.model("out_3s").unwrap();
     let p = Parasitics::new(Some(0.1), Some(6e-9), Some(0.5e-12));
     let text = subcircuit("dut", model, &p, Corner::Typ).unwrap().text;
-    assert!(text.contains("\nRPKG pin pkg 1e-1\nLPKG pkg die 6e-9\nCPKG pin gnd 5e-13\n"));
-    assert!(text.contains("\nCCOMP die gnd 3e-12\n"));
-    assert!(text.contains("\nBPD die gnd I=v(i_pd,gnd)*v(kd,gnd)\n"));
+    assert!(text.contains("\nRPKG pin pkg 1e-1\nLPKG pkg die 6e-9\nCPKG pin ref 5e-13\n"));
+    assert!(text.contains("\nCCOMP die ref 3e-12\n"));
+    assert!(text.contains("\nBPD die ref I=v(i_pd,ref)*v(kd,ref)\n"));
     let text = subcircuit(
         "dut",
         model,
@@ -319,7 +342,7 @@ fn test_errors() {
     let ramp = "[Ramp]\ndV/dt_r 1/1n NA NA\ndV/dt_f 1/1n NA NA";
     let open_drain = model(&format!("Model_type Open_drain\n[Pulldown]{table}\n{ramp}"));
     let dut = subcircuit("x", &open_drain, &Parasitics::NONE, Corner::Typ).unwrap();
-    assert_eq!(dut.ports, ["pin", "gnd", "ku", "kd"]);
+    assert_eq!(dut.ports, ["pin", "ref", "ku", "kd"]);
     assert!(!dut.text.contains("PU"));
 }
 

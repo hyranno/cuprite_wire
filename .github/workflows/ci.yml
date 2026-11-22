@@ -31,12 +31,12 @@ jobs:
       - run: rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --features shared-ngspice -- -D warnings
+      - run: cargo clippy --workspace --all-targets --features ibis,shared-ngspice -- -D warnings
       # cuprite_wire_embedded_hal turns shared-ngspice on for the whole workspace build;
       # check cuprite_wire without it too.
       - run: cargo clippy -p cuprite_wire --all-targets -- -D warnings
       # Broken intra-doc links and other rustdoc warnings.
-      - run: cargo doc --workspace --no-deps --features shared-ngspice
+      - run: cargo doc --workspace --no-deps --features ibis,shared-ngspice
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -57,7 +57,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: msrv
-      - run: cargo "+${MSRV}" check --workspace --all-targets --features shared-ngspice
+      - run: cargo "+${MSRV}" check --workspace --all-targets --features ibis,shared-ngspice
 
   test:
     name: test (KiCad ${{ matrix.kicad }})
@@ -96,7 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: kicad${{ matrix.kicad }}
-      - run: cargo test --workspace --features kicad-libraries,shared-ngspice
+      - run: cargo test --workspace --features ibis,kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored
       # The KiCad demos are in the kicad/kicad image, not in the packages of Debian trixie above.
@@ -116,11 +116,14 @@ jobs:
         with:
           persist-credentials: false
       # Homebrew's libngspice is in a directory the dynamic loader does not search by default.
+      # The libngspice formula removes its spinit, so the library loads no XSPICE code models;
+      # the spinit of the ngspice formula loads those of libngspice.
       - name: Install ngspice (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install ngspice
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:/usr/local/lib:/usr/lib" >> "${GITHUB_ENV}"
+          echo "SPICE_LIB_DIR=$(brew --prefix ngspice)/share/ngspice" >> "${GITHUB_ENV}"
       # MSYS2 is on the runner. Its shared library is copied to ngspice.dll, the name of the
       # official build and the default of SharedNgspice.
       - name: Install ngspice (Windows)
@@ -139,4 +142,4 @@ jobs:
           Select-String -Path $spinit -Pattern 'codemodel'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Without the KiCad libraries; the XSPICE tests building code models are Linux-only.
-      - run: cargo test --workspace --features shared-ngspice
+      - run: cargo test --workspace --features ibis,shared-ngspice

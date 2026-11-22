@@ -12,7 +12,7 @@
 //!   `[Pulldown]` by `kd`.
 //!
 //! Unlike KIBIS, the stimulus is not part of the subcircuit: a driver has the ports `ku` and `kd`,
-//! driven from outside with voltages from 0 to 1 (relative to `gnd`). [`EdgeTimes::weights`] makes
+//! driven from outside with voltages from 0 to 1 (relative to `ref`). [`EdgeTimes::weights`] makes
 //! them from a sequence of [`Drive`] states and the `[Ramp]` of the model.
 //!
 //! The code models need the XSPICE extension of ngspice (`analog.cm`), which the usual builds
@@ -57,7 +57,7 @@
 //! let parasitics = Parasitics::of_pin(component, pin, Corner::Typ);
 //! let model = ibs.model("buffer").unwrap();
 //! let subckt = subcircuit("buffer_typ", model, &parasitics, Corner::Typ)?;
-//! assert!(subckt.text.contains("\n.subckt buffer_typ pin gnd ku kd\n"));
+//! assert!(subckt.text.contains("\n.subckt buffer_typ pin ref ku kd\n"));
 //!
 //! // High from 10 ns, low from 30 ns.
 //! let edges = subckt.edge_times.unwrap();
@@ -72,8 +72,10 @@ use crate::{Component, Corner, IvTable, Model, ModelType, Pin, Ramp, TypMinMax};
 
 /// The pin port of a subcircuit.
 pub const PIN: &str = "pin";
-/// The ground port of a subcircuit, the reference of all voltages of the model.
-pub const GND: &str = "gnd";
+/// The reference port of a subcircuit: the ground of the model, which all its voltages are
+/// relative to. It is not named `gnd`, which ngspice reads as the global ground (node 0) even as
+/// a port.
+pub const REF: &str = "ref";
 /// The port of a driver weighting `[Pullup]`: the voltage from 0 (off) to 1 (on).
 pub const KU: &str = "ku";
 /// The port of a driver weighting `[Pulldown]`.
@@ -122,7 +124,7 @@ impl Parasitics {
 pub struct Subcircuit {
     /// The name of the subcircuit.
     pub name: String,
-    /// The ports, in order: [`PIN`] and [`GND`], then [`KU`] and [`KD`] for a driver.
+    /// The ports, in order: [`PIN`] and [`REF`], then [`KU`] and [`KD`] for a driver.
     pub ports: Vec<&'static str>,
     /// The edge times of a driver, from its `[Ramp]`; `None` for a receiver.
     pub edge_times: Option<EdgeTimes>,
@@ -188,9 +190,9 @@ impl Kind {
 /// Writes the model as a subcircuit named `name`, with the package `parasitics` and the values of
 /// the `corner`.
 ///
-/// A model of type `Input` becomes a receiver with the ports `pin gnd`: the package, `C_comp` and
+/// A model of type `Input` becomes a receiver with the ports `pin ref`: the package, `C_comp` and
 /// the clamps. The types that drive (`Output`, `I/O`, `3-state` and the open drain, sink and
-/// source types) become drivers with the ports `pin gnd ku kd`, which add `[Pullup]` and
+/// source types) become drivers with the ports `pin ref ku kd`, which add `[Pullup]` and
 /// `[Pulldown]`. An `I/O` model with `ku` and `kd` at 0 is its receiver.
 ///
 /// The voltage of `[Pullup]` and `[POWER Clamp]` is `[Pullup Reference]` and
@@ -239,7 +241,7 @@ pub fn subcircuit(
     } else {
         None
     };
-    let mut ports = vec![PIN, GND];
+    let mut ports = vec![PIN, REF];
     if kind.driver {
         ports.extend([KU, KD]);
     }
@@ -273,12 +275,12 @@ pub fn subcircuit(
     }
     let die = node;
     if let Some(c) = parasitics.c {
-        line(&mut text, format_args!("CPKG {PIN} {GND} {}", num(c)));
+        line(&mut text, format_args!("CPKG {PIN} {REF} {}", num(c)));
     }
     if let Some(c) = model.c_comp {
         line(
             &mut text,
-            format_args!("CCOMP {die} {GND} {}", num(c.get(corner))),
+            format_args!("CCOMP {die} {REF} {}", num(c.get(corner))),
         );
     }
 
@@ -335,12 +337,12 @@ pub fn subcircuit(
         })?;
         let (xs, ys) = table_points(table, corner).map_err(|m| error(format!("{keyword} {m}")))?;
         let ref_node = if reference == 0.0 {
-            GND.to_string()
+            REF.to_string()
         } else {
             let node = format!("{}_ref", id.to_ascii_lowercase());
             line(
                 &mut text,
-                format_args!("V{id} {node} {GND} {}", num(reference)),
+                format_args!("V{id} {node} {REF} {}", num(reference)),
             );
             node
         };
@@ -360,11 +362,11 @@ pub fn subcircuit(
                 let current = format!("i_{}", id.to_ascii_lowercase());
                 line(
                     &mut text,
-                    format_args!("A{id} {input} %vd({current} {GND}) {id}"),
+                    format_args!("A{id} {input} %vd({current} {REF}) {id}"),
                 );
                 line(
                     &mut text,
-                    format_args!("B{id} {die} {ref_node} I=v({current},{GND})*v({weight},{GND})"),
+                    format_args!("B{id} {die} {ref_node} I=v({current},{REF})*v({weight},{REF})"),
                 );
             }
         }

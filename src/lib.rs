@@ -57,3 +57,7 @@ mod test_parts;
 extern crate self as cuprite_wire;
 
 pub use cuprite_wire_macros::{kicad_part, spice_part};
+
+/// The IBIS reader [`cuprite_wire_ibis`], for the parts of [`spice::ibis`].
+#[cfg(feature = "ibis")]
+pub use cuprite_wire_ibis as ibis;
