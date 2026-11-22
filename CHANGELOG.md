@@ -63,6 +63,33 @@ break the API).
   `CosimDevice` were: `DigitalDriver` writes `VD_out`, `RO_out`, `VE_out`, `SO_out` (instead of
   `VD`, `RO`, `VE`, `SO`) with the nodes `out#d`, `out#e`, and the drive source of a `DCosim`
   output is `ED_<pin>` (instead of `EO_<pin>`). The names of the subcircuits change with them.
+- Instantiating: `CircuitBuilder::instantiate_part` and `instantiate_subcircuit` replace the six
+  `instantiate_*` methods. An explicit name is given by wrapping the part or the generator in
+  `circuit::Named` (`Named("R_LOAD", part)`, instead of `instantiate_part_named` and
+  `instantiate_subcircuit_named`), and a generator with its own options by
+  `SubcircuitGenerator::with_options` (instead of `instantiate_subcircuit_with` and
+  `instantiate_subcircuit_named_with`). `instantiate_part` takes an `impl Part` or a
+  `Box<dyn Part>`, so `IndependentSource::voltage` / `current`, `DigitalDriver::new`,
+  `DigitalLoad::new`, `DCosim::new`, `CosimDevice::new` and `VerilatedModel::part` return the part
+  instead of a `Box`, and their builder methods take `self`.
+- Nodes are `circuit::Node` instead of petgraph's `NodeIndex` (no longer re-exported), and the
+  type parameter of `Interface` defaults to it. A node used in a builder that did not create it,
+  such as a node of the circuit around a subcircuit used inside it, is reported as
+  `CircuitErrorKind::ForeignNode` instead of silently connecting to another node (or panicking).
+  The net graph is no longer public (`NetGraph`, `NodeInfo`, `BuiltCircuit::nets`,
+  `BuiltCircuit::connected_nodes`).
+- `Part::pin_types` is replaced by `Part::extra_pin_types`: ERC takes the pin types from the KiCad
+  pin information and gives these only to pins without it, so the two can no longer disagree. A
+  pin in both is a `CircuitErrorKind::DuplicatePinType`, and a key that is not a pin ID an
+  `UnknownPinId`. `Component::pin_types` holds the types of each component.
+- `Part::get_ref_base_name` is renamed `Part::ref_prefix`, and the `ref_base` key of
+  `kicad_part!` and `spice_part!` `ref_prefix`.
+- `SubcircuitInstance` is no longer public, and `kicad::PinType` is removed (use `parts::PinType`).
+- `spice_number` (from `spice::sources`) and `spice_value` (from `spice::part`) are in the new
+  module `spice::value`, and re-exported from `spice`.
+- `SimulationError::SharedLibrary` and `SimulationError::Cosimulation` exist only with the
+  `shared-ngspice` feature. `VerilatorError::Command::dir` is an `Option`: `None` for
+  `verilator --version`, which does not run in a build directory.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
@@ -89,10 +116,10 @@ break the API).
 - `KicadPartInfo::check_pins` reported a pad shared by three pins twice, and put pins that are not
   in the part on their pads, which could add a `DuplicatePad`. Problems are now in the order
   missing pins, unknown pins, pads.
-- Reference prefixes (`Part::get_ref_base_name`) are checked when the part is instantiated: one
+- Reference prefixes (`Part::ref_prefix`) are checked when the part is instantiated: one
   that is empty, ends with a digit (`U1` + `1` and `U` + `11` were both `U11`), or contains
   whitespace, `?`, `#`, `/` or `{` is an `InvalidName`, and so is a `SubcircuitGenerator::base_name`
-  that is empty or contains `#` or `{` when it makes an automatic name. The `ref_base` of
+  that is empty or contains `#` or `{` when it makes an automatic name. The `ref_prefix` of
   `kicad_part!` and `spice_part!` must not end with a digit either.
 - `kicad_part!` and `spice_part!`: pin IDs given in `pins` that differ only in case (`out` and
   `OUT`), which made two constants `OUT`, and a key given twice in a `{ ... }` map (`fields`,
