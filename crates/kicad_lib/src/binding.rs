@@ -6,16 +6,25 @@
 //! The bodies of the models are not interpreted.
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::Arc,
 };
+
+mod devices;
+mod diagnostics;
+mod library;
+
+pub use devices::{ModelDevice, model_device};
+use diagnostics::{describe_pin, not_found, pin_table, suggestions};
+use library::{LibFile, dependencies, read_library};
+#[cfg(test)]
+use {diagnostics::normalize, library::MAX_LIBRARY_FILES};
 
 use crate::{
     Error,
     resolve::Resolver,
-    sim::{Args, ElementDef, ModelDef, ModelMode},
-    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, SpiceLib, strip_comment},
+    sim::{Args, ElementDef, Elements, ModelDef, ModelMode},
+    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint},
 };
 
 /// The dialect of a model: detected from the library, or given.
@@ -111,14 +120,11 @@ pub struct ModelInfo {
     pub dialect_reason: String,
 }
 
-/// The elements of a part, with pins in node order, and the pins not connected to any element.
-pub type Bound = (Vec<ElementDef>, Vec<String>);
-
 pub fn bind(
     bindings: &[ModelBinding],
     options: &BindOptions,
     resolver: &mut Resolver,
-) -> Result<Bound, BindingError> {
+) -> Result<Elements, BindingError> {
     let mut elements = Vec::new();
     let mut unused: Vec<String> = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
@@ -206,7 +212,10 @@ pub fn bind(
             });
         }
     }
-    Ok((elements, unused))
+    Ok(Elements {
+        elements,
+        unused_pins: unused,
+    })
 }
 
 type FieldError = (BindingField, Error);
@@ -641,319 +650,6 @@ fn check_includes(libs: &[LibFile], dialect: Dialect) -> Result<(), FieldError> 
     Ok(())
 }
 
-/// A device with a `.model`: its KiCad `Sim.Device`, element letter and terminals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ModelDevice {
-    pub sim_device: &'static str,
-    pub letter: char,
-    pub terminals: &'static [&'static str],
-}
-
-const DIODE: &[&str] = &["A", "K"];
-const BJT: &[&str] = &["C", "B", "E"];
-const MOSFET: &[&str] = &["D", "G", "S", "B"];
-const THREE_TERMINAL_FET: &[&str] = &["D", "G", "S"];
-
-/// `.model` types (lowercase), with their devices.
-const MODEL_DEVICES: &[(&str, ModelDevice)] = &[
-    ("d", device("D", 'D', DIODE)),
-    ("npn", device("NPN", 'Q', BJT)),
-    ("pnp", device("PNP", 'Q', BJT)),
-    ("nmos", device("NMOS", 'M', MOSFET)),
-    ("pmos", device("PMOS", 'M', MOSFET)),
-    // N-channel unless the parameters have `pchan`.
-    ("vdmos", device("NMOS", 'M', THREE_TERMINAL_FET)),
-    ("njf", device("NJFET", 'J', THREE_TERMINAL_FET)),
-    ("pjf", device("PJFET", 'J', THREE_TERMINAL_FET)),
-];
-
-const fn device(
-    sim_device: &'static str,
-    letter: char,
-    terminals: &'static [&'static str],
-) -> ModelDevice {
-    ModelDevice {
-        sim_device,
-        letter,
-        terminals,
-    }
-}
-
-/// The device of a `.model` of `model_type` (lowercase) defined by `text` (the `.model`
-/// statement, which tells the channel of a VDMOS).
-pub fn model_device(model_type: &str, text: &str) -> Option<ModelDevice> {
-    let (_, mut device) = *MODEL_DEVICES.iter().find(|(t, _)| *t == model_type)?;
-    if model_type == "vdmos" && has_pchan(text) {
-        device.sim_device = "PMOS";
-    }
-    Some(device)
-}
-
-/// Whether the parameters of a `.model` have the `pchan` flag.
-fn has_pchan(text: &str) -> bool {
-    text.lines()
-        .filter(|line| !line.trim_start().starts_with('*'))
-        .map(strip_comment)
-        .flat_map(|line| line.split(|c: char| c.is_whitespace() || "(),=".contains(c)))
-        .filter(|word| !word.is_empty())
-        .skip(3)
-        .any(|word| word.eq_ignore_ascii_case("pchan"))
-}
-
-/// A library file, the section that is read (`None`: outside the sections) and its path.
-type LibFile = (Arc<SpiceLib>, Option<String>, PathBuf);
-
-/// The most files a library may read with its includes, to stop include loops through paths that
-/// keep growing (`.include sub/self.lib` with `sub` a link to `.`).
-const MAX_LIBRARY_FILES: usize = 256;
-
-/// Reads a library and the files it includes, each with the section that is read.
-fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<LibFile>, Error> {
-    let mut libs = Vec::new();
-    let mut queue = vec![(path.to_path_buf(), None::<String>)];
-    let mut seen = BTreeSet::new();
-    while let Some((file, section)) = queue.pop() {
-        let key = (
-            file.clone(),
-            section.as_ref().map(|s| s.to_ascii_lowercase()),
-        );
-        if !seen.insert(key) {
-            continue;
-        }
-        if seen.len() > MAX_LIBRARY_FILES {
-            return Err(Error::new(format!(
-                "{} includes more than {MAX_LIBRARY_FILES} files; do the includes loop?",
-                path.display()
-            )));
-        }
-        let lib = resolver.spice_lib(&file)?;
-        if let Some(section) = &section
-            && !lib.sections.iter().any(|s| s.eq_ignore_ascii_case(section))
-        {
-            return Err(Error::new(format!(
-                "{} has no section {section:?}",
-                file.display()
-            )));
-        }
-        let dir = file.parent().map(PathBuf::from).unwrap_or_default();
-        // Relative paths are relative to the including file, as in ngspice.
-        let mut includes: Vec<_> = lib
-            .includes(section.as_deref())
-            .map(|include| (dir.join(&include.path), include.section.clone()))
-            .collect();
-        includes.reverse();
-        queue.extend(includes);
-        libs.push((lib, section, file));
-    }
-    Ok(libs)
-}
-
-/// The definition and the top-level definitions (also `.param` / `.func`) it refers to by name.
-fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Definition> {
-    let find_any = |name: &str| {
-        libs.iter()
-            .find_map(|(lib, section, _)| {
-                lib.definitions(section.as_deref())
-                    .find(|d| d.name.eq_ignore_ascii_case(name))
-            })
-            .cloned()
-    };
-    let mut out: Vec<Definition> = Vec::new();
-    let mut pending = vec![definition.clone()];
-    while let Some(def) = pending.pop() {
-        if out.iter().any(|d| d.name.eq_ignore_ascii_case(&def.name)) {
-            continue;
-        }
-        for token in referenced_names(&def.text) {
-            if let Some(referenced) = find_any(token) {
-                pending.push(referenced);
-            }
-        }
-        out.push(def);
-    }
-    out
-}
-
-/// Names that a definition may refer to: the words of its text after the keyword and its own name.
-/// Names may contain `+` and `-` (`IN+`), which are also operators, so both forms are returned.
-fn referenced_names(text: &str) -> impl Iterator<Item = &str> {
-    text.lines()
-        .filter(|line| !line.trim_start().starts_with('*'))
-        .map(strip_comment)
-        .flat_map(|line| {
-            line.split(|c: char| c.is_whitespace() || "(),={}'\"*/<>&|?:!^;".contains(c))
-        })
-        .filter(|word| !word.is_empty())
-        .skip(2)
-        .flat_map(|word| {
-            std::iter::once(word).chain(word.split(['+', '-']).filter(|w| !w.is_empty()))
-        })
-}
-
-/// The error for a name that is not in the library, with candidates.
-fn not_found(name: &str, path: &Path, libs: &[LibFile]) -> Error {
-    let definitions: Vec<&Definition> = libs
-        .iter()
-        .flat_map(|(lib, section, _)| lib.definitions(section.as_deref()))
-        .filter(|d| {
-            matches!(
-                d.kind,
-                DefinitionKind::Subckt { .. } | DefinitionKind::Model { .. }
-            )
-        })
-        .collect();
-    let mut message = format!("no .subckt or .model named {name:?} in {}", path.display());
-    let wanted = normalize(name);
-    let similar: Vec<&str> = definitions
-        .iter()
-        .map(|d| d.name.as_str())
-        .filter(|candidate| {
-            let candidate = normalize(candidate);
-            candidate.contains(&wanted)
-                || wanted.contains(&candidate)
-                || edit_distance(&candidate, &wanted) <= 2
-        })
-        .take(8)
-        .collect();
-    if !similar.is_empty() {
-        message.push_str(&format!("; similar names: {}", similar.join(", ")));
-    }
-    // Subcircuits no other definition uses are likely the products of the library.
-    let used: BTreeSet<String> = definitions
-        .iter()
-        .flat_map(|d| {
-            referenced_names(&d.text)
-                .filter(|name| !name.eq_ignore_ascii_case(&d.name))
-                .map(str::to_ascii_lowercase)
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    let top: Vec<&str> = definitions
-        .iter()
-        .filter(|d| {
-            matches!(d.kind, DefinitionKind::Subckt { .. })
-                && !used.contains(&d.name.to_ascii_lowercase())
-        })
-        .map(|d| d.name.as_str())
-        .take(10)
-        .collect();
-    if !top.is_empty() {
-        message.push_str(&format!(
-            "; subcircuits not used by others: {}",
-            top.join(", ")
-        ));
-    }
-    let encrypted: usize = libs.iter().map(|(lib, _, _)| lib.encrypted_blocks).sum();
-    if encrypted > 0 {
-        message.push_str(&format!(
-            "; the library has {encrypted} encrypted blocks, which may hide it"
-        ));
-    }
-    let sections: Vec<&str> = libs
-        .iter()
-        .flat_map(|(lib, _, _)| lib.sections.iter().map(String::as_str))
-        .collect();
-    if !sections.is_empty() {
-        message.push_str(&format!(
-            "; definitions in `.lib` sections ({}) are found only through `.lib file section`",
-            sections.join(", ")
-        ));
-    }
-    Error::new(message)
-}
-
-fn describe_pin(pin: &PartPin) -> String {
-    match &pin.name {
-        Some(name) if name != &pin.id => format!("{} ({name})", pin.id),
-        _ => pin.id.clone(),
-    }
-}
-
-/// A table of the pins and the ports they are mapped to (`ports_of` a pin ID), appended to an
-/// error message.
-fn pin_table(pins: &[PartPin], ports_of: impl Fn(&str) -> Vec<String>) -> String {
-    let mut text = String::from("\npins and ports:");
-    for pin in pins {
-        let ports = ports_of(&pin.id);
-        let ports = if ports.is_empty() {
-            "-".to_string()
-        } else {
-            ports.join(", ")
-        };
-        text.push_str(&format!("\n  {:<16} => {ports}", describe_pin(pin)));
-    }
-    text
-}
-
-/// Mappings suggested from the names, to copy into `pins` after checking them.
-fn suggestions(pins: &[&PartPin], ports: &[&str]) -> String {
-    let mut by_name: BTreeMap<String, Vec<&PartPin>> = BTreeMap::new();
-    for pin in pins {
-        if let Some(name) = &pin.name {
-            by_name.entry(normalize(name)).or_default().push(pin);
-        }
-    }
-    let mut ports_by_name: BTreeMap<String, Vec<&str>> = BTreeMap::new();
-    for port in ports {
-        ports_by_name.entry(normalize(port)).or_default().push(port);
-    }
-    let mut lines = Vec::new();
-    for pin in pins {
-        let Some(key) = pin.name.as_deref().map(normalize) else {
-            continue;
-        };
-        if let (Some([_]), Some([port])) = (
-            by_name.get(&key).map(Vec::as_slice),
-            ports_by_name.get(&key).map(Vec::as_slice),
-        ) && !key.is_empty()
-        {
-            lines.push(format!("\n  {:?} => {:?},", pin.id, port));
-        }
-    }
-    if lines.is_empty() {
-        return String::new();
-    }
-    format!(
-        "\nsuggested from the names (not applied; check them against the datasheet):{}",
-        lines.concat()
-    )
-}
-
-/// A name for matching pins and ports: uppercase, without `~{}/#` and a trailing `_N` / `_B` / `N` / `B`
-/// (active-low markers); `+` and `-` are kept.
-fn normalize(name: &str) -> String {
-    let upper: String = name
-        .chars()
-        .filter(|c| !"~{}/#".contains(*c))
-        .map(|c| c.to_ascii_uppercase())
-        .collect();
-    for suffix in ["_N", "_B", "N", "B"] {
-        if let Some(stem) = upper.strip_suffix(suffix)
-            && stem.len() >= 3
-        {
-            return stem.to_string();
-        }
-    }
-    upper
-}
-
-fn edit_distance(a: &str, b: &str) -> usize {
-    let b: Vec<char> = b.chars().collect();
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.chars().enumerate() {
-        let mut previous = row[0];
-        row[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let current = row[j + 1];
-            row[j + 1] = (previous + usize::from(ca != *cb))
-                .min(row[j] + 1)
-                .min(current + 1);
-            previous = current;
-        }
-    }
-    row[b.len()]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -994,7 +690,7 @@ mod tests {
         bindings: &[ModelBinding],
         pins: &[PartPin],
         mode: ModelMode,
-    ) -> Result<Bound, BindingError> {
+    ) -> Result<Elements, BindingError> {
         let options = BindOptions {
             pins: PartPins::Given(pins),
             strict: true,
@@ -1013,8 +709,10 @@ mod tests {
     fn test_subckt() {
         let mut binding = vsup(VSUP_PINS);
         binding.params = pairs(&[("vth", "0.6")]);
-        let (elements, unused) =
-            run(&[binding.clone()], &symbol_pins(), ModelMode::Include).unwrap();
+        let Elements {
+            elements,
+            unused_pins: unused,
+        } = run(&[binding.clone()], &symbol_pins(), ModelMode::Include).unwrap();
         let element = &elements[0];
         assert_eq!(element.device, 'X');
         // In the order of the ports, not of the pin numbers.
@@ -1036,7 +734,7 @@ mod tests {
         assert!(unused.is_empty());
 
         // Inline: the definitions it uses, also from the file included with `.LIB`.
-        let (elements, _) = run(&[binding], &symbol_pins(), ModelMode::Inline).unwrap();
+        let Elements { elements, .. } = run(&[binding], &symbol_pins(), ModelMode::Inline).unwrap();
         let names: Vec<&str> = elements[0]
             .models
             .iter()
@@ -1078,7 +776,10 @@ mod tests {
             internal_connections: &[],
             mode: ModelMode::Include,
         };
-        let (elements, unused) = bind(
+        let Elements {
+            elements,
+            unused_pins: unused,
+        } = bind(
             std::slice::from_ref(&binding),
             &options,
             &mut fixture_resolver(),
@@ -1101,7 +802,9 @@ mod tests {
         let mut declared = binding.clone();
         declared.unused = strings(&["3"]);
         assert_eq!(
-            run(&[declared], &pins, ModelMode::Include).unwrap().1,
+            run(&[declared], &pins, ModelMode::Include)
+                .unwrap()
+                .unused_pins,
             ["3"]
         );
         // ... or be connected to a mapped pin inside the part.
@@ -1118,7 +821,7 @@ mod tests {
                 &mut fixture_resolver()
             )
             .unwrap()
-            .1
+            .unused_pins
             .is_empty()
         );
         // Positional without any mapping.
@@ -1133,7 +836,7 @@ mod tests {
         assert_eq!(
             bind(&[positional], &options, &mut fixture_resolver())
                 .unwrap()
-                .0[0]
+                .elements[0]
                 .nodes,
             ["1", "2"]
         );
@@ -1267,7 +970,7 @@ suggested from the names (not applied; check them against the datasheet):
         let mut given = binding("vsup_mixed");
         given.dialect = DialectOption::Given(crate::spice_lib::Dialect::Ltspice);
         assert_eq!(
-            run(&[given], pins, ModelMode::Include).unwrap().0[0].dialect,
+            run(&[given], pins, ModelMode::Include).unwrap().elements[0].dialect,
             crate::spice_lib::Dialect::Ltspice
         );
 
@@ -1320,44 +1023,6 @@ suggested from the names (not applied; check them against the datasheet):
     }
 
     #[test]
-    fn test_referenced_names_skip_comments() {
-        let names: Vec<&str> =
-            referenced_names(".subckt s a b\nx1 a b inner ; other\n* third\n+ $ fourth\n.ends")
-                .collect();
-        assert!(names.contains(&"inner"), "{names:?}");
-        for comment in ["other", "third", "fourth"] {
-            assert!(!names.contains(&comment), "{names:?}");
-        }
-    }
-
-    #[test]
-    fn test_model_devices() {
-        let device = |text: &str| {
-            let model_type = text.split([' ', '(']).nth(2).unwrap().to_ascii_lowercase();
-            model_device(&model_type, text).map(|d| (d.sim_device, d.letter, d.terminals.len()))
-        };
-        assert_eq!(device(".model a D"), Some(("D", 'D', 2)));
-        assert_eq!(device(".model a NMOS level=1"), Some(("NMOS", 'M', 4)));
-        assert_eq!(device(".model a VDMOS(Kp=1)"), Some(("NMOS", 'M', 3)));
-        assert_eq!(
-            device(".model a VDMOS(Kp=1\n+ PCHAN)"),
-            Some(("PMOS", 'M', 3))
-        );
-        assert_eq!(device(".model pchan VDMOS NCHAN"), Some(("NMOS", 'M', 3)));
-        assert_eq!(device(".model a VDMOS PCHAN"), Some(("PMOS", 'M', 3)));
-        // Inline comments are not parameters.
-        assert_eq!(
-            device(".model a VDMOS(Kp=1) $ pchan"),
-            Some(("NMOS", 'M', 3))
-        );
-        assert_eq!(
-            device(".model a VDMOS(Kp=1) // pchan"),
-            Some(("NMOS", 'M', 3))
-        );
-        assert_eq!(device(".model a SW"), None);
-    }
-
-    #[test]
     fn test_several_elements() {
         // Two copies of the same model sharing GND and VDD, like the units of a dual part.
         let pins: Vec<PartPin> = (1..=10)
@@ -1380,8 +1045,10 @@ suggested from the names (not applied; check them against the datasheet):
                 ])
             }
         };
-        let (elements, unused) =
-            run(&[unit("A", 1), unit("B", 5)], &pins, ModelMode::Include).unwrap();
+        let Elements {
+            elements,
+            unused_pins: unused,
+        } = run(&[unit("A", 1), unit("B", 5)], &pins, ModelMode::Include).unwrap();
         assert!(unused.is_empty());
         assert_eq!(elements[0].nodes, strings(&["1", "2", "9", "4", "3", "10"]));
         assert_eq!(

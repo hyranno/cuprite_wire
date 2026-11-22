@@ -39,6 +39,15 @@ fn units(device: char) -> &'static [&'static str] {
     }
 }
 
+/// [`to_spice`], with an error if the text is not a number.
+pub fn try_to_spice(text: &str, device: char) -> Result<String, crate::Error> {
+    to_spice(text, device).ok_or_else(|| {
+        crate::Error::new(format!(
+            "the value {text:?} is not a number (like 10k, 4k7 or 1M for mega)"
+        ))
+    })
+}
+
 /// Converts a number in KiCad's notation (`10k`, `1M`, `4k7`, `2R2`, `1.5e-9`, `100nF`) to SPICE
 /// (`10k`, `1Meg`, `4.7k`, `2.2`, `1.5e-9`, `100n`). `None` if the text is not such a number.
 ///

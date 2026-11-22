@@ -5,13 +5,21 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     Error,
-    binding::{self, BindOptions, BindingField, ModelBinding, PartPin, PartPins},
+    binding::{self, BindOptions, BindingField, ModelBinding, PartPins},
     naming::LibId,
     resolve::Resolver,
-    sim::{self, ModelMode, SimInput, SpiceDef, Value},
+    sim::{self, Elements, ModelMode, SimInput, SpiceDef, Value},
     symbol::{ElectricalType, Symbol},
     text_var,
 };
+
+mod pins;
+mod spice;
+
+use pins::{PinIds, PinKeys, check_internal_connections, default_pin_ids, rename_pins};
+#[cfg(test)]
+use spice::library_field;
+use spice::{sim_block, sim_fields};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FootprintOption {
@@ -256,15 +264,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         (SpiceOption::None, true) => SpiceDef::Unsupported,
         (SpiceOption::Excluded, true) => SpiceDef::Excluded,
         (SpiceOption::Auto, false) => {
-            let (elements, unused_pins) = sim_block(
+            let elements = sim_block(
                 &options.sim,
                 common.sim_model,
                 &pins,
                 &internal_connections,
                 resolver,
             )?;
-            fields.extend(sim_fields(&options.sim, &elements));
-            ids.elements(elements, unused_pins)
+            fields.extend(sim_fields(&options.sim, &elements.elements));
+            ids.elements(elements)
         }
         (SpiceOption::Auto, true) => {
             let input = SimInput {
@@ -281,18 +289,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                 )),
             })?;
             match def {
-                SpiceDef::Elements {
+                SpiceDef::Elements(Elements {
                     elements,
                     unused_pins,
-                } => {
+                }) => {
                     // The model connects symbol pins: the other pads of a stacked pin notation
                     // and extra pads are not part of it.
                     // (Duplicate pins are connected to the first, which the model connects.)
-                    let mut numbers = BTreeSet::new();
                     let other_pads = symbol
-                        .pins
-                        .iter()
-                        .filter(|pin| numbers.insert(&pin.number))
+                        .distinct_pins()
                         .filter(|pin| !unused_pins.contains(&pin.number))
                         .flat_map(|pin| pin.pads[1..].iter().cloned());
                     let mut unused_pins: Vec<String> = ids
@@ -301,7 +306,10 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                         .chain(other_pads)
                         .collect();
                     unused_pins.extend(options.extra_pads.iter().cloned());
-                    ids.elements(ids.with_first_pads(elements), unused_pins)
+                    ids.elements(Elements {
+                        elements: ids.with_first_pads(elements),
+                        unused_pins,
+                    })
                 }
                 other => other,
             }
@@ -358,77 +366,6 @@ fn expand_value(
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .chain([("Footprint", footprint.as_str())]);
     text_var::expand_field(value, all).map(sim::Value::Fixed)
-}
-
-/// Pin IDs by pad number (of the first pin of duplicate pins), and pads by symbol pin number.
-struct PinIds<'a> {
-    ids: BTreeMap<&'a str, &'a str>,
-    pads: BTreeMap<&'a str, &'a [String]>,
-}
-
-impl<'a> PinIds<'a> {
-    fn new(pins: &'a [PinDef], symbol: &'a Symbol) -> Self {
-        PinIds {
-            // The first pin of each pad (`rev` so that it is inserted last).
-            ids: pins
-                .iter()
-                .rev()
-                .map(|pin| (pin.pad.as_str(), pin.id.as_str()))
-                .collect(),
-            pads: symbol
-                .pins
-                .iter()
-                .map(|pin| (pin.number.as_str(), pin.pads.as_slice()))
-                .collect(),
-        }
-    }
-
-    /// The IDs of pads.
-    fn of(&self, pads: &[String]) -> Vec<String> {
-        pads.iter()
-            .map(|n| self.ids[n.as_str()].to_string())
-            .collect()
-    }
-
-    /// The IDs of symbol pins (of the first pad of a stacked pin notation).
-    fn of_pins(&self, numbers: &[String]) -> Vec<String> {
-        self.of(&self.first_pads(numbers))
-    }
-
-    fn first_pads(&self, numbers: &[String]) -> Vec<String> {
-        numbers
-            .iter()
-            .map(|n| self.pads[n.as_str()][0].clone())
-            .collect()
-    }
-
-    /// All pads of symbol pins.
-    fn symbol_pin_pads(&self, numbers: &[String]) -> Vec<String> {
-        numbers
-            .iter()
-            .flat_map(|n| self.pads[n.as_str()].iter().cloned())
-            .collect()
-    }
-
-    /// Elements with symbol pin numbers turned into pads (the first of a stacked pin notation,
-    /// whose pads are connected).
-    fn with_first_pads(&self, mut elements: Vec<sim::ElementDef>) -> Vec<sim::ElementDef> {
-        for element in &mut elements {
-            element.nodes = self.first_pads(&element.nodes);
-        }
-        elements
-    }
-
-    /// The SPICE description with pin IDs, from one with pad numbers.
-    fn elements(&self, mut elements: Vec<sim::ElementDef>, unused_pins: Vec<String>) -> SpiceDef {
-        for element in &mut elements {
-            element.nodes = self.of(&element.nodes);
-        }
-        SpiceDef::Elements {
-            elements,
-            unused_pins: self.of(&unused_pins),
-        }
-    }
 }
 
 /// The footprint of the part, checked against the symbol pins and the extra pads.
@@ -513,79 +450,6 @@ fn footprint(
     Ok(Some(id))
 }
 
-/// Binds the models of the `sim` block, with pad numbers.
-fn sim_block(
-    bindings: &[ModelBinding],
-    mode: ModelMode,
-    pins: &[PinDef],
-    internal_connections: &[Vec<String>],
-    resolver: &mut Resolver,
-) -> Result<binding::Bound, PartError> {
-    // The pins in pad numbers, connected as the part connects them.
-    let pad_of: BTreeMap<&str, &str> = pins
-        .iter()
-        .map(|pin| (pin.id.as_str(), pin.pad.as_str()))
-        .collect();
-    let groups: Vec<Vec<String>> = internal_connections
-        .iter()
-        .map(|group| {
-            group
-                .iter()
-                .map(|id| pad_of[id.as_str()].to_string())
-                .collect()
-        })
-        .collect();
-    // Duplicate pins are one pin of the model: the first, to which the others are connected.
-    let mut pads = BTreeSet::new();
-    let part_pins: Vec<PartPin> = pins
-        .iter()
-        .filter(|pin| pads.insert(pin.pad.as_str()))
-        .map(|pin| PartPin {
-            id: pin.pad.clone(),
-            name: pin.name.clone(),
-        })
-        .collect();
-    let options = BindOptions {
-        pins: PartPins::Given(&part_pins),
-        strict: true,
-        internal_connections: &groups,
-        mode,
-    };
-    binding::bind(bindings, &options, resolver).map_err(model_error)
-}
-
-/// The `Sim.*` fields KiCad would have for a model of the `sim` block (with a single model), so that
-/// the netlist carries the mapping as KiCad writes it.
-fn sim_fields(bindings: &[ModelBinding], elements: &[sim::ElementDef]) -> Vec<(String, String)> {
-    let ([binding], [element]) = (bindings, elements) else {
-        return Vec::new();
-    };
-    let Some(info) = &element.info else {
-        return Vec::new();
-    };
-    let pins: Vec<String> = element
-        .nodes
-        .iter()
-        .zip(&info.ports)
-        .map(|(pin, port)| format!("{pin}={port}"))
-        .collect();
-    let mut fields = vec![
-        ("Sim.Device".to_string(), info.sim_device.to_string()),
-        ("Sim.Library".to_string(), library_field(&info.path)),
-        ("Sim.Name".to_string(), info.name.clone()),
-        ("Sim.Pins".to_string(), pins.join(" ")),
-    ];
-    if !binding.params.is_empty() {
-        let params: Vec<String> = binding
-            .params
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
-        fields.push(("Sim.Params".to_string(), params.join(" ")));
-    }
-    fields
-}
-
 /// Makes a part from a SPICE model: its pins are the ports of the `.subckt` (or the terminals of the
 /// `.model`). It has no KiCad information.
 pub fn load_spice_part(
@@ -605,7 +469,7 @@ pub fn load_spice_part(
         suffix: String::new(),
         ..options.model.clone()
     };
-    let (mut elements, _) =
+    let Elements { mut elements, .. } =
         binding::bind(&[model], &bind_options, resolver).map_err(model_error)?;
     let info = elements[0].info.clone().expect("a library model");
     let mut pins: Vec<PinDef> = info
@@ -639,10 +503,10 @@ pub fn load_spice_part(
         value: common.value.clone().unwrap_or(Value::Fixed(info.name)),
         pins,
         internal_connections,
-        spice: SpiceDef::Elements {
+        spice: SpiceDef::Elements(Elements {
             elements,
             unused_pins: Vec::new(),
-        },
+        }),
     })
 }
 
@@ -661,132 +525,6 @@ fn check_ref_base(ref_base: &str) -> Result<(), PartError> {
         );
     }
     Ok(())
-}
-
-/// What the keys of `pins` are.
-#[derive(Debug, Clone, Copy)]
-enum PinKeys<'a> {
-    /// Pad numbers, or default pin IDs (`6#2`).
-    PadNumbers,
-    /// Port names of `model`, matched case-insensitively.
-    PortNames { model: &'a str },
-}
-
-/// Applies `pins` (pin ID by pad number or port name) and checks that the IDs are unique.
-fn rename_pins(
-    pins: &mut [PinDef],
-    renames: &[(String, String)],
-    keys: PinKeys,
-) -> Result<(), PartError> {
-    let what = match keys {
-        PinKeys::PadNumbers => "pin",
-        PinKeys::PortNames { .. } => "port",
-    };
-    let default_ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
-    let mut renamed = BTreeSet::new();
-    for (key, id) in renames {
-        let normalized = match keys {
-            PinKeys::PadNumbers => key.clone(),
-            PinKeys::PortNames { .. } => key.to_ascii_lowercase(),
-        };
-        if !renamed.insert(normalized) {
-            return err(OptionKey::Pins, format!("{what} {key:?} is renamed twice"));
-        }
-        if id.is_empty() {
-            return err(OptionKey::Pins, format!("empty pin ID for {what} {key:?}"));
-        }
-        // A pad number stands for its first pin; the other duplicate pins are given by their
-        // default IDs (`6#2`).
-        let index = match keys {
-            PinKeys::PadNumbers => pins
-                .iter()
-                .position(|pin| &pin.pad == key)
-                .or_else(|| default_ids.iter().position(|id| id == key)),
-            PinKeys::PortNames { .. } => pins
-                .iter()
-                .position(|pin| pin.pad.eq_ignore_ascii_case(key)),
-        };
-        let pin = index.map(|i| &mut pins[i]);
-        match pin {
-            Some(pin) => pin.id = id.clone(),
-            None => {
-                let known: Vec<&str> = pins.iter().map(|pin| pin.pad.as_str()).collect();
-                return err(
-                    OptionKey::Pins,
-                    match keys {
-                        PinKeys::PadNumbers => format!("the part has no pin {key:?}"),
-                        PinKeys::PortNames { model } => format!(
-                            "the model {model} has no port {key:?}; its ports are {}",
-                            known.join(" ")
-                        ),
-                    },
-                );
-            }
-        }
-    }
-    let mut ids = BTreeSet::new();
-    for pin in pins.iter() {
-        if !ids.insert(pin.id.as_str()) {
-            return err(
-                OptionKey::Pins,
-                format!("pin ID {:?} is used twice", pin.id),
-            );
-        }
-    }
-    // The macros make an upper-case constant of each given ID (`out` -> `OUT`).
-    let mut upper: BTreeMap<String, &str> = BTreeMap::new();
-    for (_, id) in renames {
-        if let Some(other) = upper.insert(id.to_ascii_uppercase(), id)
-            && other != id
-        {
-            return err(
-                OptionKey::Pins,
-                format!("pin IDs {other:?} and {id:?} differ only in case"),
-            );
-        }
-    }
-    Ok(())
-}
-
-/// The default pin IDs: the pad numbers, with `#2`, `#3`, ... appended for the second and later
-/// duplicate pins of a pad (the first is the one KiCad writes to the netlist).
-fn default_pin_ids(pins: &[PinDef]) -> Vec<String> {
-    let mut count: BTreeMap<&str, usize> = BTreeMap::new();
-    pins.iter()
-        .map(|pin| {
-            let n = count.entry(pin.pad.as_str()).or_default();
-            *n += 1;
-            if *n == 1 {
-                pin.pad.clone()
-            } else {
-                format!("{}#{n}", pin.pad)
-            }
-        })
-        .collect()
-}
-
-fn check_internal_connections(
-    groups: &[Vec<String>],
-    pins: &[PinDef],
-) -> Result<Vec<Vec<String>>, PartError> {
-    for group in groups {
-        if group.len() < 2 {
-            return err(
-                OptionKey::InternalConnections,
-                "a group needs at least two pins",
-            );
-        }
-        if let Some(unknown) = group
-            .iter()
-            .find(|id| !pins.iter().any(|pin| &pin.id == *id))
-        {
-            return err(
-                OptionKey::InternalConnections,
-                format!("the part has no pin ID {unknown:?}"),
-            );
-        }
-    }
-    Ok(groups.to_vec())
 }
 
 fn check_symbol(symbol: &Symbol) -> Result<(), Error> {
@@ -814,16 +552,6 @@ fn check_symbol(symbol: &Symbol) -> Result<(), Error> {
     Ok(())
 }
 
-/// The `Sim.Library` field of a model file: with `/` as the separator on Windows, as KiCad writes
-/// paths and as the SPICE netlist does.
-fn library_field(path: &std::path::Path) -> String {
-    let text = path.to_string_lossy();
-    if cfg!(windows) {
-        text.replace('\\', "/")
-    } else {
-        text.into_owned()
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,7 +597,7 @@ mod tests {
         );
         assert_eq!(
             part.spice,
-            SpiceDef::Elements {
+            SpiceDef::Elements(Elements {
                 elements: vec![ElementDef {
                     device: 'R',
                     suffix: String::new(),
@@ -880,7 +608,7 @@ mod tests {
                     info: None,
                 }],
                 unused_pins: vec![],
-            }
+            })
         );
         assert_eq!(r.files.len(), 2);
     }
@@ -992,10 +720,10 @@ mod tests {
         );
         assert_eq!(part.internal_connections, vec![strings(&["4", "4#2"])]);
         // The model connects the first pin; the other is connected to it inside the part.
-        let SpiceDef::Elements {
+        let SpiceDef::Elements(Elements {
             elements,
             unused_pins,
-        } = &part.spice
+        }) = &part.spice
         else {
             panic!("{:?}", part.spice)
         };
@@ -1008,7 +736,7 @@ mod tests {
         let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["1", "2", "3", "sub", "vee", "5"]);
         assert_eq!(part.internal_connections, vec![strings(&["sub", "vee"])]);
-        let SpiceDef::Elements { elements, .. } = &part.spice else {
+        let SpiceDef::Elements(Elements { elements, .. }) = &part.spice else {
             panic!("{:?}", part.spice)
         };
         assert_eq!(elements[0].nodes, strings(&["3", "2", "5", "sub", "1"]));
@@ -1024,10 +752,10 @@ mod tests {
         assert_eq!(part.pins[5].name.as_deref(), Some("V-"));
         assert_eq!(part.internal_connections, vec![strings(&["4", "6"])]);
         // The model sees the stacked pin as one pin (Sim.Pins `[4,6]`), connected to pad 4.
-        let SpiceDef::Elements {
+        let SpiceDef::Elements(Elements {
             elements,
             unused_pins,
-        } = &part.spice
+        }) = &part.spice
         else {
             panic!("{:?}", part.spice)
         };
@@ -1100,10 +828,10 @@ mod tests {
         opts.sim = vec![vsup_binding()];
         let mut r = resolver();
         let part = load_part(&opts, &mut r).unwrap();
-        let SpiceDef::Elements {
+        let SpiceDef::Elements(Elements {
             elements,
             unused_pins,
-        } = &part.spice
+        }) = &part.spice
         else {
             panic!()
         };
@@ -1179,7 +907,7 @@ mod tests {
         assert_eq!(part.value, Value::Fixed("VSUP01".into()));
         let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]);
-        let SpiceDef::Elements { elements, .. } = &part.spice else {
+        let SpiceDef::Elements(Elements { elements, .. }) = &part.spice else {
             panic!()
         };
         assert_eq!(elements[0].nodes, ids);

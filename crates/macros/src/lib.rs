@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use cuprite_wire_kicad_lib::{
     part::{OptionKey, PartDef, PartError, load_part, load_spice_part},
     resolve::Resolver,
-    sim::{Args, ElementDef, ModelDef, SpiceDef, Value},
+    sim::{Args, ElementDef, Elements, ModelDef, SpiceDef, Value},
     spice_lib::Dialect,
 };
 use proc_macro2::{Span, TokenStream};
@@ -218,7 +218,7 @@ fn generate(
         Value::Param => {
             // The devices that write the value, which must be a number they read.
             let mut devices: Vec<char> = match &part.spice {
-                SpiceDef::Elements { elements, .. } => elements
+                SpiceDef::Elements(Elements { elements, .. }) => elements
                     .iter()
                     .filter(|element| matches!(element.args, Args::Value { .. }))
                     .map(|element| element.device)
@@ -350,7 +350,7 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
             Some(n) => quote!(::core::option::Option::Some(#n)),
             None => quote!(::core::option::Option::None),
         };
-        let pin_type = format_ident!("{}", pin_type_variant(pin.electrical_type.as_str()));
+        let pin_type = format_ident!("{}", pin.electrical_type.variant_name());
         quote! {
             (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::kicad::PinType::#pin_type))
         }
@@ -381,10 +381,10 @@ fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let body = match &part.spice {
         SpiceDef::Unsupported => return None,
         SpiceDef::Excluded => quote!(#krate::spice::SpicePartInfo::Excluded),
-        SpiceDef::Elements {
+        SpiceDef::Elements(Elements {
             elements,
             unused_pins,
-        } => {
+        }) => {
             let elements = elements
                 .iter()
                 .map(|element| element_tokens(element, krate));
@@ -441,7 +441,7 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
 fn doc_lines(part: &PartDef) -> Vec<String> {
     let mut lines = vec![String::new()];
     let elements: &[ElementDef] = match &part.spice {
-        SpiceDef::Elements { elements, .. } => elements,
+        SpiceDef::Elements(Elements { elements, .. }) => elements,
         _ => &[],
     };
     let models: Vec<&ElementDef> = elements.iter().filter(|e| e.info.is_some()).collect();
@@ -567,19 +567,6 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
 /// Escapes `|` in a table cell.
 fn escape(text: &str) -> String {
     text.replace('|', "\\|")
-}
-
-fn pin_type_variant(electrical_type: &str) -> String {
-    electrical_type
-        .split('_')
-        .map(|word| {
-            let mut chars = word.chars();
-            chars
-                .next()
-                .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
-                .unwrap_or_default()
-        })
-        .collect()
 }
 
 fn is_identifier(text: &str) -> bool {

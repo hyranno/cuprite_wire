@@ -99,11 +99,102 @@ pub struct SpicePartInput {
     pub spans: Spans,
 }
 
-const KICAD_KEYS: &str = "symbol, footprint, value, ref_base, pins, internal_connections, extra_pads, \
-                          spice, sim, sim_model, fields, symbol_dir, footprint_dir, sim_library_dir";
-const SPICE_KEYS: &str =
-    "library, name, value, ref_base, pins, internal_connections, params, dialect, sim_model";
-const SIM_KEYS: &str = "library, name, pins, unused, params, dialect, suffix";
+/// The options shared by both macros.
+#[derive(Clone, Copy)]
+enum CommonKey {
+    Value,
+    RefBase,
+    Pins,
+    InternalConnections,
+    SimModel,
+}
+
+/// The options of a model (`spice_part!` and the `sim` block).
+#[derive(Clone, Copy)]
+enum ModelKey {
+    Library,
+    Name,
+    Pins,
+    Unused,
+    Params,
+    Dialect,
+    Suffix,
+}
+
+/// The options of `kicad_part!` only.
+#[derive(Clone, Copy)]
+enum KicadKey {
+    Symbol,
+    Footprint,
+    ExtraPads,
+    Spice,
+    Sim,
+    Fields,
+    SymbolDir,
+    FootprintDir,
+    SimLibraryDir,
+}
+
+/// A key of `kicad_part!`.
+#[derive(Clone, Copy)]
+enum KicadPartKey {
+    Common(CommonKey),
+    Kicad(KicadKey),
+}
+
+/// A key of `spice_part!`.
+#[derive(Clone, Copy)]
+enum SpicePartKey {
+    Common(CommonKey),
+    Model(ModelKey),
+}
+
+/// The keys of each macro (and of the `sim` block), in the order the error message lists them.
+const KICAD_KEYS: &[(&str, KicadPartKey)] = &[
+    ("symbol", KicadPartKey::Kicad(KicadKey::Symbol)),
+    ("footprint", KicadPartKey::Kicad(KicadKey::Footprint)),
+    ("value", KicadPartKey::Common(CommonKey::Value)),
+    ("ref_base", KicadPartKey::Common(CommonKey::RefBase)),
+    ("pins", KicadPartKey::Common(CommonKey::Pins)),
+    (
+        "internal_connections",
+        KicadPartKey::Common(CommonKey::InternalConnections),
+    ),
+    ("extra_pads", KicadPartKey::Kicad(KicadKey::ExtraPads)),
+    ("spice", KicadPartKey::Kicad(KicadKey::Spice)),
+    ("sim", KicadPartKey::Kicad(KicadKey::Sim)),
+    ("sim_model", KicadPartKey::Common(CommonKey::SimModel)),
+    ("fields", KicadPartKey::Kicad(KicadKey::Fields)),
+    ("symbol_dir", KicadPartKey::Kicad(KicadKey::SymbolDir)),
+    ("footprint_dir", KicadPartKey::Kicad(KicadKey::FootprintDir)),
+    (
+        "sim_library_dir",
+        KicadPartKey::Kicad(KicadKey::SimLibraryDir),
+    ),
+];
+const SPICE_KEYS: &[(&str, SpicePartKey)] = &[
+    ("library", SpicePartKey::Model(ModelKey::Library)),
+    ("name", SpicePartKey::Model(ModelKey::Name)),
+    ("value", SpicePartKey::Common(CommonKey::Value)),
+    ("ref_base", SpicePartKey::Common(CommonKey::RefBase)),
+    ("pins", SpicePartKey::Common(CommonKey::Pins)),
+    (
+        "internal_connections",
+        SpicePartKey::Common(CommonKey::InternalConnections),
+    ),
+    ("params", SpicePartKey::Model(ModelKey::Params)),
+    ("dialect", SpicePartKey::Model(ModelKey::Dialect)),
+    ("sim_model", SpicePartKey::Common(CommonKey::SimModel)),
+];
+const SIM_KEYS: &[(&str, ModelKey)] = &[
+    ("library", ModelKey::Library),
+    ("name", ModelKey::Name),
+    ("pins", ModelKey::Pins),
+    ("unused", ModelKey::Unused),
+    ("params", ModelKey::Params),
+    ("dialect", ModelKey::Dialect),
+    ("suffix", ModelKey::Suffix),
+];
 
 impl Parse for PartInput {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -123,17 +214,16 @@ impl Parse for PartInput {
         braced!(content in input);
         parse_keys(
             &content,
+            KICAD_KEYS,
             |key, content, span| {
-                if let Some(recorded) = common_key(key, content, &mut options.common)? {
-                    return Ok(recorded.map(|k| vec![(k, span)]).unwrap_or_default());
-                }
-                let recorded = match key.to_string().as_str() {
-                    "symbol" => {
+                let recorded = match key {
+                    KicadPartKey::Common(key) => common_key(key, content, &mut options.common)?,
+                    KicadPartKey::Kicad(KicadKey::Symbol) => {
                         options.symbol = content.parse::<LitStr>()?.value();
                         has_symbol = true;
                         Some(OptionKey::Symbol)
                     }
-                    "footprint" => {
+                    KicadPartKey::Kicad(KicadKey::Footprint) => {
                         options.footprint = if content.peek(LitStr) {
                             FootprintOption::Given(content.parse::<LitStr>()?.value())
                         } else {
@@ -142,15 +232,15 @@ impl Parse for PartInput {
                         };
                         Some(OptionKey::Footprint)
                     }
-                    "fields" => {
+                    KicadPartKey::Kicad(KicadKey::Fields) => {
                         options.fields = fields(content)?;
                         None
                     }
-                    "extra_pads" => {
+                    KicadPartKey::Kicad(KicadKey::ExtraPads) => {
                         options.extra_pads = string_list(content)?;
                         Some(OptionKey::ExtraPads)
                     }
-                    "spice" => {
+                    KicadPartKey::Kicad(KicadKey::Spice) => {
                         options.spice =
                             match keyword(content, &["auto", "none", "excluded"])?.as_str() {
                                 "auto" => SpiceOption::Auto,
@@ -159,25 +249,24 @@ impl Parse for PartInput {
                             };
                         Some(OptionKey::Spice)
                     }
-                    "sim" => {
+                    KicadPartKey::Kicad(KicadKey::Sim) => {
                         options.sim = sim_block(content, &mut sim_spans)?;
-                        return Ok(Vec::new());
+                        None
                     }
-                    "symbol_dir" => {
+                    KicadPartKey::Kicad(KicadKey::SymbolDir) => {
                         symbol_dir = Some(content.parse()?);
                         None
                     }
-                    "footprint_dir" => {
+                    KicadPartKey::Kicad(KicadKey::FootprintDir) => {
                         footprint_dir = Some(content.parse()?);
                         None
                     }
-                    "sim_library_dir" => {
+                    KicadPartKey::Kicad(KicadKey::SimLibraryDir) => {
                         sim_library_dir = Some(content.parse()?);
                         None
                     }
-                    _ => return Err(unknown_key(key, KICAD_KEYS)),
                 };
-                Ok(recorded.map(|k| vec![(k, span)]).unwrap_or_default())
+                Ok(recorded.map(|k| (k, span)))
             },
             &mut spans,
         )?;
@@ -216,18 +305,16 @@ impl Parse for SpicePartInput {
         braced!(content in input);
         parse_keys(
             &content,
+            SPICE_KEYS,
             |key, content, span| {
-                // Before the value is parsed: `sim` keys such as `suffix` are not options here.
-                if !SPICE_KEYS.split(", ").any(|k| key == k) {
-                    return Err(unknown_key(key, SPICE_KEYS));
-                }
-                if let Some(recorded) = common_key(key, content, &mut options.common)? {
-                    return Ok(recorded.map(|k| vec![(k, span)]).unwrap_or_default());
-                }
-                match model_key(key, content, &mut options.model)? {
-                    Some(field) => Ok(vec![(OptionKey::Model { element: 0, field }, span)]),
-                    None => Err(unknown_key(key, SPICE_KEYS)),
-                }
+                let recorded = match key {
+                    SpicePartKey::Common(key) => common_key(key, content, &mut options.common)?,
+                    SpicePartKey::Model(key) => Some(OptionKey::Model {
+                        element: 0,
+                        field: model_key(key, content, &mut options.model)?,
+                    }),
+                };
+                Ok(recorded.map(|k| (k, span)))
             },
             &mut spans,
         )?;
@@ -258,9 +345,10 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
         braced!(content in input);
         parse_keys(
             &content,
-            |key, content, span| match model_key(key, content, &mut binding)? {
-                Some(field) => Ok(vec![(OptionKey::Model { element, field }, span)]),
-                None => Err(unknown_key(key, SIM_KEYS)),
+            SIM_KEYS,
+            |key, content, span| {
+                let field = model_key(key, content, &mut binding)?;
+                Ok(Some((OptionKey::Model { element, field }, span)))
             },
             spans,
         )?;
@@ -281,17 +369,25 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
     Ok(bindings)
 }
 
-/// Parses `key: value` pairs separated by commas. `handle` parses the value and returns the
-/// options it sets with their spans.
-fn parse_keys(
+/// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` parses the
+/// value and returns the option it sets, if errors should point at it, with its span.
+fn parse_keys<K: Copy>(
     content: ParseStream,
-    mut handle: impl FnMut(&Ident, ParseStream, Span) -> syn::Result<Vec<(OptionKey, Span)>>,
+    keys: &[(&str, K)],
+    mut handle: impl FnMut(K, ParseStream, Span) -> syn::Result<Option<(OptionKey, Span)>>,
     spans: &mut Spans,
 ) -> syn::Result<()> {
     let mut seen: Vec<String> = Vec::new();
     comma_separated(content, |content| {
         let key: Ident = content.parse()?;
         let key_name = key.to_string();
+        let Some(&(_, handled)) = keys.iter().find(|(name, _)| key == name) else {
+            let names: Vec<&str> = keys.iter().map(|(name, _)| *name).collect();
+            return Err(syn::Error::new(
+                key.span(),
+                format!("unknown key `{key}`; expected one of: {}", names.join(", ")),
+            ));
+        };
         if seen.contains(&key_name) {
             return Err(syn::Error::new(
                 key.span(),
@@ -305,7 +401,7 @@ fn parse_keys(
             .cursor()
             .token_tree()
             .map_or_else(|| content.span(), |(tree, _)| tree.span());
-        spans.options.extend(handle(&key, content, span)?);
+        spans.options.extend(handle(handled, content, span)?);
         Ok(())
     })
 }
@@ -326,15 +422,14 @@ fn comma_separated(
     Ok(())
 }
 
-/// Options shared by both macros. `Ok(None)`: not one of them; `Ok(Some(key))`: parsed, with the
-/// key errors point at.
+/// Parses an option shared by both macros; returns the key errors point at, if any.
 fn common_key(
-    key: &Ident,
+    key: CommonKey,
     content: ParseStream,
     options: &mut CommonOptions,
-) -> syn::Result<Option<Option<OptionKey>>> {
-    Ok(Some(match key.to_string().as_str() {
-        "value" => {
+) -> syn::Result<Option<OptionKey>> {
+    Ok(match key {
+        CommonKey::Value => {
             options.value = Some(if content.peek(LitStr) {
                 Value::Fixed(content.parse::<LitStr>()?.value())
             } else {
@@ -343,15 +438,15 @@ fn common_key(
             });
             Some(OptionKey::Value)
         }
-        "ref_base" => {
+        CommonKey::RefBase => {
             options.ref_base = Some(content.parse::<LitStr>()?.value());
             Some(OptionKey::RefBase)
         }
-        "pins" => {
+        CommonKey::Pins => {
             options.pins = string_map(content)?;
             Some(OptionKey::Pins)
         }
-        "internal_connections" => {
+        CommonKey::InternalConnections => {
             let groups;
             bracketed!(groups in content);
             options.internal_connections =
@@ -360,45 +455,44 @@ fn common_key(
                     .collect();
             Some(OptionKey::InternalConnections)
         }
-        "sim_model" => {
+        CommonKey::SimModel => {
             options.sim_model = match keyword(content, &["include", "inline"])?.as_str() {
                 "include" => ModelMode::Include,
                 _ => ModelMode::Inline,
             };
             None
         }
-        _ => return Ok(None),
-    }))
+    })
 }
 
-/// Options of a model (`spice_part!` and the `sim` block). `Ok(None)`: not one of them.
+/// Parses an option of a model (`spice_part!` and the `sim` block).
 fn model_key(
-    key: &Ident,
+    key: ModelKey,
     content: ParseStream,
     binding: &mut ModelBinding,
-) -> syn::Result<Option<BindingField>> {
-    Ok(Some(match key.to_string().as_str() {
-        "library" => {
+) -> syn::Result<BindingField> {
+    Ok(match key {
+        ModelKey::Library => {
             binding.library = content.parse::<LitStr>()?.value();
             BindingField::Library
         }
-        "name" => {
+        ModelKey::Name => {
             binding.name = content.parse::<LitStr>()?.value();
             BindingField::Name
         }
-        "pins" => {
+        ModelKey::Pins => {
             binding.pins = string_map(content)?;
             BindingField::Pins
         }
-        "unused" => {
+        ModelKey::Unused => {
             binding.unused = string_list(content)?;
             BindingField::Unused
         }
-        "params" => {
+        ModelKey::Params => {
             binding.params = string_map(content)?;
             BindingField::Params
         }
-        "dialect" => {
+        ModelKey::Dialect => {
             binding.dialect =
                 match keyword(content, &["auto", "ngspice", "pspice", "ltspice"])?.as_str() {
                     "ngspice" => DialectOption::Given(Dialect::Ngspice),
@@ -408,19 +502,11 @@ fn model_key(
                 };
             BindingField::Dialect
         }
-        "suffix" => {
+        ModelKey::Suffix => {
             binding.suffix = content.parse::<LitStr>()?.value();
             BindingField::Suffix
         }
-        _ => return Ok(None),
-    }))
-}
-
-fn unknown_key(key: &Ident, keys: &str) -> syn::Error {
-    syn::Error::new(
-        key.span(),
-        format!("unknown key `{key}`; expected one of: {keys}"),
-    )
+    })
 }
 
 fn end(input: ParseStream) -> syn::Result<()> {

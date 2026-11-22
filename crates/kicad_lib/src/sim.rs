@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use crate::{
     Error,
     binding::{
-        BindOptions, Bound, ModelBinding, ModelInfo, PartPin, PartPins, bind, check_param_value,
+        BindOptions, ModelBinding, ModelInfo, PartPin, PartPins, bind, check_param_value,
         map_ports, model_device,
     },
     resolve::Resolver,
@@ -38,11 +38,15 @@ pub enum SpiceDef {
     /// The symbol has no simulation model.
     Unsupported,
     Excluded,
-    Elements {
-        elements: Vec<ElementDef>,
-        /// Pins not connected to the model.
-        unused_pins: Vec<String>,
-    },
+    Elements(Elements),
+}
+
+/// The elements of a part, with pins in node order, and the pins not connected to any element.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Elements {
+    pub elements: Vec<ElementDef>,
+    /// Pins not connected to the model.
+    pub unused_pins: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,7 +122,7 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
         library: symbol.property("Sim.Library").filter(|l| !l.is_empty()),
         model_name: symbol.property("Sim.Name").filter(|n| !n.is_empty()),
     };
-    let (elements, unused_pins) = match fields.device.as_str() {
+    let elements = match fields.device.as_str() {
         "R" | "C" | "L" | "V" | "I" => passive_or_source(input, &fields)?,
         "D" | "NPN" | "PNP" | "NMOS" | "PMOS" | "NJFET" | "PJFET" => {
             semiconductor(input, &fields, resolver)?
@@ -126,10 +130,7 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
         "SUBCKT" => subcircuit(input, &fields, resolver)?,
         device => return Err(Error::new(format!("Sim.Device {device} is not supported"))),
     };
-    Ok(SpiceDef::Elements {
-        elements,
-        unused_pins,
-    })
+    Ok(SpiceDef::Elements(elements))
 }
 
 /// The `Sim.*` fields of a symbol with a `Sim.Device`.
@@ -154,7 +155,7 @@ impl SimFields<'_> {
 }
 
 /// `Sim.Device` `R` `C` `L`, and `V` `I` with `Sim.Type DC`: the value, or the one parameter.
-fn passive_or_source(input: &SimInput, fields: &SimFields) -> Result<Bound, Error> {
+fn passive_or_source(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
     let device = &fields.device;
     let letter = device.chars().next().unwrap();
     let source = matches!(letter, 'V' | 'I');
@@ -197,7 +198,7 @@ fn semiconductor(
     input: &SimInput,
     fields: &SimFields,
     resolver: &mut Resolver,
-) -> Result<Bound, Error> {
+) -> Result<Elements, Error> {
     let device = &fields.device;
     match (fields.library, fields.model_name) {
         (Some(library), Some(name)) => {
@@ -207,7 +208,7 @@ fn semiconductor(
                 ));
             }
             let bound = library_model(input, library, name, Vec::new(), resolver)?;
-            let info = bound.0[0].info.as_ref().expect("a library model");
+            let info = bound.elements[0].info.as_ref().expect("a library model");
             match (&info.model_type, info.sim_device) {
                 (None, _) => Err(Error::new(format!(
                     "{name:?} in {library:?} is a subcircuit, not a .model"
@@ -254,7 +255,7 @@ fn subcircuit(
     input: &SimInput,
     fields: &SimFields,
     resolver: &mut Resolver,
-) -> Result<Bound, Error> {
+) -> Result<Elements, Error> {
     if fields.sim_type.is_some() {
         return Err(fields.unsupported_type());
     }
@@ -264,7 +265,7 @@ fn subcircuit(
         ));
     };
     let bound = library_model(input, library, name, fields.params.clone(), resolver)?;
-    if bound.0[0].device != 'X' {
+    if bound.elements[0].device != 'X' {
         return Err(Error::new(format!(
             "{name:?} in {library:?} is a .model, not a subcircuit"
         )));
@@ -293,11 +294,13 @@ fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
         .iter()
         .map(|pin| pin.number.clone())
         .collect();
-    let (elements, unused_pins) = element(letter, nodes, args, Vec::new(), Vec::new());
-    Ok(SpiceDef::Elements {
-        elements,
-        unused_pins,
-    })
+    Ok(SpiceDef::Elements(element(
+        letter,
+        nodes,
+        args,
+        Vec::new(),
+        Vec::new(),
+    )))
 }
 
 /// The arguments for the value of the part (in KiCad's notation, converted to SPICE).
@@ -306,13 +309,11 @@ fn value_args(value: &Value, device: char, prefix: &str) -> Result<Args, Error> 
         Value::Param => Ok(Args::Value {
             prefix: prefix.to_string(),
         }),
-        Value::Fixed(value) => match value::to_spice(value, device) {
-            Some(spice) => Ok(Args::Fixed(format!("{prefix}{spice}"))),
-            None => Err(Error::new(format!(
-                "the value {value:?} is not a number (like 10k, 4k7 or 1M for mega); \
-                 use `value: param` or a numeric value"
-            ))),
-        },
+        Value::Fixed(value) => {
+            let spice = value::try_to_spice(value, device)
+                .map_err(|e| Error::new(format!("{e}; use `value: param` or a numeric value")))?;
+            Ok(Args::Fixed(format!("{prefix}{spice}")))
+        }
     }
 }
 
@@ -322,7 +323,7 @@ fn element(
     args: Args,
     models: Vec<ModelDef>,
     unused_pins: Vec<String>,
-) -> Bound {
+) -> Elements {
     let element = ElementDef {
         device,
         suffix: String::new(),
@@ -332,16 +333,16 @@ fn element(
         dialect: Dialect::Ngspice,
         info: None,
     };
-    (vec![element], unused_pins)
+    Elements {
+        elements: vec![element],
+        unused_pins,
+    }
 }
 
 /// The pins of a symbol, for binding them to a model: the first of duplicate pins only (the others are connected to it).
 fn part_pins(symbol: &Symbol) -> Vec<PartPin> {
-    let mut numbers = std::collections::BTreeSet::new();
     symbol
-        .pins
-        .iter()
-        .filter(|pin| numbers.insert(pin.number.as_str()))
+        .distinct_pins()
         .map(|pin| PartPin {
             id: pin.number.clone(),
             name: pin.name.clone(),
@@ -357,7 +358,7 @@ fn library_model(
     name: &str,
     params: Vec<(String, String)>,
     resolver: &mut Resolver,
-) -> Result<Bound, Error> {
+) -> Result<Elements, Error> {
     let symbol = input.symbol;
     let pins = parse_sim_pins(symbol.property("Sim.Pins").unwrap_or_default())?;
     let binding = ModelBinding {
@@ -521,10 +522,10 @@ mod tests {
     /// The element of a part with a single element, and the unused pins.
     fn single(def: SpiceDef) -> (ElementDef, Vec<String>) {
         match def {
-            SpiceDef::Elements {
+            SpiceDef::Elements(Elements {
                 mut elements,
                 unused_pins,
-            } if elements.len() == 1 => (elements.remove(0), unused_pins),
+            }) if elements.len() == 1 => (elements.remove(0), unused_pins),
             other => panic!("{other:?}"),
         }
     }
