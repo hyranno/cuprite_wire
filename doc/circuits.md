@@ -69,8 +69,10 @@ let amp = circuit.instantiate_subcircuit(Named("amp_left", Follower));
 circuit.connect(amp.output, node);
 ```
 
-Nodes are `circuit::NodeIndex` (petgraph's `NodeIndex`, re-exported so that circuits can be
-written without depending on petgraph).
+Nodes are `circuit::Node`s. A node belongs to the builder that created it: using it in another
+builder (e.g. a node of the outer circuit inside a subcircuit's generator) is reported as
+`CircuitErrorKind::ForeignNode` when the circuit is converted to a netlist. Pass nodes into a
+subcircuit through its interface.
 
 A subcircuit is a `SubcircuitGenerator`. Its `Interface` type lists the nodes the circuit around
 it connects to, usually as a struct deriving `subcircuit::Interface`, generic over the type of its
@@ -79,7 +81,7 @@ returns the corresponding new nodes in the outer circuit, in the same struct:
 
 ```rust
 #[derive(Interface)]
-pub struct FollowerPorts<T = NodeIndex> {
+pub struct FollowerPorts<T = Node> {
     pub input: T,
     pub output: T,
     pub vcc: T,
@@ -95,7 +97,7 @@ impl SubcircuitGenerator for Follower {
 }
 ```
 
-`Interface` is also implemented for arrays (`type Interface = [NodeIndex; 2]`) and for `()`.
+`Interface` is also implemented for arrays (`type Interface = [Node; 2]`) and for `()`.
 The same struct holding other values gives them per interface node, e.g. the pin types of
 `check_subcircuit` (`doc/erc.md` section 5).
 

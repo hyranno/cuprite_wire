@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, Named, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -15,7 +15,7 @@ pub struct LowPass;
 
 /// The interface of [`LowPass`].
 #[derive(Interface)]
-pub struct LowPassPorts<T = NodeIndex> {
+pub struct LowPassPorts<T = Node> {
     pub input: T,
     pub vref: T,
     pub vcc: T,

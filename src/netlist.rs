@@ -458,7 +458,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        circuit::{CircuitBuilder, Named},
+        circuit::{CircuitBuilder, Named, Node},
         kicad::{KicadPinInfo, PinType},
         spice::IndependentSource,
         subcircuit::SubcircuitGenerator,
@@ -577,7 +577,7 @@ mod tests {
     struct Divider;
     impl SubcircuitGenerator for Divider {
         type Options = ();
-        type Interface = [NodeIndex; 2];
+        type Interface = [Node; 2];
 
         // Node 0: input (labeled "IN" inside), node 1: output.
         fn construct_subcircuit(

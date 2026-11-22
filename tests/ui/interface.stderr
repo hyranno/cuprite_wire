@@ -10,19 +10,19 @@ error: `Interface` can only be derived for a struct with named fields
 9 | struct Tuple<T>(T, T);
   |        ^^^^^
 
-error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = Node> { input: T, output: T }`
   --> tests/ui/interface.rs:12:8
    |
 12 | struct NoParameter {
    |        ^^^^^^^^^^^
 
-error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = Node> { input: T, output: T }`
   --> tests/ui/interface.rs:17:22
    |
 17 | struct TwoParameters<T, U> {
    |                      ^
 
-error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`
+error: an `Interface` must have exactly one type parameter without bounds, e.g. `struct Ports<T = Node> { input: T, output: T }`
   --> tests/ui/interface.rs:23:16
    |
 23 | struct Bounded<T: Clone> {

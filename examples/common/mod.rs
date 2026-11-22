@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, Named, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     naming::NetLabel,
     subcircuit::SubcircuitGenerator,
 };
@@ -13,7 +13,7 @@ pub struct RcStage;
 
 impl SubcircuitGenerator for RcStage {
     type Options = ();
-    type Interface = [NodeIndex; 2];
+    type Interface = [Node; 2];
 
     fn construct_subcircuit(
         &self,
@@ -34,7 +34,7 @@ impl SubcircuitGenerator for RcStage {
 
 /// Two [`RcStage`]s in series, with the input labeled `IN`.
 /// Returns the circuit and its input and output nodes.
-pub fn two_stage_filter() -> (CircuitBuilder, NodeIndex, NodeIndex) {
+pub fn two_stage_filter() -> (CircuitBuilder, Node, Node) {
     let mut circuit = CircuitBuilder::new();
     let first = circuit.instantiate_subcircuit(Named("stage1", RcStage));
     let second = circuit.instantiate_subcircuit(Named("stage2", RcStage));

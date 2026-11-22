@@ -1,26 +1,26 @@
 //! Test bench shared by the tests of the subcircuits: a supply and SPICE helpers.
 
 use cuprite_wire::{
-    circuit::{CircuitBuilder, Named, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     naming::NetLabel,
     spice::{IndependentSource, Simulation},
 };
 
 /// The nodes of a signal stage (the preamp, the filter) for [`Bench::stage`].
 pub struct StageNodes {
-    pub input: NodeIndex,
-    pub vref: NodeIndex,
-    pub vcc: NodeIndex,
-    pub gnd: NodeIndex,
-    pub output: NodeIndex,
+    pub input: Node,
+    pub vref: Node,
+    pub vcc: Node,
+    pub gnd: Node,
+    pub output: Node,
 }
 
 pub struct Bench {
     pub circuit: CircuitBuilder,
     /// The positive supply, driven by an ideal source.
-    pub vcc: NodeIndex,
+    pub vcc: Node,
     /// The ground (`GND`, the SPICE ground).
-    pub gnd: NodeIndex,
+    pub gnd: Node,
 }
 
 impl Bench {
@@ -38,7 +38,7 @@ impl Bench {
     }
 
     /// Adds a source between a new node (returned) and the ground.
-    pub fn source(&mut self, name: &str, source: IndependentSource) -> NodeIndex {
+    pub fn source(&mut self, name: &str, source: IndependentSource) -> Node {
         let pins = self.circuit.instantiate_part(Named(name, source));
         self.circuit.connect(pins[IndependentSource::N], self.gnd);
         pins[IndependentSource::P]
@@ -63,7 +63,7 @@ impl Bench {
     }
 
     /// Names a node, so that the deck can refer to it as `v("/<name>")`.
-    pub fn probe(&mut self, node: NodeIndex, name: &str) {
+    pub fn probe(&mut self, node: Node, name: &str) {
         self.circuit.label(node, NetLabel::local(name));
     }
 

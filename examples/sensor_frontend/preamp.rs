@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, Named, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -30,7 +30,7 @@ impl Default for Preamp {
 
 /// The interface of [`Preamp`].
 #[derive(Interface)]
-pub struct PreampPorts<T = NodeIndex> {
+pub struct PreampPorts<T = Node> {
     pub input: T,
     pub vref: T,
     pub vcc: T,

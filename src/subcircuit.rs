@@ -8,7 +8,7 @@ use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
 
 use crate::{
-    circuit::{CircuitBuilder, ExpandedCircuit},
+    circuit::{CircuitBuilder, ExpandedCircuit, Node},
     naming::short_type_name,
     trace::Loc,
 };
@@ -24,10 +24,10 @@ pub use cuprite_wire_macros::Interface;
 /// [`check_subcircuit`](crate::erc::check_subcircuit):
 ///
 /// ```
-/// use cuprite_wire::{circuit::NodeIndex, subcircuit::Interface};
+/// use cuprite_wire::{circuit::Node, subcircuit::Interface};
 ///
 /// #[derive(Interface)]
-/// pub struct FollowerPorts<T = NodeIndex> {
+/// pub struct FollowerPorts<T = Node> {
 ///     pub input: T,
 ///     pub output: T,
 ///     pub vcc: T,
@@ -35,8 +35,8 @@ pub use cuprite_wire_macros::Interface;
 /// }
 /// ```
 ///
-/// It is also implemented for arrays (`[NodeIndex; 2]`) and for `()` (no interface).
-pub trait Interface<T = NodeIndex>: Sized {
+/// It is also implemented for arrays (`[Node; 2]`) and for `()` (no interface).
+pub trait Interface<T = Node>: Sized {
     /// The same interface holding `U`s.
     type With<U>: Interface<U>;
 
@@ -124,7 +124,11 @@ pub trait SubcircuitGenerator: Debug + Clone {
 
 /// The nodes of `interface` in order.
 pub(crate) fn interface_nodes(interface: &impl Interface) -> Vec<NodeIndex> {
-    interface.values().into_iter().copied().collect()
+    interface
+        .values()
+        .into_iter()
+        .map(|node| node.index())
+        .collect()
 }
 
 /// Creates a circuit with the interface nodes of `generator`, traced to `location`, and
@@ -133,10 +137,10 @@ pub(crate) fn construct<G: SubcircuitGenerator>(
     generator: &G,
     options: &G::Options,
     location: Loc,
-) -> (CircuitBuilder<G::Options>, Vec<NodeIndex>) {
+) -> (CircuitBuilder<G::Options>, Vec<Node>) {
     let mut circuit = CircuitBuilder::new();
     let interface = G::Interface::from_fn(|_| circuit.add_node_at(location));
-    let nodes = interface_nodes(&interface);
+    let nodes = interface.values().into_iter().copied().collect();
     generator.construct_subcircuit(options, &mut circuit, interface);
     (circuit, nodes)
 }
@@ -183,6 +187,7 @@ where
     fn generate(&self, options: &B, location: Loc) -> (ExpandedCircuit, Vec<NodeIndex>) {
         let options = (self.options_for_generator)(options);
         let (circuit, interface) = construct(&self.generator, &options, location);
+        let interface = interface.into_iter().map(Node::index).collect();
         (circuit.expand(&options), interface)
     }
 }
@@ -312,19 +317,19 @@ mod tests {
     use super::*;
 
     #[derive(Interface, Debug, PartialEq)]
-    struct Ports<T = NodeIndex> {
+    struct Ports<T = Node> {
         input: T,
         output: T,
     }
 
     #[test]
     fn test_derived_interface() {
-        let ports = <Ports>::from_fn(NodeIndex::new);
+        let ports = Ports::<usize>::from_fn(|index| index);
         assert_eq!(
             ports,
             Ports {
-                input: NodeIndex::new(0),
-                output: NodeIndex::new(1)
+                input: 0,
+                output: 1
             }
         );
         assert_eq!(ports.values(), [&ports.input, &ports.output]);
@@ -337,12 +342,12 @@ mod tests {
 
     #[test]
     fn test_array_and_unit_interfaces() {
-        let nodes = <[NodeIndex; 3]>::from_fn(NodeIndex::new);
-        assert_eq!(nodes, [0, 1, 2].map(NodeIndex::new));
+        let nodes = <[usize; 3]>::from_fn(|index| index);
+        assert_eq!(nodes, [0, 1, 2]);
         assert_eq!(nodes.values(), nodes.iter().collect::<Vec<_>>());
-        assert_eq!(<[NodeIndex; 3] as Interface>::names(), ["0", "1", "2"]);
+        assert_eq!(<[Node; 3] as Interface>::names(), ["0", "1", "2"]);
         <() as Interface>::from_fn(|_| unreachable!());
-        assert!(Interface::<NodeIndex>::values(&()).is_empty());
+        assert!(Interface::<Node>::values(&()).is_empty());
         assert!(<() as Interface>::names().is_empty());
     }
 }

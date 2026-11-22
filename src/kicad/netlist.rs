@@ -318,7 +318,7 @@ impl KicadNet {
 mod tests {
     use std::collections::BTreeMap;
 
-    use petgraph::graph::NodeIndex;
+    use crate::circuit::Node;
 
     use super::*;
     use crate::{
@@ -405,7 +405,7 @@ mod tests {
     struct Inner;
     impl SubcircuitGenerator for Inner {
         type Options = ();
-        type Interface = [NodeIndex; 2];
+        type Interface = [Node; 2];
 
         fn construct_subcircuit(
             &self,
@@ -431,7 +431,7 @@ mod tests {
     struct Outer;
     impl SubcircuitGenerator for Outer {
         type Options = ();
-        type Interface = [NodeIndex; 2];
+        type Interface = [Node; 2];
 
         fn construct_subcircuit(
             &self,

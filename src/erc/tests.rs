@@ -1,9 +1,7 @@
-use petgraph::graph::NodeIndex;
-
 use super::*;
 use crate::{
     basic::{OpAmpSot23, Resistor0603},
-    circuit::{CircuitBuilder, Named},
+    circuit::{CircuitBuilder, Named, Node},
     kicad::{KicadPartInfo, KicadPinInfo},
     naming::NetLabel,
     subcircuit::{Interface, SubcircuitGenerator},
@@ -39,7 +37,7 @@ fn warning(message: &str) -> (Severity, String) {
 struct Follower;
 
 #[derive(Interface)]
-struct FollowerPorts<T = NodeIndex> {
+struct FollowerPorts<T = Node> {
     input: T,
     output: T,
     vcc: T,
@@ -131,9 +129,9 @@ fn test_label_single_pin() {
     );
     // Traced to the label, with a note at the pin.
     let diagnostic = &report.violations[0].diagnostic;
-    assert_eq!(diagnostic.trace.0[0].line(), 31);
+    assert_eq!(diagnostic.trace.0[0].line(), 29);
     assert_eq!(diagnostic.notes[0].message, "R1.1 (passive) is here");
-    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 29);
+    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 27);
 
     // A no-connect mark or an allow mark silences it.
     let mut circuit = CircuitBuilder::new();
@@ -298,7 +296,7 @@ struct OpenResistor;
 
 impl SubcircuitGenerator for OpenResistor {
     type Options = ();
-    type Interface = [NodeIndex; 1];
+    type Interface = [Node; 1];
 
     fn construct_subcircuit(
         &self,

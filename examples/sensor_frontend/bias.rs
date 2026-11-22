@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, Named, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -14,7 +14,7 @@ pub struct MidSupply;
 
 /// The interface of [`MidSupply`].
 #[derive(Interface)]
-pub struct MidSupplyPorts<T = NodeIndex> {
+pub struct MidSupplyPorts<T = Node> {
     pub vcc: T,
     pub gnd: T,
     pub vref: T,

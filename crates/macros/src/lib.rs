@@ -135,7 +135,7 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 /// Implements `Interface` for a struct with one type parameter whose fields all have that type,
-/// e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`. The order of the fields is the
+/// e.g. `struct Ports<T = Node> { input: T, output: T }`. The order of the fields is the
 /// order of the interface. `cuprite_wire::subcircuit::Interface` documents it.
 #[proc_macro_derive(Interface)]
 pub fn derive_interface(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

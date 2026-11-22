@@ -92,6 +92,9 @@ pub enum CircuitErrorKind {
         /// The duplicated instance name.
         name: String,
     },
+    /// A node created by another [`CircuitBuilder`](crate::circuit::CircuitBuilder) is used, e.g.
+    /// a node of the circuit around a subcircuit inside the subcircuit. The use is ignored.
+    ForeignNode,
     /// A part lists the same pin ID more than once.
     DuplicatePinId {
         /// Reference designator of the part.
@@ -202,6 +205,9 @@ impl fmt::Display for CircuitErrorKind {
                     f,
                     "instance name {name:?} is used more than once in the same circuit"
                 )
+            }
+            CircuitErrorKind::ForeignNode => {
+                write!(f, "a node of another circuit is used in this circuit")
             }
             CircuitErrorKind::DuplicatePinId { ref_name, pin_id } => {
                 write!(f, "{ref_name}: pin ID {pin_id:?} is listed more than once")

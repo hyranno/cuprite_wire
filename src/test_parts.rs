@@ -2,10 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use petgraph::graph::NodeIndex;
-
 use crate::{
-    circuit::{CircuitBuilder, Named},
+    circuit::{CircuitBuilder, Named, Node},
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
     naming::NetLabel,
     parts::Part,
@@ -41,7 +39,7 @@ pub struct RcStage;
 
 impl SubcircuitGenerator for RcStage {
     type Options = ();
-    type Interface = [NodeIndex; 2];
+    type Interface = [Node; 2];
 
     fn construct_subcircuit(
         &self,
