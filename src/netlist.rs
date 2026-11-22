@@ -1,6 +1,9 @@
 //! Format-independent netlist, the common input of the KiCad and SPICE exporters.
 
-use std::{cmp::Ordering, collections::HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap},
+};
 
 use petgraph::graph::NodeIndex;
 use uuid::Uuid;
@@ -13,7 +16,7 @@ use crate::{
     },
     kicad::KicadPartInfo,
     naming::{HierPath, NetLabel, NodeLabel, escape_name, natural_cmp},
-    parts::{Part, PartPins},
+    parts::{Part, PartPins, PinType},
     trace::Trace,
 };
 
@@ -46,6 +49,9 @@ pub struct Component {
     pub pins: PartPins,
     /// [`Part::kicad`] of the part, made once.
     pub(crate) kicad: Option<KicadPartInfo>,
+    /// The electrical types of the pins for ERC, keyed by pin ID: those of the KiCad pin
+    /// information and [`Part::extra_pin_types`].
+    pub pin_types: BTreeMap<String, PinType>,
     /// Path of the subcircuit instance containing the component.
     pub path: HierPath,
     /// Derived from the path and the instance name, so it does not change between builds.
@@ -191,11 +197,21 @@ impl BuiltCircuit {
             .into_iter()
             .map(|i| {
                 let part = &self.parts[i];
+                let kicad = part.part.kicad();
+                let mut pin_types: BTreeMap<_, _> = kicad
+                    .iter()
+                    .flat_map(|info| &info.pins)
+                    .map(|(id, pin)| (id.clone(), pin.pin_type))
+                    .collect();
+                let mut extra_types = part.part.extra_pin_types();
+                extra_types.retain(|id, _| !pin_types.contains_key(id));
+                pin_types.append(&mut extra_types);
                 Component {
                     ref_name: ref_names[i].clone(),
                     part: part.part.clone(),
                     pins: PartPins::of(part.part.as_ref()),
-                    kicad: part.part.kicad(),
+                    kicad,
+                    pin_types,
                     path: part.path.clone(),
                     uuid: part.uuid(),
                     trace: part.trace.clone(),
@@ -225,6 +241,23 @@ impl BuiltCircuit {
                     ref_name: ref_name(),
                     pin_id: pin_id.clone(),
                 }));
+            }
+            for pin_id in component.part.extra_pin_types().into_keys() {
+                if component
+                    .kicad
+                    .as_ref()
+                    .is_some_and(|info| info.pins.contains_key(&pin_id))
+                {
+                    errors.push(error(CircuitErrorKind::DuplicatePinType {
+                        ref_name: ref_name(),
+                        pin_id,
+                    }));
+                } else if !component.pins.contains(&pin_id) {
+                    errors.push(error(CircuitErrorKind::UnknownPinId {
+                        ref_name: ref_name(),
+                        pin_id,
+                    }));
+                }
             }
         }
         (components, component_of_part)

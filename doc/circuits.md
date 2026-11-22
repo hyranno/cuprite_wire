@@ -39,7 +39,7 @@ impl Part for Passive {
     fn kicad(&self) -> Option<KicadPartInfo> { ... }         // doc/kicad_netlist_usage.md section 2
     fn spice(&self) -> Option<SpicePartInfo> { ... }         // doc/spice_netlist_usage.md section 2
     // fn internal_connections(&self) -> Vec<Vec<String>>   (empty by default)
-    // fn pin_types(&self) -> BTreeMap<String, PinType>     (doc/erc.md section 2)
+    // fn extra_pin_types(&self) -> BTreeMap<String, PinType> (doc/erc.md section 2)
 }
 ```
 

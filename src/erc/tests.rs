@@ -2,8 +2,10 @@ use super::*;
 use crate::{
     basic::{OpAmpSot23, Resistor0603},
     circuit::{CircuitBuilder, Named, Node},
+    error::CircuitErrorKind,
     kicad::{KicadPartInfo, KicadPinInfo},
     naming::NetLabel,
+    parts::Part,
     subcircuit::{Interface, SubcircuitGenerator},
     test_parts::{CustomPart, rc_filter},
 };
@@ -511,5 +513,79 @@ fn test_display() {
             "warning: label \"/IN\" is connected only to R1.1 (passive)\n  at src/test_parts.rs:"
         ),
         "{text}"
+    );
+}
+
+/// A part with extra pin types.
+#[derive(Debug, Clone)]
+struct WithExtraTypes(CustomPart, Vec<(&'static str, PinType)>);
+
+impl Part for WithExtraTypes {
+    fn get_ref_base_name(&self) -> String {
+        self.0.get_ref_base_name()
+    }
+    fn pin_ids(&self) -> Vec<String> {
+        self.0.pin_ids()
+    }
+    fn value(&self) -> String {
+        self.0.value()
+    }
+    fn kicad(&self) -> Option<KicadPartInfo> {
+        self.0.kicad()
+    }
+    fn extra_pin_types(&self) -> BTreeMap<String, PinType> {
+        self.1.iter().map(|(id, t)| (id.to_string(), *t)).collect()
+    }
+}
+
+#[test]
+fn test_extra_pin_types() {
+    // Pins without KiCad pin information get the extra types.
+    let no_kicad = CustomPart {
+        kicad: None,
+        ..CustomPart::valid()
+    };
+    let driver = WithExtraTypes(no_kicad, vec![("1", PinType::Output)]);
+    let mut circuit = CircuitBuilder::new();
+    let a = circuit.instantiate_part(driver.clone());
+    let b = circuit.instantiate_part(driver);
+    circuit.connect(a["1"], b["1"]);
+    circuit.label(a["1"], NetLabel::global("OUT"));
+    circuit.no_connect(a["2"]);
+    circuit.no_connect(b["2"]);
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    assert_eq!(
+        netlist.components[0].pin_types,
+        BTreeMap::from([("1".to_string(), PinType::Output)])
+    );
+    assert_eq!(
+        summary(&netlist.erc(&ErcSettings::default())),
+        vec![error(
+            "net \"OUT\": pins of type output and output are connected: X1.1 (output) and X2.1 (output)"
+        )]
+    );
+
+    // A pin with KiCad pin information keeps its type, and the extra type is reported, as is an
+    // unknown pin ID.
+    let both = WithExtraTypes(
+        CustomPart::valid(),
+        vec![("1", PinType::Output), ("x", PinType::Input)],
+    );
+    let mut circuit = CircuitBuilder::new();
+    circuit.instantiate_part(both);
+    let errors = circuit.build(&()).to_netlist().unwrap_err();
+    let kinds: Vec<_> = errors.0.iter().map(|error| error.kind.clone()).collect();
+    assert_eq!(
+        kinds,
+        [
+            CircuitErrorKind::DuplicatePinType {
+                ref_name: "X1".into(),
+                pin_id: "1".into()
+            },
+            CircuitErrorKind::UnknownPinId {
+                ref_name: "X1".into(),
+                pin_id: "x".into()
+            },
+        ]
     );
 }

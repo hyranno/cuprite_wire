@@ -1,6 +1,7 @@
 //! Electrical rules check (ERC) of a netlist, following the netlist-level rules of KiCad 10's ERC.
 //!
-//! The electrical types of pins come from [`Part::pin_types`](crate::parts::Part::pin_types).
+//! The electrical types of pins come from their KiCad pin information and
+//! [`Part::extra_pin_types`](crate::parts::Part::extra_pin_types) ([`Component::pin_types`](crate::netlist::Component::pin_types)).
 //! Marks attached to nodes stand for the schematic items KiCad uses: a no-connect flag
 //! ([`CircuitBuilder::no_connect`]), a `PWR_FLAG` ([`CircuitBuilder::power_flag`]), and pins outside the
 //! circuit ([`CircuitBuilder::virtual_pin`]). A violation is excluded on one net with
@@ -474,9 +475,8 @@ impl Netlist {
             settings,
             violations: Vec::new(),
         };
-        let pin_types: Vec<_> = self.components.iter().map(|c| c.part.pin_types()).collect();
-        self.check_nets(&pin_types, &mut report);
-        self.check_ground_pins(&pin_types, &mut report);
+        self.check_nets(&mut report);
+        self.check_ground_pins(&mut report);
         self.check_pinless_nets(&mut report);
         self.check_similar_net_names(&mut report);
         self.report_warnings(&mut report);
@@ -486,9 +486,9 @@ impl Netlist {
     }
 
     /// Checks the pins and marks on each net.
-    fn check_nets(&self, pin_types: &[BTreeMap<String, PinType>], report: &mut Reporter) {
+    fn check_nets(&self, report: &mut Reporter) {
         for net in &self.nets {
-            let (pins, net_pins, traces) = self.net_pins(net, pin_types);
+            let (pins, net_pins, traces) = self.net_pins(net);
             let no_connect = net
                 .marks
                 .iter()
@@ -504,20 +504,17 @@ impl Netlist {
     }
 
     /// The pins on `net` (part pins, then virtual pins) for ERC, with the trace of each.
-    fn net_pins(
-        &self,
-        net: &Net,
-        pin_types: &[BTreeMap<String, PinType>],
-    ) -> (Vec<ErcPin>, Vec<NetPin>, Vec<Trace>) {
+    fn net_pins(&self, net: &Net) -> (Vec<ErcPin>, Vec<NetPin>, Vec<Trace>) {
         let mut pins = Vec::new();
         let mut net_pins = Vec::new();
         let mut traces = Vec::new();
         for node in &net.nodes {
-            let pin_type = pin_types[node.component]
+            let component = &self.components[node.component];
+            let pin_type = component
+                .pin_types
                 .get(&node.pin_id)
                 .copied()
                 .unwrap_or(PinType::Passive);
-            let component = &self.components[node.component];
             let stack = match component.pins.group(&node.pin_id) {
                 Some(group) => Stack::Group {
                     component: node.component,
@@ -551,7 +548,7 @@ impl Netlist {
 
     /// Reports the power pins named like a ground that are not on a ground net, on parts with
     /// another power pin on one (KiCad 10's `ERC_TESTER::TestGroundPins`).
-    fn check_ground_pins(&self, pin_types: &[BTreeMap<String, PinType>], report: &mut Reporter) {
+    fn check_ground_pins(&self, report: &mut Reporter) {
         let net_of: HashMap<(usize, &str), &Net> = self
             .nets
             .iter()
@@ -567,7 +564,7 @@ impl Netlist {
             };
             let mut has_ground_net = false;
             let mut mismatched = Vec::new();
-            for (pin_id, &pin_type) in &pin_types[index] {
+            for (pin_id, &pin_type) in &component.pin_types {
                 if !matches!(pin_type, PinType::PowerIn | PinType::PowerOut) {
                     continue;
                 }

@@ -53,17 +53,17 @@ pub trait Part: Debug + DynClone {
     fn cosim_device(&self) -> Option<&crate::spice::cosim::CosimDevice> {
         None
     }
-    /// Electrical types of the pins for ERC, keyed by pin ID. Defaults to those of the KiCad
-    /// information. ERC treats pins without a type as [`PinType::Passive`].
-    fn pin_types(&self) -> BTreeMap<String, PinType> {
-        self.kicad()
-            .map(|info| {
-                info.pins
-                    .into_iter()
-                    .map(|(id, pin)| (id, pin.pin_type))
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// Electrical types for ERC of pins that have no KiCad pin information, keyed by pin ID (e.g.
+    /// the pins of a part without [`Part::kicad`]). ERC uses the types of the KiCad pin information
+    /// and these, and treats pins with neither as [`PinType::Passive`].
+    ///
+    /// A pin with KiCad pin information is reported as
+    /// [`CircuitErrorKind::DuplicatePinType`](crate::error::CircuitErrorKind::DuplicatePinType),
+    /// and a key that is not a pin ID as
+    /// [`CircuitErrorKind::UnknownPinId`](crate::error::CircuitErrorKind::UnknownPinId). Empty by
+    /// default.
+    fn extra_pin_types(&self) -> BTreeMap<String, PinType> {
+        BTreeMap::new()
     }
 }
 dyn_clone::clone_trait_object!(Part);
