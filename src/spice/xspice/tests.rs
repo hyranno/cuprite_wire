@@ -210,8 +210,15 @@ fn test_simulate_oscillator() {
 )]
 fn test_simulate_verilog_counter() {
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice/counter.v");
-    let model = Verilator::new([&source]).build().unwrap();
-    assert_eq!(Verilator::new([&source]).build().unwrap(), model);
+    let dir = test_dir("counter");
+    let build = || {
+        Verilator::new([&source])
+            .cache_dir(dir.join("cache"))
+            .build()
+            .unwrap()
+    };
+    let model = build();
+    assert_eq!(build(), model);
     let input = InputCharacteristics::cmos(3.3);
     let cmos = OutputCharacteristics::cmos(3.3);
     let part = model.part(&input, &cmos);

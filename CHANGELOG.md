@@ -90,6 +90,12 @@ break the API).
 - `SimulationError::SharedLibrary` and `SimulationError::Cosimulation` exist only with the
   `shared-ngspice` feature. `VerilatorError::Command::dir` is an `Option`: `None` for
   `verilator --version`, which does not run in a build directory.
+- `Verilator` caches the builds in `cuprite_wire/verilator` in the user's cache directory
+  (`$XDG_CACHE_HOME`, else `~/.cache`; `%LOCALAPPDATA%` on Windows) instead of
+  `cuprite_wire-verilator` in the system temporary directory, where another user could place
+  libraries that would be loaded. On Unix, the cache directory is created with mode `0700`, and
+  `build` fails with `VerilatorError::Io` if it belongs to another user or is writable by the
+  group or others.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.

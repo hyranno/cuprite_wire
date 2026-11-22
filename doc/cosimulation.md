@@ -268,8 +268,11 @@ let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristic
   with `g++`. It needs `verilator`, `g++` and `make` (the devcontainer has them). A missing
   program or shim is reported as `VerilatorError::Io` that names it (and `shim_dir`, for the shim).
 - Builds take a few seconds and are cached by the contents of the sources, the arguments, the
-  current directory and the version of Verilator, in `cuprite_wire-verilator` in the temporary
-  directory (`cache_dir` to change it). The files Verilator read in besides the sources
+  current directory and the version of Verilator, in `cuprite_wire/verilator` in the user's
+  cache directory (`$XDG_CACHE_HOME`, else `~/.cache`; `cache_dir` to change it). The libraries
+  built there are loaded into the process, so on Unix the cache directory is created with mode
+  `0700`, and one that belongs to another user or is writable by the group or others is
+  rejected (`VerilatorError::Io`). The files Verilator read in besides the sources
   (`` `include ``, `-y`, `-v`, `-f`) are recorded with their size and modification time, and a
   change to them rebuilds the design.
 - Relative paths (the sources, `shim_dir`, `cache_dir` and paths in the arguments) are resolved

@@ -89,7 +89,9 @@ impl Component {
 pub struct Net {
     /// The net name, unique in the netlist: given by a label (`NAME` for a global one, `/path/NAME`
     /// for a local one), or, for nets without labels, after one of its pins like KiCad
-    /// (`Net-(R1-Pad2)`, or `unconnected-(U1-NC-Pad7)` for a single pin).
+    /// (`Net-(R1-Pad2)`, or `unconnected-(U1-NC-Pad7)` for a single pin). `/` in the label and
+    /// in the instance names on the path is escaped as `{slash}`, as KiCad does
+    /// ([`NetLabel`]).
     pub name: String,
     /// Sorted by component, then by pin ID.
     pub nodes: Vec<NetNode>,
