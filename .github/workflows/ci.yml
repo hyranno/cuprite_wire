@@ -127,8 +127,12 @@ jobs:
           Copy-Item C:\msys64\ucrt64\bin\libngspice-0.dll C:\msys64\ucrt64\bin\ngspice.dll
           "C:\msys64\ucrt64\bin" >> $env:GITHUB_PATH
           # ngspice looks for spinit (which loads the XSPICE code models) in its build prefix
-          # otherwise, which MSYS2 does not have.
+          # otherwise, which MSYS2 does not have. spinit names the code models by MSYS2 paths
+          # (/ucrt64/lib/ngspice/...), which the native ngspice cannot open.
           "SPICE_LIB_DIR=C:\msys64\ucrt64\share\ngspice" >> $env:GITHUB_ENV
+          $spinit = 'C:\msys64\ucrt64\share\ngspice\scripts\spinit'
+          (Get-Content $spinit) -replace '/ucrt64/', 'C:/msys64/ucrt64/' | Set-Content $spinit
+          Select-String -Path $spinit -Pattern 'codemodel'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Without the KiCad libraries; the XSPICE tests building code models are Linux-only.
       - run: cargo test --workspace --features shared-ngspice
