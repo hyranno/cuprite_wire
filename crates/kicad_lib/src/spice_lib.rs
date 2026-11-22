@@ -474,7 +474,7 @@ fn is_comment_line(line: &str) -> bool {
 /// Removes an inline comment: `;`, `//`, or a `$` after whitespace and followed by whitespace
 /// (ngspice's `$` comment; `$G_DPWR` is a node name in PSpice and stays). Like [`tokenize`],
 /// `{...}`, `'...'` and `"..."` are not searched (`.include "a;b.lib"`).
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     let bytes = line.as_bytes();
     let mut depth = 0usize;
     let mut quote: Option<u8> = None;

@@ -4,7 +4,7 @@ error: no .subckt or .model named "VSUP1" in $DIR/crates/kicad_lib/tests/fixture
 7 |         name: "VSUP1",
   |               ^^^^^^^
 
-error: the model has no port "RESET"; its ports are CTR CTS GND RESET_B SENSE VDD
+error: the model VSUP01 has no port "RESET"; its ports are CTR CTS GND RESET_B SENSE VDD
   --> tests/ui/spice_part.rs:16:15
    |
 16 |         pins: { "RESET" => "reset_n" },
@@ -32,4 +32,10 @@ error: unknown key `unused`; expected one of: library, name, value, ref_base, pi
   --> tests/ui/spice_part.rs:48:9
    |
 48 |         unused: ["CTR"],
+   |         ^^^^^^
+
+error: unknown key `suffix`; expected one of: library, name, value, ref_base, pins, internal_connections, params, dialect, sim_model
+  --> tests/ui/spice_part.rs:56:9
+   |
+56 |         suffix: 5,
    |         ^^^^^^

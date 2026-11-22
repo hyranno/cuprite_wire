@@ -49,4 +49,12 @@ cuprite_wire::spice_part! {
     }
 }
 
+cuprite_wire::spice_part! {
+    struct SimKeyBadValue {
+        library: "${TEST_MODELS}/vsup01.lib",
+        name: "VSUP01",
+        suffix: 5,
+    }
+}
+
 fn main() {}

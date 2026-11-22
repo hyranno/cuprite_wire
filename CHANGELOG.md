@@ -87,6 +87,25 @@ break the API).
   whitespace, `?`, `#`, `/` or `{` is an `InvalidName`, and so is a `SubcircuitGenerator::base_name`
   that is empty or contains `#` or `{` when it makes an automatic name. The `ref_base` of
   `kicad_part!` and `spice_part!` must not end with a digit either.
+- `kicad_part!` and `spice_part!`: pin IDs given in `pins` that differ only in case (`out` and
+  `OUT`), which made two constants `OUT`, and a key given twice in a `{ ... }` map (`fields`,
+  `params`, `pins`) are errors. `fields` cannot give `Sim.*` fields, which were written next to
+  those of the `sim` block (or were not used for the simulation); give the model with `sim`.
+- A `.model` with `pchan` only in an inline comment (`$ pchan`) was taken as a P-channel VDMOS,
+  and words in inline comments were looked up as definitions the model needs.
+- `${KIPRJMOD}` in `Sim.Library` is KiCad's project directory, the directory relative paths are
+  resolved against (`sim_library_dir`), instead of an environment variable.
+- `Simulation::table` reports a file that cannot be read (e.g. no command wrote it) as
+  `SimulationError::Table` with the file name, instead of `Io` ("cannot run ngspice").
+- `Verilator::build` read the sources as UTF-8 for the cache key, so a source with a Latin-1
+  comment could not be built; it reports a build that cannot be moved into the cache instead of
+  failing later; and the logs of ngspice and Verilator start the standard error on a new line.
+- `spice_part!` reports a `sim` key (`suffix`, `unused`) as unknown before reading its value, and
+  names the model when a port in `pins` is not found.
+- Reading KiCad files: escapes in strings follow KiCad's lexer (`\a` `\b` `\f` `\v`, bytes in hex
+  `\x41` and octal `\101`; a backslash before another character is kept), and a pin in several
+  units with the same name and type belongs to the lowest of them rather than the first in the
+  file.
 
 ## [0.2.0] - 2026-11-21
 

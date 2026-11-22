@@ -503,6 +503,21 @@ fn aborted_transient_error(simulator: &dyn Simulator) {
     assert!(error.contains("simulation(s) aborted"), "{error}");
 }
 
+/// A file no command wrote is reported with its name.
+#[test]
+fn test_missing_table() {
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).control(["op"]);
+    let error = deck.run().unwrap().table("missing.txt").unwrap_err();
+    assert!(
+        matches!(&error, crate::spice::SimulationError::Table { file, .. } if file == "missing.txt"),
+        "{error}"
+    );
+    assert!(
+        error.to_string().starts_with("cannot read missing.txt: "),
+        "{error}"
+    );
+}
+
 #[test]
 fn test_parts_without_spice_model_mix_with_kicad() {
     // The same circuit exports to both formats, and the SPICE node names follow the KiCad net names.

@@ -242,13 +242,16 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
         for pin in unit_symbol.children("pin") {
             let pin = parse_pin(pin, unit)?;
             // The same number with the same name and type in several units (e.g. a shared supply
-            // pin) is one pin. With another name or type, it is a duplicate pin of the pad(s).
-            if !pins.iter().any(|other| {
+            // pin) is one pin, of the lowest of the units whatever their order in the file. With
+            // another name or type, it is a duplicate pin of the pad(s).
+            match pins.iter_mut().find(|other| {
                 other.number == pin.number
                     && other.electrical_type == pin.electrical_type
                     && other.name == pin.name
             }) {
-                pins.push(pin);
+                Some(other) if pin.unit < other.unit => *other = pin,
+                Some(_) => {}
+                None => pins.push(pin),
             }
         }
     }
@@ -488,7 +491,7 @@ mod tests {
         assert_eq!(
             pins,
             [
-                ("1", "V", 2),
+                ("1", "V", 1),
                 ("6", "K", 1),
                 ("6", "A", 2),
                 ("7", "Q", 1),

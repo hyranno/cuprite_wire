@@ -1,7 +1,10 @@
 //! A reader for the S-expressions of KiCad files (`.kicad_sym`, `.kicad_mod`, ...).
 //!
 //! Lists, bare atoms (keywords and numbers) and double-quoted strings are supported.
-//! Quoted strings may contain the escapes `\"`, `\\`, `\n`, `\r` and `\t`.
+//! Quoted strings may contain escapes as KiCad's lexer reads them: `\"`, `\\`, `\a`, `\b`, `\f`,
+//! `\n`, `\r`, `\t`, `\v`, a byte in hex (`\x41`, one or two digits) or octal (`\101`, one to
+//! three digits). A backslash before another character is kept (`\q` is `\q`), and `\x` without
+//! a hex digit is `x`.
 
 use std::fmt;
 
@@ -14,6 +17,11 @@ pub const ESCAPES: [(char, char); 5] = [
     ('r', '\r'),
     ('t', '\t'),
 ];
+
+/// Appends the UTF-8 bytes of `c`.
+fn push_char(bytes: &mut Vec<u8>, c: char) {
+    bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+}
 
 /// A position in the source text (1-based).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +156,67 @@ impl Parser<'_> {
         }
     }
 
+    /// Reads up to `max` digits in `radix`: their value and how many there are.
+    fn digits(&mut self, radix: u32, max: u32) -> (u32, u32) {
+        let (mut value, mut count) = (0, 0);
+        while count < max
+            && let Some(digit) = self.chars.peek().and_then(|c| c.to_digit(radix))
+        {
+            self.bump();
+            value = value * radix + digit;
+            count += 1;
+        }
+        (value, count)
+    }
+
+    /// Reads the escape after a backslash into `bytes`.
+    fn escape(&mut self, bytes: &mut Vec<u8>) -> Result<(), ParseError> {
+        // At the backslash.
+        let pos = Pos {
+            column: self.pos.column - 1,
+            ..self.pos
+        };
+        let error = |message: String| ParseError { pos, message };
+        let c = self
+            .bump()
+            .ok_or_else(|| self.error("unterminated escape"))?;
+        let byte = match c {
+            'x' => match self.digits(16, 2) {
+                (_, 0) => {
+                    bytes.push(b'x');
+                    return Ok(());
+                }
+                (value, _) => value,
+            },
+            '0'..='7' => {
+                let (rest, count) = self.digits(8, 2);
+                c.to_digit(8).unwrap_or_default() * 8u32.pow(count) + rest
+            }
+            'a' => 0x07,
+            'b' => 0x08,
+            'f' => 0x0c,
+            'v' => 0x0b,
+            c => {
+                match ESCAPES.iter().find(|(escaped, _)| *escaped == c) {
+                    Some(&(_, unescaped)) => push_char(bytes, unescaped),
+                    None => {
+                        bytes.push(b'\\');
+                        push_char(bytes, c);
+                    }
+                }
+                return Ok(());
+            }
+        };
+        match u8::try_from(byte) {
+            Ok(0) => Err(error("a NUL character in a string".into())),
+            Ok(byte) => {
+                bytes.push(byte);
+                Ok(())
+            }
+            Err(_) => Err(error(format!("the escape \\{byte:o} is not a byte"))),
+        }
+    }
+
     fn bump(&mut self) -> Option<char> {
         let c = self.chars.next()?;
         if c == '\n' {
@@ -192,7 +261,8 @@ impl Parser<'_> {
             Some(')') => Err(self.error("unexpected ')'")),
             Some('"') => {
                 self.bump();
-                let mut text = String::new();
+                // Bytes, since escapes may give the bytes of a UTF-8 sequence one by one.
+                let mut bytes = Vec::new();
                 loop {
                     match self.bump() {
                         None => {
@@ -201,18 +271,16 @@ impl Parser<'_> {
                                 message: "unterminated string".into(),
                             });
                         }
-                        Some('"') => return Ok(Sexpr::Str(text, start)),
-                        Some('\\') => match self.bump() {
-                            // Unknown escapes stand for the character itself.
-                            Some(c) => text.push(
-                                ESCAPES
-                                    .iter()
-                                    .find(|(escaped, _)| *escaped == c)
-                                    .map_or(c, |&(_, unescaped)| unescaped),
-                            ),
-                            None => return Err(self.error("unterminated escape")),
-                        },
-                        Some(c) => text.push(c),
+                        Some('"') => {
+                            return String::from_utf8(bytes)
+                                .map(|text| Sexpr::Str(text, start))
+                                .map_err(|_| ParseError {
+                                    pos: start,
+                                    message: "the escapes of the string are not UTF-8".into(),
+                                });
+                        }
+                        Some('\\') => self.escape(&mut bytes)?,
+                        Some(c) => push_char(&mut bytes, c),
                     }
                 }
             }
@@ -249,6 +317,29 @@ mod tests {
     }
 
     #[test]
+    fn test_escapes() {
+        // Compared with KiCad 10 (a footprint description read by `pcbnew.FootprintLoad`).
+        let cases = [
+            (r"a\x41b", "aAb"),
+            (r"a\101b", "aAb"),
+            (r"a\1234", "aS4"),
+            (r"a\x414", "aA4"),
+            (r"a\x4G", "a\x04G"),
+            (r"a\xGb", "axGb"),
+            (r"a\bb\fc\vd\a", "a\x08b\x0cc\x0bd\x07"),
+            (r"a\qb", r"a\qb"),
+            (r"a\8b", r"a\8b"),
+            (r"a\/b", r"a\/b"),
+            (r#"a\"b\\c\n"#, "a\"b\\c\n"),
+            (r"\xe2\x82\xac", "\u{20ac}"),
+        ];
+        for (escaped, text) in cases {
+            let expr = parse(&format!("(a \"{escaped}\")")).unwrap();
+            assert_eq!(expr.arg(0), Some(text), "{escaped}");
+        }
+    }
+
+    #[test]
     fn test_flags() {
         let expr = parse("(pin (hide yes) (in_bom no) (power))").unwrap();
         assert_eq!(expr.flag("hide"), Some(true));
@@ -267,5 +358,15 @@ mod tests {
         );
         assert_eq!(error(")"), "1:1: unexpected ')'");
         assert_eq!(error("  "), "1:3: unexpected end of file");
+        // KiCad reads such a string as empty (not UTF-8) or cut at the NUL.
+        assert_eq!(
+            error("(a \"\\xff\")"),
+            "1:4: the escapes of the string are not UTF-8"
+        );
+        assert_eq!(error("(a \"x\\0\")"), "1:6: a NUL character in a string");
+        assert_eq!(
+            error("(a \"\\777\")"),
+            "1:5: the escape \\777 is not a byte"
+        );
     }
 }

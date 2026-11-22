@@ -221,7 +221,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     for (pin, id) in pins.iter_mut().zip(&default_ids) {
         pin.id.clone_from(id);
     }
-    rename_pins(&mut pins, &common.pins, "pin")?;
+    rename_pins(&mut pins, &common.pins, PinKeys::PadNumbers)?;
     let ids = PinIds::new(&pins, &symbol);
     // The pads of a stacked pin notation, then pins at the same position.
     let mut internal_connections: Vec<Vec<String>> = symbol
@@ -619,7 +619,11 @@ pub fn load_spice_part(
             unit: 0,
         })
         .collect();
-    rename_pins(&mut pins, &common.pins, "port")?;
+    rename_pins(
+        &mut pins,
+        &common.pins,
+        PinKeys::PortNames { model: &info.name },
+    )?;
     elements[0].nodes = pins.iter().map(|pin| pin.id.clone()).collect();
     let internal_connections = check_internal_connections(&common.internal_connections, &pins)?;
     let ref_base = match (&common.ref_base, elements[0].device) {
@@ -659,20 +663,31 @@ fn check_ref_base(ref_base: &str) -> Result<(), PartError> {
     Ok(())
 }
 
-/// Applies `pins` (pin ID by pad number or port name; ports are matched case-insensitively) and
-/// checks that the IDs are unique.
+/// What the keys of `pins` are.
+#[derive(Debug, Clone, Copy)]
+enum PinKeys<'a> {
+    /// Pad numbers, or default pin IDs (`6#2`).
+    PadNumbers,
+    /// Port names of `model`, matched case-insensitively.
+    PortNames { model: &'a str },
+}
+
+/// Applies `pins` (pin ID by pad number or port name) and checks that the IDs are unique.
 fn rename_pins(
     pins: &mut [PinDef],
     renames: &[(String, String)],
-    what: &str,
+    keys: PinKeys,
 ) -> Result<(), PartError> {
+    let what = match keys {
+        PinKeys::PadNumbers => "pin",
+        PinKeys::PortNames { .. } => "port",
+    };
     let default_ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
     let mut renamed = BTreeSet::new();
     for (key, id) in renames {
-        let normalized = if what == "port" {
-            key.to_ascii_lowercase()
-        } else {
-            key.clone()
+        let normalized = match keys {
+            PinKeys::PadNumbers => key.clone(),
+            PinKeys::PortNames { .. } => key.to_ascii_lowercase(),
         };
         if !renamed.insert(normalized) {
             return err(OptionKey::Pins, format!("{what} {key:?} is renamed twice"));
@@ -682,13 +697,14 @@ fn rename_pins(
         }
         // A pad number stands for its first pin; the other duplicate pins are given by their
         // default IDs (`6#2`).
-        let index = if what == "port" {
-            pins.iter()
-                .position(|pin| pin.pad.eq_ignore_ascii_case(key))
-        } else {
-            pins.iter()
+        let index = match keys {
+            PinKeys::PadNumbers => pins
+                .iter()
                 .position(|pin| &pin.pad == key)
-                .or_else(|| default_ids.iter().position(|id| id == key))
+                .or_else(|| default_ids.iter().position(|id| id == key)),
+            PinKeys::PortNames { .. } => pins
+                .iter()
+                .position(|pin| pin.pad.eq_ignore_ascii_case(key)),
         };
         let pin = index.map(|i| &mut pins[i]);
         match pin {
@@ -697,13 +713,12 @@ fn rename_pins(
                 let known: Vec<&str> = pins.iter().map(|pin| pin.pad.as_str()).collect();
                 return err(
                     OptionKey::Pins,
-                    if what == "port" {
-                        format!(
-                            "the model has no port {key:?}; its ports are {}",
+                    match keys {
+                        PinKeys::PadNumbers => format!("the part has no pin {key:?}"),
+                        PinKeys::PortNames { model } => format!(
+                            "the model {model} has no port {key:?}; its ports are {}",
                             known.join(" ")
-                        )
-                    } else {
-                        format!("the part has no pin {key:?}")
+                        ),
                     },
                 );
             }
@@ -715,6 +730,18 @@ fn rename_pins(
             return err(
                 OptionKey::Pins,
                 format!("pin ID {:?} is used twice", pin.id),
+            );
+        }
+    }
+    // The macros make an upper-case constant of each given ID (`out` -> `OUT`).
+    let mut upper: BTreeMap<String, &str> = BTreeMap::new();
+    for (_, id) in renames {
+        if let Some(other) = upper.insert(id.to_ascii_uppercase(), id)
+            && other != id
+        {
+            return err(
+                OptionKey::Pins,
+                format!("pin IDs {other:?} and {id:?} differ only in case"),
             );
         }
     }
@@ -902,6 +929,12 @@ mod tests {
         let mut opts = options("test:R", "test:R_0603");
         opts.common.pins = vec![("1".into(), "a".into()), ("2".into(), "a".into())];
         assert_eq!(error(opts).1, "pin ID \"a\" is used twice");
+        let mut opts = options("test:R", "test:R_0603");
+        opts.common.pins = vec![("1".into(), "out".into()), ("2".into(), "OUT".into())];
+        assert_eq!(
+            error(opts).1,
+            "pin IDs \"out\" and \"OUT\" differ only in case"
+        );
         let mut opts = options("test:R", "test:R_0603");
         opts.common.value = Some(Value::Fixed("R".into()));
         let (key, message) = error(opts);
@@ -1159,7 +1192,7 @@ mod tests {
             (e.key, e.error.message.as_str()),
             (
                 OptionKey::Pins,
-                "the model has no port \"RESET\"; its ports are CTR CTS GND RESET_B SENSE VDD"
+                "the model VSUP01 has no port \"RESET\"; its ports are CTR CTS GND RESET_B SENSE VDD"
             )
         );
         opts.common.pins.clear();

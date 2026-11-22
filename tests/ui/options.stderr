@@ -33,3 +33,21 @@ error: the part has no pin ID "x"
    |
 42 |         internal_connections: [["1", "x"]],
    |                               ^^^^^^^^^^^^
+
+error: "MPN" is given twice
+  --> tests/ui/options.rs:51:33
+   |
+51 |         fields: { "MPN" => "a", "MPN" => "b" },
+   |                                 ^^^^^
+
+error: `Sim.*` fields cannot be given in `fields`; give the model with `sim`
+  --> tests/ui/options.rs:60:33
+   |
+60 |         fields: { "MPN" => "a", "Sim.Device" => "R" },
+   |                                 ^^^^^^^^^^^^
+
+error: pin IDs "out" and "OUT" differ only in case
+  --> tests/ui/options.rs:69:15
+   |
+69 |         pins: { "1" => "out", "2" => "OUT" },
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
