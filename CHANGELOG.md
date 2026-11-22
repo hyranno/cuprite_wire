@@ -1,8 +1,8 @@
 # Changelog
 
 All notable changes to the crates of this workspace (`cuprite_wire`, `cuprite_wire_macros`,
-`cuprite_wire_kicad_lib` and `cuprite_wire_embedded_hal`) are documented in this file. The crates
-are released together with the same version.
+`cuprite_wire_kicad_lib`, `cuprite_wire_embedded_hal` and `cuprite_wire_ibis`) are documented in
+this file. The crates are released together with the same version.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crates
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (before 1.0, a minor version may
@@ -12,6 +12,10 @@ break the API).
 
 ### Added
 
+- `cuprite_wire_ibis`: a new crate reading IBIS model files (`.ibs`): the header, components with
+  their package and pins, and models with their I-V tables, ramp rates, voltage ranges and input
+  thresholds. Other keywords are skipped and listed. It does not depend on `cuprite_wire`, which
+  will use it to simulate I/O buffers.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes

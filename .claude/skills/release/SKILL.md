@@ -1,6 +1,6 @@
 ---
 name: release
-description: Release a new version of the cuprite_wire workspace crates (cuprite_wire, cuprite_wire_macros, cuprite_wire_kicad_lib, cuprite_wire_embedded_hal) to crates.io and GitHub. Use when preparing or performing a release - version bump, goldens, CHANGELOG, package checks, the release PR and the tag - or when checking the public API against the previous release.
+description: Release a new version of the cuprite_wire workspace crates (cuprite_wire, cuprite_wire_macros, cuprite_wire_kicad_lib, cuprite_wire_embedded_hal, cuprite_wire_ibis) to crates.io and GitHub. Use when preparing or performing a release - version bump, goldens, CHANGELOG, package checks, the release PR and the tag - or when checking the public API against the previous release.
 ---
 
 # Releasing cuprite_wire

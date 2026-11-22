@@ -1,0 +1,115 @@
+|************************************************************************
+| A hand-written IBIS file for the tests of cuprite_wire_ibis. The values
+| do not describe a real device.
+|************************************************************************
+[IBIS Ver]      5.0
+[File name]     buffers.ibs
+[File Rev]      1.0
+[Date]          2026-11-22
+[Source]        Written by hand
+                for the tests.
+[Notes]         Two components share the models.
+[Disclaimer]    Not a real device.
+[Copyright]     None.
+[Comment Char]  !_char
+! From here on, `!` starts a comment and `|` is ordinary text.
+
+[Component]     Buffer8
+[Manufacturer]  Example Corp.
+[Package]
+! variable  typ     min     max
+R_pkg       0.2     0.1     0.3
+L_pkg       5nH     4nH     6nH
+C_pkg       1.0pF   NA      NA
+[Pin]  signal_name  model_name  R_pin   L_pin   C_pin
+1      A0           in_cmos     0.1     NA      0.5p
+2      Y0           out_3s      100m    3.5n    0.6p
+3      IO           io_sel      NA      NA      NA
+4      VCC          POWER       NA      NA      NA
+5      GND          gnd         NA      NA      NA
+6      NC1          NC          NA      NA      NA
+[Diff Pin]  inv_pin  vdiff  tdelay_typ  tdelay_min  tdelay_max
+1           2        0.1V   NA          NA          NA
+
+[Define Package Model] pkg_matrix
+[Manufacturer]  Someone else
+[Pin Numbers]
+1
+2
+[Model Data]
+[Resistance Matrix] Diagonal_matrix
+[Row] 1
+0.1
+[End Model Data]
+[End Package Model]
+
+[Component]     Small
+[Manufacturer]  Example Corp.
+[Package]
+R_pkg       10m     NA      NA
+L_pkg       1n      NA      NA
+C_pkg       0.1p    NA      NA
+[Pin]  signal_name  model_name
+A1     OUT          out_3s
+A2     GND          GND
+
+[Model Selector] io_sel
+in_cmos   CMOS input
+out_3s    3-state output
+
+[Model]         in_cmos
+Model_type      input
+Polarity        Non-Inverting
+Vinl = 0.8V
+Vinh=2.0V
+C_comp          2.0pF   1.5pF   2.5pF
+C_comp_pullup   1.0pF   NA      NA
+[Temperature Range]  25  85  0
+[Voltage Range]  3.3V  3.0V  3.6V
+[GND Clamp]
+!  V      I(typ)   I(min)   I(max)
+  -3.3   -100m    -80m     -120m
+  -0.6    0        0        0
+   3.3    0        0        0
+[POWER Clamp]
+  -3.3    100m     NA       NA
+   0      0        NA       NA
+
+[Model]         out_3s
+Model_type      3-state
+Polarity        Inverting
+Enable          Active-Low
+Vmeas = 1.65
+Cref = 0
+Rref = 50
+Vref = 0
+C_comp          3p      NA      NA
+[Pullup Reference]      3.3     3.0     3.6
+[Pulldown Reference]    0       0       0
+[POWER Clamp Reference] 3.3     3.0     3.6
+[GND Clamp Reference]   0       0       0
+[Pulldown]
+  -3.3   -40m    NA   NA
+   0      0      NA   NA
+   3.3    40m    NA   NA
+[Pullup]
+  -3.3    40m    NA   NA
+   0      0      NA   NA
+   3.3   -40m    NA   NA
+[Ramp]
+dV/dt_r   1.98/0.5n   1.8/0.6n   2.16/0.4n
+dV/dt_f   1.98/0.4n   NA         NA
+R_load = 50
+[Rising Waveform]
+R_fixture = 50
+V_fixture = 3.3
+0.0ns  0.0  NA  NA
+1.0ns  3.3  NA  NA
+
+[Submodel]      dyn_clamp
+Submodel_type   Dynamic_clamp
+[Pullup]
+   0      0      NA   NA
+
+[END]
+[Model] ignored after the end
