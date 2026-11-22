@@ -101,10 +101,9 @@ fn waveform(r_fixture: f64, v_fixture: f64) -> Waveform {
             let voltage = (ku * 3.3 / 100.0 + v_fixture / r_fixture) / conductance;
             VtPoint {
                 time,
-                voltage: crate::TypMinMax {
-                    typ: voltage,
-                    min: None,
-                    max: None,
+                voltage: crate::CornerValues {
+                    typ: Some(voltage),
+                    ..Default::default()
                 },
             }
         })

@@ -184,7 +184,7 @@ impl Kind {
             })
         };
         match model_type {
-            ModelType::Input => kind(false, false, false),
+            ModelType::Input | ModelType::Terminator => kind(false, false, false),
             ModelType::Output | ModelType::Io | ModelType::ThreeState => kind(true, true, true),
             ModelType::OpenDrain
             | ModelType::IoOpenDrain
@@ -199,8 +199,10 @@ impl Kind {
 /// Writes the model as a subcircuit named `name`, with the package `parasitics` and the values of
 /// the `corner`.
 ///
-/// A model of type `Input` becomes a receiver with the ports `pin ref`: the package, `C_comp` and
-/// the clamps. The types that drive (`Output`, `I/O`, `3-state` and the open drain, sink and
+/// A model of type `Input` or `Terminator` becomes a receiver with the ports `pin ref`: the
+/// package, `C_comp` and the clamps, and for a terminator `[Rgnd]` to `[GND Clamp Reference]`,
+/// `[Rpower]` to `[POWER Clamp Reference]` (or else `[Voltage Range]`), and `[Rac]` in series
+/// with `[Cac]` to `[GND Clamp Reference]`. The types that drive (`Output`, `I/O`, `3-state` and the open drain, sink and
 /// source types) become drivers with the ports `pin ref ku kd`, which add `[Pullup]` and
 /// `[Pulldown]`. An `I/O` model with `ku` and `kd` at 0 is its receiver.
 ///
@@ -221,10 +223,11 @@ impl Kind {
 /// ([`Edges::from_ramp`]).
 ///
 /// # Errors
-/// If the model type is not one of the above (ECL, differential, series and terminator models),
+/// If the model type is not one of the above (ECL, differential and series models),
 /// a driver lacks the I-V table its type needs or an edge lacks both waveforms and `[Ramp]`, a
 /// table has fewer than two rows or
-/// repeats a voltage, or a table lacks its reference voltage.
+/// repeats a voltage, a table or a termination lacks its reference voltage, or a terminator has
+/// only one of `[Rac]` and `[Cac]`.
 pub fn subcircuit(
     name: &str,
     model: &Model,
@@ -319,6 +322,37 @@ pub fn subcircuit(
         });
     }
     let c_comp = model.c_comp.map(|c| c.get(corner));
+    // The specification allows the terminations only in terminators.
+    let terminator = model.model_type == ModelType::Terminator;
+    let value = |v: Option<TypMinMax<f64>>| v.filter(|_| terminator).map(|v| v.get(corner));
+    let terminations = [
+        (
+            "RGND",
+            "[Rgnd]",
+            value(model.rgnd),
+            "[GND Clamp Reference]",
+            reference(model.gnd_clamp_reference, Some(0.0)),
+        ),
+        (
+            "RPOWER",
+            "[Rpower]",
+            value(model.rpower),
+            "[POWER Clamp Reference]",
+            reference(model.power_clamp_reference, supply),
+        ),
+    ];
+    let ac = match (value(model.rac), value(model.cac)) {
+        (Some(r), Some(c)) => Some((r, c)),
+        (None, None) => None,
+        _ => return Err(error("[Rac] and [Cac] go together".into())),
+    };
+    for (_, keyword, r, reference_keyword, reference) in &terminations {
+        if r.is_some() && reference.is_none() {
+            return Err(error(format!(
+                "{keyword} needs {reference_keyword} or [Voltage Range]"
+            )));
+        }
+    }
 
     let mut notes = Vec::new();
     let edges = if kind.driver {
@@ -395,18 +429,33 @@ pub fn subcircuit(
         line(&mut text, format_args!("CCOMP {die} {REF} {}", num(c)));
     }
 
-    for curve in &curves {
-        let id = curve.id;
-        let ref_node = if curve.reference == 0.0 {
+    // A node at the voltage of a reference: `ref` itself, or a source named after the element.
+    let gnd_reference = terminations[0].4.unwrap_or(0.0);
+    let reference_node = |text: &mut String, id: &str, voltage: f64| {
+        if voltage == 0.0 {
             REF.to_string()
         } else {
             let node = format!("{}_ref", id.to_ascii_lowercase());
-            line(
-                &mut text,
-                format_args!("V{id} {node} {REF} {}", num(curve.reference)),
-            );
+            line(text, format_args!("V{id} {node} {REF} {}", num(voltage)));
             node
-        };
+        }
+    };
+    // The terminations of a terminator.
+    for (id, _, r, _, reference) in terminations {
+        if let (Some(r), Some(reference)) = (r, reference) {
+            let node = reference_node(&mut text, id, reference);
+            line(&mut text, format_args!("{id} {die} {node} {}", num(r)));
+        }
+    }
+    if let Some((r, c)) = ac {
+        let node = reference_node(&mut text, "AC", gnd_reference);
+        line(&mut text, format_args!("RAC {die} ac {}", num(r)));
+        line(&mut text, format_args!("CAC ac {node} {}", num(c)));
+    }
+
+    for curve in &curves {
+        let id = curve.id;
+        let ref_node = reference_node(&mut text, id, curve.reference);
         // The current into the pin flows from the die to the reference.
         let input = if curve.from_reference {
             format!("%vd({ref_node} {die})")
@@ -503,11 +552,7 @@ impl IvCurve {
 
 /// The voltages and currents of a table at the corner, in increasing voltage.
 fn table_points(table: &IvTable, corner: Corner) -> Result<(Vec<f64>, Vec<f64>), String> {
-    let mut points: Vec<_> = table
-        .points
-        .iter()
-        .map(|p| (p.voltage, p.current.get(corner)))
-        .collect();
+    let mut points = table.curve(corner);
     if points.len() < 2 {
         return Err("needs at least two rows".into());
     }

@@ -107,11 +107,32 @@ fn test_of_pin_errors() {
         error("Chip", "4"),
         "pin `4` has no model: it is a POWER pin"
     );
+    let model_error = |pin, model| {
+        IbisBuffer::of_pin_model(&ibs(), "Chip", pin, model, Corner::Typ)
+            .unwrap_err()
+            .to_string()
+    };
     assert_eq!(
-        error("Chip", "5"),
-        "pin `5` has no model: `sel` is a [Model Selector]; choose one of its models with \
-         IbisBuffer::new"
+        model_error("5", "od"),
+        "pin `5` has no model: `od` is not a model of `sel`"
     );
+    assert_eq!(
+        model_error("1", "in"),
+        "pin `1` has no model: `in` is not a model of `io`"
+    );
+}
+
+#[test]
+fn test_model_selector() {
+    // The first model of the selector is the default.
+    let default = IbisBuffer::of_pin(&ibs(), "Chip", "5", Corner::Typ).unwrap();
+    assert_eq!(default.model_name(), "io");
+    let chosen = IbisBuffer::of_pin_model(&ibs(), "Chip", "5", "in", Corner::Typ).unwrap();
+    assert_eq!(chosen.model_name(), "in");
+    assert!(!chosen.is_driver());
+    // A pin naming a model takes the model's own name.
+    let io = IbisBuffer::of_pin_model(&ibs(), "Chip", "1", "io", Corner::Typ).unwrap();
+    assert_eq!(io, buffer("1"));
 }
 
 #[test]

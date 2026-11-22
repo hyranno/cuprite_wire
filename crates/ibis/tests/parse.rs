@@ -23,7 +23,10 @@ fn test_header() {
     assert_eq!(h.file_rev.as_deref(), Some("1.0"));
     assert_eq!(h.date.as_deref(), Some("2026-11-22"));
     assert_eq!(h.source.as_deref(), Some("Written by hand\nfor the tests."));
-    assert_eq!(h.notes.as_deref(), Some("Two components share the models."));
+    assert_eq!(
+        h.notes.as_deref(),
+        Some("Two components share the models.\nA keyword of text may repeat.")
+    );
     assert_eq!(h.disclaimer.as_deref(), Some("Not a real device."));
     assert_eq!(h.copyright.as_deref(), Some("None."));
 }
@@ -68,7 +71,47 @@ fn test_components() {
     let small = ibs.component("Small").unwrap();
     let pin = small.pin("A1").unwrap();
     assert_eq!((pin.r_pin, pin.l_pin, pin.c_pin), (None, None, None));
-    assert_eq!(ibs.model_selectors, ["io_sel"]);
+    let [selector] = &ibs.model_selectors[..] else {
+        panic!("{:?}", ibs.model_selectors)
+    };
+    assert_eq!(selector.name, "io_sel");
+    let options: Vec<_> = selector
+        .options
+        .iter()
+        .map(|o| (o.model.as_str(), o.description.as_str()))
+        .collect();
+    assert_eq!(
+        options,
+        [("in_cmos", "CMOS input"), ("out_3s", "3-state output")]
+    );
+    assert_eq!(selector.default_model(), "in_cmos");
+    assert_eq!(ibs.model_selector("io_sel"), Some(selector));
+}
+
+#[test]
+fn test_pin_model() {
+    let ibs = fixture();
+    let name = |choice| ibs.pin_model("io_sel", choice).map(|m| m.name.as_str());
+    assert_eq!(name(None), Ok("in_cmos"));
+    assert_eq!(name(Some("out_3s")), Ok("out_3s"));
+    assert_eq!(
+        name(Some("in_ttl")).unwrap_err().to_string(),
+        "`in_ttl` is not a model of `io_sel`"
+    );
+    assert_eq!(
+        ibs.pin_model("out_3s", Some("out_3s")).unwrap().name,
+        "out_3s"
+    );
+    assert_eq!(
+        ibs.pin_model("out_3s", Some("in_cmos"))
+            .unwrap_err()
+            .to_string(),
+        "`in_cmos` is not a model of `out_3s`"
+    );
+    assert_eq!(
+        ibs.pin_model("nothing", None).unwrap_err().to_string(),
+        "the file has no [Model] or [Model Selector] `nothing`"
+    );
 }
 
 #[test]
@@ -82,7 +125,13 @@ fn test_input_model() {
     assert_eq!(m.polarity, Some(Polarity::NonInverting));
     assert_eq!(m.enable, None);
     assert_eq!((m.vinl, m.vinh), (Some(0.8), Some(2.0)));
+    // C_comp takes precedence over C_comp_pullup.
     approx(m.c_comp.unwrap().get(Corner::Min), 1.5e-12);
+    // [Model Spec] gives Vinh at the corners; Vinl stays that of the model.
+    assert_eq!(m.model_spec.vinh.unwrap().max, Some(2.2));
+    assert_eq!(m.model_spec.vinl, None);
+    assert_eq!(m.thresholds(Corner::Max), Some((0.8, 2.2)));
+    assert_eq!(m.thresholds(Corner::Typ), Some((0.8, 2.1)));
     assert_eq!(m.temperature_range.unwrap().max, Some(0.0));
     assert_eq!(m.voltage_range.unwrap().get(Corner::Max), 3.6);
     assert_eq!(m.pullup_reference, None);
@@ -95,9 +144,9 @@ fn test_input_model() {
     assert_eq!(
         rows,
         [
-            (-3.3, -0.1, Some(-0.12)),
-            (-0.6, 0.0, Some(0.0)),
-            (3.3, 0.0, Some(0.0))
+            (-3.3, Some(-0.1), Some(-0.12)),
+            (-0.6, Some(0.0), Some(0.0)),
+            (3.3, Some(0.0), Some(0.0))
         ]
     );
     assert_eq!(m.power_clamp.as_ref().unwrap().points.len(), 2);
@@ -111,6 +160,12 @@ fn test_output_model() {
     assert_eq!(m.model_type, ModelType::ThreeState);
     assert_eq!(m.polarity, Some(Polarity::Inverting));
     assert_eq!(m.enable, Some(Enable::ActiveLow));
+    // The sum of C_comp_pullup and C_comp_pulldown.
+    let c_comp = m.c_comp.unwrap();
+    approx(c_comp.typ, 3e-12);
+    approx(c_comp.get(Corner::Min), 2.5e-12);
+    assert_eq!(c_comp.max, None);
+    assert_eq!(m.thresholds(Corner::Typ), None);
     assert_eq!(
         (m.vmeas, m.cref, m.rref, m.vref),
         (Some(1.65), Some(0.0), Some(50.0), Some(0.0))
@@ -120,7 +175,10 @@ fn test_output_model() {
     assert_eq!(m.power_clamp_reference.unwrap().typ, 3.3);
     assert_eq!(m.gnd_clamp_reference.unwrap().typ, 0.0);
     assert_eq!(m.voltage_range, None);
-    assert_eq!(m.pulldown.as_ref().unwrap().points[2].current.typ, 0.04);
+    assert_eq!(
+        m.pulldown.as_ref().unwrap().points[2].current.typ,
+        Some(0.04)
+    );
     // [Pullup] of the [Submodel] after the model does not replace it.
     assert_eq!(m.pullup.as_ref().unwrap().points.len(), 3);
 
@@ -142,8 +200,10 @@ fn test_output_model() {
     approx(w.l_fixture.unwrap(), 1e-9);
     assert_eq!(w.points.len(), 2);
     approx(w.points[1].time, 1e-9);
-    assert_eq!(w.points[1].voltage.get(Corner::Min), 3.0);
     assert_eq!(w.points[1].voltage.max, None);
+    // A column takes the rows with values, the typical column when it has none.
+    assert_eq!(w.curve(Corner::Min), [(1e-9, 3.0)]);
+    assert_eq!(w.curve(Corner::Max), [(0.0, 0.0), (1e-9, 3.3)]);
 }
 
 #[test]
@@ -154,13 +214,13 @@ fn test_skipped() {
         .map(|s| (s.name, s.line))
         .collect();
     let expected = [
-        ("[Diff Pin]", 31),
-        ("[Define Package Model]", 34),
-        ("[Model Selector]", 56),
-        ("C_comp_pullup", 66),
-        ("[Submodel]", 113),
+        ("[Package Model]", 26),
+        ("[Diff Pin]", 34),
+        ("[Define Package Model]", 37),
+        ("Vmeas", 75),
+        ("[Submodel]", 121),
         // The keywords in the scope of [Submodel] are skipped too.
-        ("[Pullup]", 115),
+        ("[Pullup]", 123),
     ];
     let expected: Vec<_> = expected.iter().map(|&(n, l)| (n.to_string(), l)).collect();
     assert_eq!(skipped, expected);
@@ -292,6 +352,22 @@ fn test_errors() {
             "[Model] m\nModel_type Input\n[GND Clamp]\nx 0 NA NA\n",
             5,
             "invalid voltage `x` in [GND Clamp]",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[GND Clamp]\n0 NA 0 0\n1 NA 1 1\n",
+            4,
+            "the typical column of [GND Clamp] is all NA",
+        ),
+        ("[Model Selector] s\n", 2, "[Model Selector] has no models"),
+        (
+            "[Model Selector] s\nm one\n[Model Selector] s\nm two\n",
+            4,
+            "duplicate [Model Selector] s",
+        ),
+        (
+            "[Model Selector] s\nm the model\nx another\n[Model] m\nModel_type Input\n",
+            4,
+            "[Model Selector] s lists `x`, which is not a [Model] of the file",
         ),
         (
             "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1/1n NA NA\n",

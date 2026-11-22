@@ -273,15 +273,7 @@ pub(super) fn from_waveforms(
 /// Solves the weights at each time of the waveforms, so that the buffer drives the current that
 /// flows into each fixture.
 fn solve(buffer: &Buffer, waveforms: &[&Waveform], rising: bool, corner: Corner) -> Edge {
-    let curves: Vec<Vec<(f64, f64)>> = waveforms
-        .iter()
-        .map(|w| {
-            w.points
-                .iter()
-                .map(|p| (p.time, p.voltage.get(corner)))
-                .collect()
-        })
-        .collect();
+    let curves: Vec<Vec<(f64, f64)>> = waveforms.iter().map(|w| w.curve(corner)).collect();
     let end = curves
         .iter()
         .map(|c| c.last().unwrap().0)

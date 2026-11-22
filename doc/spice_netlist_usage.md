@@ -162,10 +162,16 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
 
 - `IbisBuffer::of_pin(&file, component, pin, corner)` takes the `[Model]` of a pin of a
   `[Component]` with the parasitics of the pin (`R_pin` / `L_pin` / `C_pin`, or else `R_pkg` /
-  `L_pkg` / `C_pkg`); `IbisBuffer::new(&model, &parasitics, corner)` takes any model, e.g. one of a
-  `[Model Selector]`, which `of_pin` does not choose. `Corner::Typ` / `Min` / `Max` select the
-  column of the values (`NA` falls back to typical). The supported model types are `Input`,
-  `Output`, `I/O`, `3-state` and the open drain, sink and source types.
+  `L_pkg` / `C_pkg`); `IbisBuffer::new(&model, &parasitics, corner)` takes any model. For a pin
+  naming a `[Model Selector]`, `of_pin` takes its default (first) model and
+  `IbisBuffer::of_pin_model(&file, component, pin, model, corner)` one of the others
+  (`file.model_selector(name)` lists them with their descriptions). `Corner::Typ` / `Min` / `Max`
+  select the column of the values (a value that is `NA` falls back to typical; in a table, a column
+  takes the rows that have values, and the typical column if it has none). The supported model
+  types are `Input`, `Output`, `I/O`, `3-state`, the open drain, sink and source types, and
+  `Terminator`.
+- The sequence is the level of the pin (the pad), not of the logic inside the device: `Polarity`
+  (`Inverting`) and `Enable` (`Active-Low`) of the model are not applied.
 - `IbisDriver::new(buffer, sequence)` (pins `out`, `gnd`; `XDRV1`) plays a `DigitalSequence`. The
   model's `[Pullup]` and `[Pulldown]` are weighted by two PWL sources that follow the edges of the
   model (`buffer.edges()`): the weights that reproduce its `[Rising Waveform]` /
@@ -177,13 +183,16 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
   and listed in `buffer.notes()`. `HiZ` turns both weights off. A level the model cannot drive
   (`HiZ` on an `Output`, `High` on an open drain) panics.
 - `IbisReceiver::new(buffer)` (pins `in`, `gnd`; `XRX1`) is the package, `C_comp` and the clamps;
-  an I/O model is its receiver with the driver off.
-- `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` as the
-  thresholds, to `decode` the voltage of the pin (`None` if the model lacks them).
+  an I/O model is its receiver with the driver off. A `Terminator` model is a receiver with its
+  `[Rgnd]`, `[Rpower]` and `[Rac]` + `[Cac]`.
+- `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` (those of
+  `[Model Spec]` at the corner if given) as the thresholds, to `decode` the voltage of the pin
+  (`None` if the model lacks them).
 - Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
   model, `cuprite_ibis_<hash>` for the driver); the I-V tables are XSPICE `pwl` code models, which
   the usual builds of ngspice load. Beyond the voltages of a table, its end segments are extended.
-- `[Model Selector]`, differential and series models are not used.
+- Differential, ECL and series models are not used; neither are `[Package Model]`,
+  `[Receiver Thresholds]` and `[Submodel]`.
 
 Which to use:
 

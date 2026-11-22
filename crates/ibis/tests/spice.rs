@@ -229,6 +229,59 @@ print inside
 }
 
 #[test]
+fn test_terminator() {
+    // A Thevenin termination (100 ohms to 3.3 V and to 1 V) with an AC termination
+    // (50 ohms and 1 nF to 1 V).
+    let ibs = parse(
+        "\
+[IBIS Ver] 5.0
+[File Name] term.ibs
+[Model] term
+Model_type Terminator
+C_comp 1p NA NA
+[Voltage Range] 3.3 3.0 3.6
+[GND Clamp Reference] 1.0 NA NA
+[Rgnd] 100 NA NA
+[Rpower] 100 NA NA
+[Rac] 50 NA NA
+[Cac] 1n NA NA
+[END]
+",
+    )
+    .unwrap();
+    let dut = subcircuit("dut", &ibs.models[0], &Parasitics::NONE, Corner::Typ).unwrap();
+    assert_eq!(dut.ports, ["pin", "ref"]);
+    assert!(!dut.is_driver());
+    // DC: the pin floats to the middle of the references, 2.15 V. AC at 1 GHz: the two 100 ohms,
+    // 50 ohms and 1 nF, and C_comp in parallel.
+    let values = run(&format!(
+        "terminator
+{}X1 pin 0 dut
+Rs src pin 1g
+Vs src 0 0
+Ip 0 pin 0 AC 1
+.control
+op
+let open = v(pin)
+print open
+ac lin 1 1g 1g
+let z = mag(v(pin))
+print z
+.endc
+.end
+",
+        dut.text
+    ));
+    assert_close(value(&values, "open"), 2.15, 1e-3);
+    let w = 2.0 * std::f64::consts::PI * 1e9;
+    // The admittance of 50 ohms and 1 nF in series: 1 / (50 - j / (w C)).
+    let (re, im) = (50.0, -1.0 / (w * 1e-9));
+    let norm = re * re + im * im;
+    let (g, b) = (2.0 / 100.0 + re / norm, -im / norm + w * 1e-12);
+    assert_close(value(&values, "z"), 1.0 / g.hypot(b), 1e-3);
+}
+
+#[test]
 fn test_driver_transient() {
     let dut = out_3s();
     // The [Rising Waveform] has L_fixture: the edges come from [Ramp].
@@ -464,8 +517,16 @@ fn test_errors() {
     };
     let table = "\n0 0 NA NA\n3.3 10m NA NA";
     assert_eq!(
-        error("Model_type Terminator"),
-        "model `m`: the model type `Terminator` is not supported"
+        error("Model_type Series"),
+        "model `m`: the model type `Series` is not supported"
+    );
+    assert_eq!(
+        error("Model_type Terminator\n[Rac] 50 NA NA"),
+        "model `m`: [Rac] and [Cac] go together"
+    );
+    assert_eq!(
+        error("Model_type Terminator\n[Rpower] 50 NA NA"),
+        "model `m`: [Rpower] needs [POWER Clamp Reference] or [Voltage Range]"
     );
     assert_eq!(
         error(&format!("Model_type Output\n[Pulldown]{table}")),

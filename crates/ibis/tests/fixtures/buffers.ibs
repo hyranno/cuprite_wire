@@ -9,6 +9,7 @@
 [Source]        Written by hand
                 for the tests.
 [Notes]         Two components share the models.
+[Notes]         A keyword of text may repeat.
 [Disclaimer]    Not a real device.
 [Copyright]     None.
 [Comment Char]  !_char
@@ -21,6 +22,8 @@
 R_pkg       0.2     0.1     0.3
 L_pkg       5nH     4nH     6nH
 C_pkg       1.0pF   NA      NA
+! Not the end of a block: [Define Package Model] ends with [End Package Model].
+[Package Model] pkg_matrix
 [Pin]  signal_name  model_name  R_pin   L_pin   C_pin
 1      A0           in_cmos     0.1     NA      0.5p
 2      Y0           out_3s      100m    3.5n    0.6p
@@ -66,6 +69,10 @@ C_comp          2.0pF   1.5pF   2.5pF
 C_comp_pullup   1.0pF   NA      NA
 [Temperature Range]  25  85  0
 [Voltage Range]  3.3V  3.0V  3.6V
+[Model Spec]
+! subparameter  typ  min  max
+Vinh           2.1  2.0  2.2
+Vmeas          1.5  NA   NA
 [GND Clamp]
 !  V      I(typ)   I(min)   I(max)
   -3.3   -100m    -80m     -120m
@@ -83,7 +90,8 @@ Vmeas = 1.65
 Cref = 0
 Rref = 50
 Vref = 0
-C_comp          3p      NA      NA
+C_comp_pullup   1p      NA      NA
+C_comp_pulldown 2p      1.5p    NA
 [Pullup Reference]      3.3     3.0     3.6
 [Pulldown Reference]    0       0       0
 [POWER Clamp Reference] 3.3     3.0     3.6

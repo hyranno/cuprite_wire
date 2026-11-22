@@ -3,8 +3,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    Component, Enable, Error, Header, IbisFile, IvPoint, IvTable, Model, ModelType, Package, Pin,
-    PinModel, Polarity, Ramp, Skipped, Slope, TypMinMax, VtPoint, Waveform,
+    Component, Corner, CornerValues, Enable, Error, Header, IbisFile, IvPoint, IvTable, Model,
+    ModelSelector, ModelSpec, ModelType, Package, Pin, PinModel, Polarity, Ramp, SelectorOption,
+    Skipped, Slope, TypMinMax, VtPoint, Waveform,
     lex::{Block, Line, lex},
     number::{parse_number, parse_optional},
 };
@@ -61,14 +62,15 @@ struct Parser<'a> {
     header: HeaderFields,
     components: Vec<Component>,
     models: Vec<Model>,
-    model_selectors: Vec<String>,
+    /// The selectors, with the lines of their options.
+    model_selectors: Vec<(ModelSelector, Vec<usize>)>,
     skipped: Vec<Skipped>,
     /// The models named by pins, with the lines.
     pin_refs: Vec<(usize, String)>,
 }
 
 /// Top-level keywords whose scope, up to the next component or model, is skipped.
-const SKIPPED_SCOPES: [&str; 4] = ["model selector", "submodel", "test data", "test load"];
+const SKIPPED_SCOPES: [&str; 3] = ["submodel", "test data", "test load"];
 
 impl<'a> Parser<'a> {
     fn run(&mut self, blocks: &'a [Block]) -> Result<(), Error> {
@@ -83,10 +85,10 @@ impl<'a> Parser<'a> {
                 ("file name", _) => set_once(&mut self.header.file_name, b, args(b)?)?,
                 ("file rev", _) => set_once(&mut self.header.file_rev, b, args(b)?)?,
                 ("date", _) => set_once(&mut self.header.date, b, args(b)?)?,
-                ("source", _) => set_once(&mut self.header.source, b, text(b))?,
-                ("notes", _) => set_once(&mut self.header.notes, b, text(b))?,
-                ("disclaimer", _) => set_once(&mut self.header.disclaimer, b, text(b))?,
-                ("copyright", _) => set_once(&mut self.header.copyright, b, text(b))?,
+                ("source", _) => append(&mut self.header.source, text(b)),
+                ("notes", _) => append(&mut self.header.notes, text(b)),
+                ("disclaimer", _) => append(&mut self.header.disclaimer, text(b)),
+                ("copyright", _) => append(&mut self.header.copyright, text(b)),
                 ("component", _) => {
                     let name = args(b)?;
                     if self.components.iter().any(|c| c.name == name) {
@@ -111,10 +113,23 @@ impl<'a> Parser<'a> {
                     self.models.push(model);
                     context = Context::Model(self.models.len() - 1);
                 }
-                (_, _) if SKIPPED_SCOPES.contains(&name) => {
-                    if name == "model selector" {
-                        self.model_selectors.push(args(b)?);
+                ("model selector", _) => {
+                    let selector = model_selector(b)?;
+                    if self
+                        .model_selectors
+                        .iter()
+                        .any(|s| s.0.name == selector.0.name)
+                    {
+                        return Err(Error::new(
+                            b.line,
+                            format!("duplicate [Model Selector] {}", selector.0.name),
+                        ));
                     }
+                    self.model_selectors.push(selector);
+                    // The keywords up to the next component or model belong to neither.
+                    context = Context::Skipped;
+                }
+                (_, _) if SKIPPED_SCOPES.contains(&name) => {
                     self.skip(b);
                     context = Context::Skipped;
                 }
@@ -157,9 +172,25 @@ impl<'a> Parser<'a> {
         let ibis_ver = h
             .ibis_ver
             .ok_or_else(|| Error::new(1, "missing [IBIS Ver]"))?;
-        for (line, name) in &self.pin_refs {
-            if !self.models.iter().any(|m| &m.name == name) && !self.model_selectors.contains(name)
+        let is_model = |name: &str| self.models.iter().any(|m| m.name == name);
+        for selector in &self.model_selectors {
+            let (selector, lines) = selector;
+            if let Some((line, option)) = lines
+                .iter()
+                .zip(&selector.options)
+                .find(|(_, o)| !is_model(&o.model))
             {
+                return Err(Error::new(
+                    *line,
+                    format!(
+                        "[Model Selector] {} lists `{}`, which is not a [Model] of the file",
+                        selector.name, option.model
+                    ),
+                ));
+            }
+        }
+        for (line, name) in &self.pin_refs {
+            if !is_model(name) && !self.model_selectors.iter().any(|s| &s.0.name == name) {
                 return Err(Error::new(
                     *line,
                     format!(
@@ -182,7 +213,7 @@ impl<'a> Parser<'a> {
             },
             components: self.components,
             models: self.models,
-            model_selectors: self.model_selectors,
+            model_selectors: self.model_selectors.into_iter().map(|s| s.0).collect(),
             skipped: self.skipped,
         })
     }
@@ -307,10 +338,16 @@ impl<'a> Parser<'a> {
             pulldown: None,
             gnd_clamp: None,
             power_clamp: None,
+            rgnd: None,
+            rpower: None,
+            rac: None,
+            cac: None,
             ramp: None,
             rising_waveforms: Vec::new(),
             falling_waveforms: Vec::new(),
+            model_spec: ModelSpec::default(),
         };
+        let mut c_comp_parts = Vec::new();
         for s in subparams(&b.body) {
             let lower = s.name.to_ascii_lowercase();
             match lower.as_str() {
@@ -358,8 +395,25 @@ impl<'a> Parser<'a> {
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_optional)?;
                     set_subparam(&mut model.c_comp, &s, value)?;
                 }
+                "c_comp_pullup" | "c_comp_pulldown" | "c_comp_power_clamp" | "c_comp_gnd_clamp" => {
+                    c_comp_parts.push(typ_min_max(&s.values, s.line, &s.name, parse_optional)?);
+                }
                 _ => self.skip_subparam(&s),
             }
+        }
+        if model.c_comp.is_none() && !c_comp_parts.is_empty() {
+            let sum = |corner| {
+                c_comp_parts
+                    .iter()
+                    .map(|c: &TypMinMax<f64>| c.get(corner))
+                    .sum()
+            };
+            let any = |f: fn(&TypMinMax<f64>) -> bool| c_comp_parts.iter().any(f);
+            model.c_comp = Some(TypMinMax {
+                typ: sum(Corner::Typ),
+                min: any(|c| c.min.is_some()).then(|| sum(Corner::Min)),
+                max: any(|c| c.max.is_some()).then(|| sum(Corner::Max)),
+            });
         }
         model.model_type = model_type.ok_or_else(|| {
             Error::new(b.line, format!("[Model] {} has no Model_type", model.name))
@@ -385,6 +439,26 @@ impl<'a> Parser<'a> {
                 let ramp = self.ramp(b)?;
                 set_once(&mut self.models[m].ramp, b, ramp)
             }
+            "model spec" => {
+                let mut spec = ModelSpec::default();
+                for s in subparams(&b.body) {
+                    let field = match s.name.to_ascii_lowercase().as_str() {
+                        "vinl" => &mut spec.vinl,
+                        "vinh" => &mut spec.vinh,
+                        _ => {
+                            self.skip_subparam(&s);
+                            continue;
+                        }
+                    };
+                    let value = typ_min_max(&s.values, s.line, &s.name, parse_optional)?;
+                    set_subparam(field, &s, value)?;
+                }
+                if self.models[m].model_spec != ModelSpec::default() {
+                    return Err(Error::new(b.line, format!("duplicate {}", b.keyword)));
+                }
+                self.models[m].model_spec = spec;
+                Ok(())
+            }
             "rising waveform" | "falling waveform" => {
                 let waveform = self.waveform(b)?;
                 let model = &mut self.models[m];
@@ -395,7 +469,7 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             _ => {
-                // The ranges and references: three columns after the keyword.
+                // The ranges, references and terminations: three columns after the keyword.
                 let values: Vec<_> = b
                     .args
                     .split_whitespace()
@@ -410,6 +484,10 @@ impl<'a> Parser<'a> {
                     "pulldown reference" => &mut model.pulldown_reference,
                     "power clamp reference" => &mut model.power_clamp_reference,
                     "gnd clamp reference" => &mut model.gnd_clamp_reference,
+                    "rgnd" => &mut model.rgnd,
+                    "rpower" => &mut model.rpower,
+                    "rac" => &mut model.rac,
+                    "cac" => &mut model.cac,
                     _ => unreachable!(),
                 };
                 set_once(field, b, value)
@@ -490,13 +568,14 @@ impl Parser<'_> {
                 let (time, voltage) = tokens.split_first().unwrap();
                 Ok(VtPoint {
                     time: parse_number(time).unwrap(),
-                    voltage: typ_min_max(voltage, l.line, &b.keyword, parse_optional)?,
+                    voltage: corner_values(voltage, l.line, &b.keyword)?,
                 })
             })
             .collect::<Result<Vec<_>, Error>>()?;
         if points.len() < 2 {
             return Err(missing("at least two rows"));
         }
+        check_typ(points.iter().map(|p| p.voltage), b)?;
         if let Some(w) = points.windows(2).find(|w| w[1].time <= w[0].time) {
             return Err(Error::new(
                 b.line,
@@ -525,7 +604,12 @@ impl Parser<'_> {
 }
 
 /// The keywords read in the scope of a `[Model]`, besides `[Model]` itself.
-const MODEL_KEYWORDS: [&str; 13] = [
+const MODEL_KEYWORDS: [&str; 18] = [
+    "rgnd",
+    "rpower",
+    "rac",
+    "cac",
+    "model spec",
     "temperature range",
     "voltage range",
     "pullup reference",
@@ -546,6 +630,11 @@ const MODEL_KEYWORDS: [&str; 13] = [
 /// `[End Board Description]`, `[Define Package Model]` with `[End Package Model]`).
 fn end_keyword(name: &str) -> Option<String> {
     if name.starts_with("end ") {
+        return None;
+    }
+    // `[Package Model]` names a package model of the component; its definition is
+    // `[Define Package Model]` ... `[End Package Model]`.
+    if name == "package model" {
         return None;
     }
     let body = name
@@ -610,6 +699,34 @@ fn args(b: &Block) -> Result<String, Error> {
     }
 }
 
+/// A `[Model Selector]`: rows of a model name and its description. Returns the lines of the rows
+/// too.
+fn model_selector(b: &Block) -> Result<(ModelSelector, Vec<usize>), Error> {
+    let name = args(b)?;
+    let (lines, options) = b
+        .body
+        .iter()
+        .map(|l| {
+            let (model, description) = l
+                .text
+                .split_once(char::is_whitespace)
+                .unwrap_or((&l.text, ""));
+            (
+                l.line,
+                SelectorOption {
+                    model: model.to_string(),
+                    description: description.trim().to_string(),
+                },
+            )
+        })
+        .unzip();
+    let selector = ModelSelector { name, options };
+    if selector.options.is_empty() {
+        return Err(Error::new(b.line, format!("{} has no models", b.keyword)));
+    }
+    Ok((selector, lines))
+}
+
 /// The text after the keyword and the following lines, joined by `\n`.
 fn text(b: &Block) -> String {
     std::iter::once(b.args.as_str())
@@ -617,6 +734,17 @@ fn text(b: &Block) -> String {
         .chain(b.body.iter().map(|l| l.text.as_str()))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Adds the text of a keyword that may repeat, such as `[Notes]`, on a new line.
+fn append(field: &mut Option<String>, text: String) {
+    match field {
+        Some(old) => {
+            old.push('\n');
+            old.push_str(&text);
+        }
+        None => *field = Some(text),
+    }
 }
 
 fn set_once<T>(field: &mut Option<T>, b: &Block, value: T) -> Result<(), Error> {
@@ -660,6 +788,40 @@ fn typ_min_max<T, S: AsRef<str>>(
     Ok(TypMinMax { typ, min, max })
 }
 
+/// The values of a row of a table: typical, minimum and maximum, any of them `NA`, or the
+/// typical value alone.
+fn corner_values(values: &[&str], line: usize, what: &str) -> Result<CornerValues, Error> {
+    let value = |s: &str| {
+        parse_optional(s).ok_or_else(|| Error::new(line, format!("invalid value `{s}` for {what}")))
+    };
+    match values {
+        [typ] => Ok(CornerValues {
+            typ: value(typ)?,
+            ..CornerValues::default()
+        }),
+        [typ, min, max] => Ok(CornerValues {
+            typ: value(typ)?,
+            min: value(min)?,
+            max: value(max)?,
+        }),
+        _ => Err(Error::new(
+            line,
+            format!("{what} needs the typical, minimum and maximum values"),
+        )),
+    }
+}
+
+/// Checks that the typical column of a table has values.
+fn check_typ(rows: impl IntoIterator<Item = CornerValues>, b: &Block) -> Result<(), Error> {
+    if rows.into_iter().all(|v| v.typ.is_none()) {
+        return Err(Error::new(
+            b.line,
+            format!("the typical column of {} is all NA", b.keyword),
+        ));
+    }
+    Ok(())
+}
+
 /// A `dV/dt` value (`3.0/30n`) or `NA`.
 fn parse_slope(s: &str) -> Option<Option<Slope>> {
     if s.eq_ignore_ascii_case("NA") {
@@ -688,12 +850,13 @@ fn iv_table(b: &Block) -> Result<IvTable, Error> {
                         format!("invalid voltage `{voltage}` in {}", b.keyword),
                     )
                 })?,
-                current: typ_min_max(current, l.line, &b.keyword, parse_optional)?,
+                current: corner_values(current, l.line, &b.keyword)?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
     if points.is_empty() {
         return Err(Error::new(b.line, format!("{} has no rows", b.keyword)));
     }
+    check_typ(points.iter().map(|p| p.current), b)?;
     Ok(IvTable { points })
 }
