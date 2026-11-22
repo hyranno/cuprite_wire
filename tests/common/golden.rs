@@ -1,4 +1,4 @@
-//! Golden files, shared by the unit tests (`src/test_parts.rs`) and the integration tests.
+//! Golden files.
 
 use std::path::Path;
 

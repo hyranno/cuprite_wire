@@ -9,35 +9,18 @@ use crate::{
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
     naming::NetLabel,
     parts::Part,
-    spice::{ModelSource, SimulationError, SpiceDeck, SpiceElement, SpiceNetlist, SpicePartInfo},
+    spice::{ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo},
     subcircuit::SubcircuitGenerator,
 };
 
-#[path = "../tests/common/golden.rs"]
-mod golden;
+#[path = "../tests/common/mod.rs"]
+mod common;
 
-pub use golden::check_golden;
+pub use common::{check_golden, deck_of, simulation_error_message, strings};
 
 /// The SPICE netlist of `circuit`.
 pub fn spice_netlist(circuit: &CircuitBuilder) -> SpiceNetlist {
     circuit.build(&()).to_netlist().unwrap().to_spice().unwrap()
-}
-
-/// The SPICE deck of `circuit`, without front-end commands.
-pub fn deck_of(circuit: &CircuitBuilder) -> SpiceDeck {
-    spice_netlist(circuit).deck()
-}
-
-/// The message of a failed simulation; removes the run directory that ngspice errors keep.
-pub fn simulation_error_message(error: SimulationError) -> String {
-    if let SimulationError::Ngspice { dir, .. } = &error {
-        let _ = std::fs::remove_dir_all(dir);
-    }
-    error.to_string()
-}
-
-pub fn strings(s: &[&str]) -> Vec<String> {
-    s.iter().map(|s| s.to_string()).collect()
 }
 
 /// A 10k / 100n RC low-pass filter between the local nets `IN` and `OUT`, with `GND`.

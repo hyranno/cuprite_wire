@@ -10,8 +10,9 @@ use std::{
 
 use super::DCosim;
 use crate::spice::{
-    digital::{InputCharacteristics, OutputCharacteristics, check_subcircuit_pin, fnv1a},
+    digital::{InputCharacteristics, OutputCharacteristics},
     simulation::output_log,
+    subcircuit::{check_subcircuit_pin, fnv1a},
     temp_dir::TempDir,
 };
 

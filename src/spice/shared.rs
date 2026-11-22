@@ -12,6 +12,7 @@ use std::{
     cell::RefCell,
     ffi::{CStr, CString, c_char, c_int, c_void},
     fs, io,
+    marker::PhantomData,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     path::{Path, PathBuf},
     ptr,
@@ -142,14 +143,12 @@ impl SharedNgspice {
         let commands = [mode.as_str(), source.as_str()]
             .into_iter()
             .chain((!deck.has_control()).then_some("run"));
-        let status = {
-            let _active = session.map(|session| Active::start(session, loaded.set_breakpoint));
-            commands
-                .map(|command| loaded.command(command))
-                .find(|status| !matches!(status, Ok(0)) || EXITED.load(Ordering::SeqCst))
-                .unwrap_or(Ok(0))
-        };
-        let panic = Active::take_panic();
+        let active = session.map(|session| Active::start(session, loaded.set_breakpoint));
+        let status = commands
+            .map(|command| loaded.command(command))
+            .find(|status| !matches!(status, Ok(0)) || EXITED.load(Ordering::SeqCst))
+            .unwrap_or(Ok(0));
+        let panic = active.and_then(ActiveGuard::finish);
         let log = std::mem::take(&mut *lock(&OUTPUT));
         let exited = EXITED.load(Ordering::SeqCst);
         drop(loaded);
@@ -180,7 +179,7 @@ pub(crate) trait Session {
 
 /// The session of the run in progress in this thread.
 struct Active {
-    /// Valid until the [`ActiveGuard`] that set it is dropped.
+    /// Valid while the [`ActiveGuard`] that set it lives.
     session: *mut (dyn Session + 'static),
     set_breakpoint: NgSpiceSetBkpt,
     /// The type of the plot announced by `SendInitData`, until its first point.
@@ -191,17 +190,32 @@ struct Active {
 
 thread_local! {
     static ACTIVE: RefCell<Option<Active>> = const { RefCell::new(None) };
-    /// The panic of the session of the last run, kept after its guard is dropped.
-    static PANIC: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
 }
 
-/// Removes the session when dropped.
-struct ActiveGuard;
+/// Borrows the session of [`ACTIVE`], and removes it when finished or dropped (when unwinding).
+struct ActiveGuard<'s> {
+    _session: PhantomData<&'s mut dyn Session>,
+}
+
+impl ActiveGuard<'_> {
+    /// Removes the session; its panic, if any.
+    fn finish(self) -> Option<Box<dyn Any + Send>> {
+        ACTIVE.with_borrow_mut(|active| active.take().and_then(|active| active.panic))
+    }
+}
+
+impl Drop for ActiveGuard<'_> {
+    fn drop(&mut self) {
+        // Already removed if finished.
+        ACTIVE.with_borrow_mut(|active| *active = None);
+    }
+}
 
 impl Active {
-    fn start(session: &mut dyn Session, set_breakpoint: NgSpiceSetBkpt) -> ActiveGuard {
+    fn start<'s>(session: &'s mut dyn Session, set_breakpoint: NgSpiceSetBkpt) -> ActiveGuard<'s> {
         let session: *mut (dyn Session + '_) = session;
-        // SAFETY: only the lifetime is erased; the guard removes the pointer before it ends.
+        // SAFETY: only the lifetime is erased; the guard, which borrows the session, removes the
+        // pointer when it ends.
         let session: *mut (dyn Session + 'static) = unsafe { std::mem::transmute(session) };
         ACTIVE.with_borrow_mut(|active| {
             *active = Some(Active {
@@ -212,12 +226,9 @@ impl Active {
                 panic: None,
             })
         });
-        ActiveGuard
-    }
-
-    /// The panic of the session that has just ended, if any.
-    fn take_panic() -> Option<Box<dyn Any + Send>> {
-        PANIC.with_borrow_mut(Option::take)
+        ActiveGuard {
+            _session: PhantomData,
+        }
     }
 
     /// Calls `f` with the session, unless there is none in this thread or it has panicked.
@@ -234,13 +245,6 @@ impl Active {
                 }
             }
         })
-    }
-}
-
-impl Drop for ActiveGuard {
-    fn drop(&mut self) {
-        let panic = ACTIVE.with_borrow_mut(|active| active.take().and_then(|a| a.panic));
-        PANIC.with_borrow_mut(|slot| *slot = panic);
     }
 }
 
@@ -344,19 +348,12 @@ impl Loaded {
             .map_err(|e| error(format!("cannot load {}: {e}", path.display())))?;
         // SAFETY: the types are those of `sharedspice.h` (ngspice 44).
         let (init, init_sync, command, set_breakpoint) = unsafe {
-            let init: NgSpiceInit = *library
-                .get("ngSpice_Init")
-                .map_err(|e| error(e.to_string()))?;
-            let init_sync: NgSpiceInitSync = *library
-                .get("ngSpice_Init_Sync")
-                .map_err(|e| error(e.to_string()))?;
-            let command: NgSpiceCommand = *library
-                .get("ngSpice_Command")
-                .map_err(|e| error(e.to_string()))?;
-            let set_breakpoint: NgSpiceSetBkpt = *library
-                .get("ngSpice_SetBkpt")
-                .map_err(|e| error(e.to_string()))?;
-            (init, init_sync, command, set_breakpoint)
+            (
+                symbol::<NgSpiceInit>(&library, "ngSpice_Init")?,
+                symbol::<NgSpiceInitSync>(&library, "ngSpice_Init_Sync")?,
+                symbol::<NgSpiceCommand>(&library, "ngSpice_Command")?,
+                symbol::<NgSpiceSetBkpt>(&library, "ngSpice_SetBkpt")?,
+            )
         };
         // SAFETY: the callbacks have the types ngspice expects and live as long as the process.
         let status = unsafe {
@@ -410,13 +407,24 @@ impl Loaded {
     }
 }
 
+/// The function `name` of `library`.
+///
+/// # Safety
+/// `T` is the type of the function, and is used while the library is loaded.
+unsafe fn symbol<T: Copy>(library: &Library, name: &str) -> Result<T, SimulationError> {
+    // SAFETY: as the caller ensures.
+    unsafe { library.get::<T>(name.as_bytes()) }
+        .map(|symbol| *symbol)
+        .map_err(|e| SimulationError::SharedLibrary(format!("cannot find {name}: {e}")))
+}
+
 /// Collects a line of output, with the `stdout ` / `stderr ` prefix of the library removed.
 unsafe extern "C" fn send_char(text: *mut c_char, _id: c_int, _user: *mut c_void) -> c_int {
     if text.is_null() {
         return 0;
     }
     // SAFETY: ngspice passes a NUL-terminated string valid during the call.
-    let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+    let text = unsafe { c_string(text) };
     let line = ["stdout", "stderr"]
         .iter()
         .find_map(|prefix| text.strip_prefix(prefix))

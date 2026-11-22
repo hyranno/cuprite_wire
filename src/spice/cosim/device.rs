@@ -4,10 +4,8 @@ use crate::{
     parts::Part,
     spice::{
         SpicePartInfo,
-        digital::{
-            InputCharacteristics, OutputCharacteristics, StageSource, assert_subcircuit_pin,
-            is_identifier, subcircuit_part, subcircuit_text,
-        },
+        digital::{InputCharacteristics, OutputCharacteristics, StageSource},
+        subcircuit::{assert_subcircuit_pin, is_identifier, subcircuit_part, subcircuit_text},
     },
 };
 

@@ -23,14 +23,6 @@ pub fn spice_number(value: f64) -> String {
     }
 }
 
-fn numbers(values: &[f64]) -> String {
-    values
-        .iter()
-        .map(|v| spice_number(*v))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 /// Whether an [`IndependentSource`] is a voltage or a current source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
@@ -93,11 +85,18 @@ impl Waveform {
         }
     }
 
-    /// # Panics
-    /// If a number is not finite, or the points of `Pwl` are none or not in increasing time.
-    #[track_caller]
-    fn validate(&self) {
-        let values: Vec<f64> = match self {
+    /// The keyword of the waveform in SPICE.
+    fn keyword(&self) -> &'static str {
+        match self {
+            Waveform::Sin { .. } => "SIN",
+            Waveform::Pulse { .. } => "PULSE",
+            Waveform::Pwl(_) => "PWL",
+        }
+    }
+
+    /// The numbers of the waveform, in the order SPICE takes them.
+    fn numbers(&self) -> Vec<f64> {
+        match self {
             Waveform::Sin {
                 offset,
                 amplitude,
@@ -115,51 +114,30 @@ impl Waveform {
                 width,
                 period,
             } => vec![*initial, *pulsed, *delay, *rise, *fall, *width, *period],
-            Waveform::Pwl(points) => {
-                assert!(!points.is_empty(), "a PWL waveform needs a point");
-                assert!(
-                    points.windows(2).all(|pair| pair[0].0 < pair[1].0),
-                    "the times of a PWL waveform must increase: {points:?}"
-                );
-                points.iter().flat_map(|&(t, v)| [t, v]).collect()
-            }
-        };
+            Waveform::Pwl(points) => points.iter().flat_map(|&(t, v)| [t, v]).collect(),
+        }
+    }
+
+    /// # Panics
+    /// If a number is not finite, or the points of `Pwl` are none or not in increasing time.
+    #[track_caller]
+    fn validate(&self) {
+        if let Waveform::Pwl(points) = self {
+            assert!(!points.is_empty(), "a PWL waveform needs a point");
+            assert!(
+                points.windows(2).all(|pair| pair[0].0 < pair[1].0),
+                "the times of a PWL waveform must increase: {points:?}"
+            );
+        }
         assert!(
-            values.iter().all(|v| v.is_finite()),
+            self.numbers().iter().all(|v| v.is_finite()),
             "the numbers of a waveform must be finite: {self:?}"
         );
     }
 
     pub(crate) fn to_spice(&self) -> String {
-        match self {
-            Waveform::Sin {
-                offset,
-                amplitude,
-                frequency,
-                delay,
-                damping,
-                phase,
-            } => format!(
-                "SIN( {} )",
-                numbers(&[*offset, *amplitude, *frequency, *delay, *damping, *phase])
-            ),
-            Waveform::Pulse {
-                initial,
-                pulsed,
-                delay,
-                rise,
-                fall,
-                width,
-                period,
-            } => format!(
-                "PULSE( {} )",
-                numbers(&[*initial, *pulsed, *delay, *rise, *fall, *width, *period])
-            ),
-            Waveform::Pwl(points) => {
-                let values: Vec<f64> = points.iter().flat_map(|&(t, v)| [t, v]).collect();
-                format!("PWL( {} )", numbers(&values))
-            }
-        }
+        let numbers: Vec<String> = self.numbers().into_iter().map(spice_number).collect();
+        format!("{}( {} )", self.keyword(), numbers.join(" "))
     }
 }
 

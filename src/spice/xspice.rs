@@ -12,12 +12,13 @@ use crate::{
     parts::Part,
     spice::{
         SpicePartInfo,
-        digital::{
-            InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE,
-            assert_subcircuit_pin, hashed_subcircuit, internal_node, subcircuit_part,
-        },
+        digital::{InputCharacteristics, OutputCharacteristics},
         sources::spice_number,
         spice_path,
+        subcircuit::{
+            SUBCIRCUIT_REFERENCE, assert_subcircuit_pin, hashed_subcircuit, internal_node,
+            subcircuit_part,
+        },
     },
 };
 
