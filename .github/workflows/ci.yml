@@ -99,6 +99,10 @@ jobs:
       - run: cargo test --workspace --features kicad-libraries,shared-ngspice
       - name: Tests reading the KiCad libraries
         run: cargo test -p cuprite_wire_kicad_lib -- --ignored
+      # The KiCad demos are in the kicad/kicad image, not in the packages of Debian trixie above.
+      - name: Tests reading the KiCad demos
+        if: matrix.kicad == 10
+        run: cargo test -p cuprite_wire_ibis -- --ignored
 
   test-other-os:
     name: test (${{ matrix.os }})
