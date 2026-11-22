@@ -169,7 +169,38 @@ from what the library (and the files it includes) uses, and record it in the ele
   eeschema), always for the whole netlist. Choose the matching mode there to simulate the schematic
   with the same models.
 
-## 5. What is not supported
+## 5. XSPICE code models
+
+ngspice's XSPICE code models (`A` elements such as `d_state`, `adc_bridge` and `dac_bridge`) can
+be used inside a `.subckt`, which is then the model of the part like any other subcircuit (KiCad's
+demo `simulation/up-down-counter` is such a library). A `.model` of a code model cannot be a part
+by itself: wrap it in a `.subckt` with the ports the part needs.
+
+Some code models read a file named by a parameter:
+
+| Model type | Parameter |
+|---|---|
+| `d_state` | `state_file` |
+| `d_source` | `input_file` |
+| `d_process` | `process_file` |
+| `d_cosim` | `simulation` |
+| `filesource` | `file` |
+| `table2D`, `table3D` | `file` |
+
+ngspice opens these files relative to the directory it runs in (a temporary directory for
+`SpiceDeck::run`), not to the library. The macros resolve a relative path against the library file
+the `.model` is in (as ngspice does for `.include`), check that the file exists and track it for
+rebuilds. Then:
+
+- With `sim_model: inline`, the copied definition gets the absolute path.
+- With `sim_model: include` (the default), the library is included as it is, so a relative path is
+  a compile error suggesting `sim_model: inline`. Absolute paths in the library are fine.
+
+The file itself is not copied: ngspice reads it when the deck runs, as it reads an included
+library. For digital models built by your crate, `spice::xspice::DCosim` is simpler than a
+`d_cosim` in a library (`doc/cosimulation.md` section 6).
+
+## 6. What is not supported
 
 - **Encrypted models** (PSpice's `$CDNENCSTART` blocks). Ask the vendor for an unencrypted model,
   or use a generic model.
@@ -177,7 +208,8 @@ from what the library (and the files it includes) uses, and record it in the ele
   model has them only for its supply, a copy with the optional ports made regular can be used.
 - **Model bodies are not checked**: syntax ngspice cannot read even in its compatibility mode is
   reported when the deck runs (`SimulationError::Ngspice` with the log).
-- IBIS, Verilog-A, XSPICE code models and TINA-TI's own formats.
+- IBIS, Verilog-A, the `.model` of an XSPICE code model as a part by itself (wrap it in a
+  `.subckt`, section 5) and TINA-TI's own formats.
 - Parameters as constructor arguments (`params` are fixed values).
 - Mappings taken from vendor symbol files (`.olb`) or from header comments
   (`* PINOUT ORDER ...`), which follow no common format.
@@ -189,7 +221,7 @@ the transient operating point ngspice falls back to leaves the output above the 
 any error: check results against what the circuit can do. Transient models (e.g. TI's TPS3899
 model) are meant for `.tran`, as in the vendor's test bench.
 
-## 6. Licenses of vendor models
+## 7. Licenses of vendor models
 
 Vendor models are usually free to use but restrict redistribution. Keep them out of your
 repository unless their terms allow it, and prefer `sim_model: include` (the default), which only
@@ -205,6 +237,6 @@ model, checked with ngspice 44.2 on 2026-11-18). The TPS3899 model is marked "Al
 so it is only read from the directory given by `CUPRITE_VENDOR_MODELS_DIR` (e.g. the git-ignored
 `vendor_models.local/`).
 
-## 7. Verifying
+## 8. Verifying
 
 How the model handling is tested is described in `doc/dev/verifying.md`.

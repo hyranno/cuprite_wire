@@ -4,7 +4,8 @@
 //! `.subckt` definitions (ports and parameters), the types of the top-level `.model` statements,
 //! the names of the top-level `.param` / `.func` definitions, the files they include, and hints of
 //! the dialect the library is written in. The bodies of the definitions are kept as text, to be
-//! copied into a deck, but not interpreted: ngspice reads them.
+//! copied into a deck, but not interpreted: ngspice reads them. Only the files named by XSPICE code
+//! models are looked for in them ([`file_refs`]), to resolve their paths.
 //!
 //! Vendor libraries are often written for PSpice: `.LIB "file"` includes a file, `$` is not a
 //! comment (`$G_DPWR` is a node name), and `OPTIONAL:` ports and encrypted blocks
@@ -408,6 +409,109 @@ impl SpiceLib {
             .iter()
             .filter(move |i| same_section(i.within.as_deref(), section))
     }
+}
+
+/// The parameters of XSPICE code models that name a file, by model type (lowercase). ngspice opens
+/// these files relative to the directory it runs in, not to the library.
+pub const FILE_PARAMS: &[(&str, &str)] = &[
+    ("d_state", "state_file"),
+    ("d_source", "input_file"),
+    ("d_process", "process_file"),
+    ("d_cosim", "simulation"),
+    ("filesource", "file"),
+    ("table2d", "file"),
+    ("table3d", "file"),
+];
+
+/// A file named by a parameter of a code model ([`FILE_PARAMS`]) in a `.model` statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRef {
+    /// The name of the `.model`.
+    pub model: String,
+    /// The model type, lowercase (`d_state`).
+    pub model_type: &'static str,
+    pub param: &'static str,
+    /// The path, as written (without quotes).
+    pub path: String,
+    /// The value in the text searched, with its quotes.
+    pub range: std::ops::Range<usize>,
+}
+
+/// The files named by code models in `text` (a definition, including the `.model` statements
+/// nested in a `.subckt`).
+pub fn file_refs(text: &str) -> Vec<FileRef> {
+    let mut refs = Vec::new();
+    for statement in statements(text) {
+        if statement.encrypted {
+            continue;
+        }
+        let tokens = tokenize(&statement.text);
+        if !tokens
+            .first()
+            .is_some_and(|t| t.eq_ignore_ascii_case(".model"))
+        {
+            continue;
+        }
+        let (Some(model), Some(model_type)) = (tokens.get(1), tokens.get(2)) else {
+            continue;
+        };
+        let model_type = model_type.split('(').next().unwrap_or_default();
+        for &(file_type, param) in FILE_PARAMS {
+            if !model_type.eq_ignore_ascii_case(file_type) {
+                continue;
+            }
+            for line in statement.own_lines() {
+                if is_comment_line(line) {
+                    continue;
+                }
+                let offset = line.as_ptr() as usize - text.as_ptr() as usize;
+                for (path, range) in param_values(strip_comment(line), param) {
+                    refs.push(FileRef {
+                        model: model.clone(),
+                        model_type: file_type,
+                        param,
+                        path,
+                        range: range.start + offset..range.end + offset,
+                    });
+                }
+            }
+        }
+    }
+    refs
+}
+
+/// The values of `param = value` in a line: the value without quotes, and its range with them.
+fn param_values(line: &str, param: &str) -> Vec<(String, std::ops::Range<usize>)> {
+    let lower = line.to_ascii_lowercase();
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut values = Vec::new();
+    for (start, _) in lower.match_indices(param) {
+        if lower[..start].ends_with(is_name) {
+            continue;
+        }
+        let after = &line[start + param.len()..];
+        let Some(rest) = after.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = rest.trim_start();
+        let begin = line.len() - value.len();
+        let (path, len) = match value.chars().next() {
+            Some(q @ ('"' | '\'')) => match value[1..].find(q) {
+                Some(end) => (&value[1..end + 1], end + 2),
+                None => continue,
+            },
+            _ => {
+                let end = value
+                    .find(|c: char| c.is_whitespace() || c == ')' || c == ',')
+                    .unwrap_or(value.len());
+                (&value[..end], end)
+            }
+        };
+        if !path.is_empty() {
+            values.push((path.to_string(), begin..begin + len));
+        }
+    }
+    values
 }
 
 fn same_section(a: Option<&str>, b: Option<&str>) -> bool {
@@ -922,6 +1026,37 @@ R1 a b 1k
         let lib = SpiceLib::parse(&decode(std::fs::read(path).unwrap())).unwrap();
         assert_eq!(subckt(lib.find("VSUP_DIGITAL").unwrap()).1.len(), 2);
         assert!(lib.find("VSUP_LOCKED").unwrap().encrypted);
+    }
+
+    #[test]
+    fn test_file_refs() {
+        let text = "\
+.subckt counter clk q
+a0 [d] clk [q] state1
+.model state1 d_state(state_file = \"count.in\" reset_state=0)
+* .model state2 d_state(state_file = \"commented.in\")
+.MODEL src FileSource (FILE=wave.txt amploffset=[0])
+.model tab table2d (offset=0.0 gain=1
++ file = 'tab le.tbl') ; file=\"comment\"
+.model other d_source(state_file=\"x\" profile=\"y\")
+.model g filesource(profile=1)
+.ends counter
+";
+        let refs = file_refs(text);
+        let found: Vec<_> = refs
+            .iter()
+            .map(|r| (r.model.as_str(), r.model_type, r.param, r.path.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("state1", "d_state", "state_file", "count.in"),
+                ("src", "filesource", "file", "wave.txt"),
+                ("tab", "table2d", "file", "tab le.tbl"),
+            ]
+        );
+        let values: Vec<_> = refs.iter().map(|r| &text[r.range.clone()]).collect();
+        assert_eq!(values, ["\"count.in\"", "wave.txt", "'tab le.tbl'"]);
     }
 
     #[test]

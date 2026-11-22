@@ -60,20 +60,27 @@ pub(super) fn read_library(path: &Path, resolver: &mut Resolver) -> Result<Vec<L
     Ok(libs)
 }
 
-/// The definition and the top-level definitions (also `.param` / `.func`) it refers to by name.
-pub(super) fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Definition> {
+/// The definition (in `file`) and the top-level definitions (also `.param` / `.func`) it refers
+/// to by name, each with the file it is in.
+pub(super) fn dependencies(
+    definition: &Definition,
+    file: &Path,
+    libs: &[LibFile],
+) -> Vec<(Definition, PathBuf)> {
     let find_any = |name: &str| {
-        libs.iter()
-            .find_map(|(lib, section, _)| {
-                lib.definitions(section.as_deref())
-                    .find(|d| d.name.eq_ignore_ascii_case(name))
-            })
-            .cloned()
+        libs.iter().find_map(|(lib, section, path)| {
+            lib.definitions(section.as_deref())
+                .find(|d| d.name.eq_ignore_ascii_case(name))
+                .map(|d| (d.clone(), path.clone()))
+        })
     };
-    let mut out: Vec<Definition> = Vec::new();
-    let mut pending = vec![definition.clone()];
-    while let Some(def) = pending.pop() {
-        if out.iter().any(|d| d.name.eq_ignore_ascii_case(&def.name)) {
+    let mut out: Vec<(Definition, PathBuf)> = Vec::new();
+    let mut pending = vec![(definition.clone(), file.to_path_buf())];
+    while let Some((def, path)) = pending.pop() {
+        if out
+            .iter()
+            .any(|(d, _)| d.name.eq_ignore_ascii_case(&def.name))
+        {
             continue;
         }
         for token in referenced_names(&def.text) {
@@ -81,7 +88,7 @@ pub(super) fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Def
                 pending.push(referenced);
             }
         }
-        out.push(def);
+        out.push((def, path));
     }
     out
 }
