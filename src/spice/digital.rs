@@ -356,6 +356,10 @@ impl Pwl {
         if self.points.last().is_some_and(|&(t, _)| t < time) {
             self.points.push((time, current));
         }
+        if current == target {
+            // The cut ramp had not left `target` yet (two events at one time).
+            return;
+        }
         self.points.push((time + duration(current, target), target));
     }
 }
@@ -824,6 +828,28 @@ mod tests {
         assert_eq!(sequence.level_at(1.0), Level::High);
         assert_eq!(sequence.level_at(3.0), Level::Low);
         assert_eq!(sequence.end_time(), 2.0);
+    }
+
+    #[test]
+    fn test_waveform_events_at_one_time() {
+        // `Low` cuts the edge to `High` at its start: the output stays low, with no repeated time.
+        let sequence = DigitalSequence::new(Level::Low)
+            .at(1.0, Level::High)
+            .at(1.0, Level::Low);
+        let output = OutputCharacteristics::cmos(1.0);
+        let Waveform::Pwl(points) = sequence.voltage_waveform(&output) else {
+            unreachable!()
+        };
+        assert_points(&points, &[(0.0, 0.0), (1.0, 0.0)]);
+        let enable = DigitalSequence::new(Level::HiZ)
+            .at(1.0, Level::High)
+            .at(1.0, Level::HiZ)
+            .enable_waveform(1e-9)
+            .unwrap();
+        let Waveform::Pwl(points) = &enable else {
+            unreachable!()
+        };
+        assert_points(points, &[(0.0, 0.0), (1.0, 0.0)]);
     }
 
     #[test]

@@ -178,7 +178,9 @@ trace of the part or the label):
 - `log()` is ngspice's output.
 
 The run fails with `SimulationError::Ngspice` (the log and the kept run directory) if ngspice exits
-with an error or prints a line starting with `Error`. Otherwise the directory is removed when the
+with an error, prints a line starting with `Error`, or reports an analysis that stopped
+(`tran simulation(s) aborted`, e.g. after `Timestep too small` in the middle of a transient
+analysis, which ngspice reports without an `Error` line and with exit status 0). Otherwise the directory is removed when the
 `Simulation` is dropped.
 
 **Compatibility mode.** If models are marked as PSpice or LTspice, the deck needs ngspice's

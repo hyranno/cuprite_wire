@@ -19,7 +19,11 @@ use crate::{kicad::KicadPartInfo, naming::HierPath, spice::SpicePartInfo, trace:
 /// Parts supporting different formats may be mixed in one circuit; exporting a circuit
 /// that contains an unsupported part to that format is an error.
 pub trait Part: Debug + DynClone {
-    /// Reference designator prefix (e.g. `"R"`).
+    /// Reference designator prefix (e.g. `"R"`), followed by a number in the reference.
+    ///
+    /// It must not be empty, end with a digit (`U1` + `1` would be `U11`), or contain whitespace,
+    /// `?`, `#`, `/` or `{`; other prefixes are reported as
+    /// [`CircuitErrorKind::InvalidName`](crate::error::CircuitErrorKind::InvalidName).
     fn get_ref_base_name(&self) -> String;
     /// IDs of the pins. One pin ID corresponds to one footprint pad, except for duplicate pins
     /// (several pins on one pad, which KiCad 10 allows): they must be connected by

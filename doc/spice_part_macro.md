@@ -53,7 +53,7 @@ the body of the model is not interpreted, ngspice reads it. Files read are track
 | `internal_connections` | `[["a", "b"], ...]`: groups of pin IDs | none |
 | `params` | `{ "TD" => "1m" }`: parameters of the `.subckt` | the model's defaults |
 | `value` | `"text"` or `param` | the model name |
-| `ref_base` | reference prefix | `U` for a `.subckt`; `D` for a diode, `Q` for other `.model`s |
+| `ref_base` | reference prefix (a letter, then letters, digits and `_`, not ending with a digit) | `U` for a `.subckt`; `D` for a diode, `Q` for other `.model`s |
 | `dialect` | `auto`, `ngspice`, `pspice` or `ltspice` (section 4) | `auto` |
 | `sim_model` | `include` or `inline` (as for `kicad_part!`) | `include` |
 

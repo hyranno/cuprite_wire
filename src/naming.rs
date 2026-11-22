@@ -96,6 +96,50 @@ pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
     }
 }
 
+/// Checks the base of automatic instance names ([`SubcircuitGenerator::base_name`]), which
+/// becomes part of hierarchical paths like an explicit name.
+///
+/// [`SubcircuitGenerator::base_name`]: crate::subcircuit::SubcircuitGenerator::base_name
+pub(crate) fn check_base_name(name: &str) -> Result<(), &'static str> {
+    if name.is_empty() {
+        Err("base names must not be empty")
+    } else if name.contains(AUTO_NAME_SEPARATOR) {
+        Err("'#' is reserved for automatic names")
+    } else if name.contains(ESCAPE_START) {
+        Err("'{' is reserved for escape sequences such as {slash}")
+    } else {
+        Ok(())
+    }
+}
+
+/// Checks the prefix of reference designators ([`Part::get_ref_base_name`]): the reference is
+/// the prefix followed by a number, so the prefix must not end with a digit (`U1` + `1` and
+/// `U` + `11` would both be `U11`). KiCad rejects whitespace in references, treats `?` as an
+/// unannotated number and `#` as a virtual part (`#PWR`).
+///
+/// [`Part::get_ref_base_name`]: crate::parts::Part::get_ref_base_name
+pub(crate) fn check_ref_prefix(prefix: &str) -> Result<(), &'static str> {
+    if prefix.is_empty() {
+        Err("reference prefixes must not be empty")
+    } else if prefix.ends_with(|c: char| c.is_ascii_digit()) {
+        Err("reference prefixes must not end with a digit")
+    } else if prefix.contains(char::is_whitespace) {
+        Err("reference prefixes must not contain whitespace")
+    } else if let Some(c) = prefix
+        .chars()
+        .find(|&c| matches!(c, '?' | '#' | '/' | ESCAPE_START))
+    {
+        Err(match c {
+            '?' => "'?' marks an unannotated reference in KiCad",
+            '#' => "'#' marks a virtual part in KiCad and automatic names",
+            '/' => "'/' separates sheet paths in KiCad",
+            _ => "'{' is reserved for escape sequences such as {slash}",
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Checks the name of a net label.
 pub(crate) fn check_label_name(name: &str) -> Result<(), &'static str> {
     if name.is_empty() {

@@ -40,7 +40,7 @@ Only `symbol` is required. Options are separated by commas.
 | `symbol` | `"Library:Name"` | |
 | `footprint` | `"Library:Name"`, or `none` for simulation-only parts | the symbol's `Footprint` property; an error if it is empty |
 | `value` | `"text"`, or `param` to take it as a constructor argument | the symbol's `Value` |
-| `ref_base` | the reference prefix, e.g. `"RN"` | the symbol's `Reference` without `?` |
+| `ref_base` | the reference prefix, e.g. `"RN"`: a letter, then letters, digits and `_`, not ending with a digit | the symbol's `Reference` without the trailing `?` and digits |
 | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin (or extra pad) number | the pin numbers |
 | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs connected inside the part | stacked pins only |
 | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins of the part | none |

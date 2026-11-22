@@ -14,7 +14,8 @@ use crate::{
     erc::{ErcMark, ErcRule, NodeMark},
     error::{CircuitError, CircuitErrorKind},
     naming::{
-        AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_explicit_name, check_label_name,
+        AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_base_name, check_explicit_name,
+        check_label_name, check_ref_prefix,
     },
     parts::{Part, PartInstance, PinType},
     subcircuit::{Interface, SubcircuitGenerator, SubcircuitInstance},
@@ -209,6 +210,24 @@ impl<B> CircuitBuilder<B> {
         self.nets.add_edge(a, b, Location::caller());
     }
 
+    /// Reports `name` as an [`CircuitErrorKind::InvalidName`] if `check` rejects it.
+    fn check_name(
+        &mut self,
+        name: &str,
+        check: fn(&str) -> Result<(), &'static str>,
+        trace: Trace,
+    ) {
+        if let Err(reason) = check(name) {
+            self.errors.push(CircuitError::new(
+                CircuitErrorKind::InvalidName {
+                    name: name.to_string(),
+                    reason,
+                },
+                trace,
+            ));
+        }
+    }
+
     /// Gives a name to the net containing `node`.
     ///
     /// Nodes with the same global label, or with the same local label in the same
@@ -217,15 +236,7 @@ impl<B> CircuitBuilder<B> {
     #[track_caller]
     pub fn label(&mut self, node: NodeIndex, label: NetLabel) {
         let trace = Trace::new(Location::caller());
-        if let Err(reason) = check_label_name(label.name()) {
-            self.errors.push(CircuitError::new(
-                CircuitErrorKind::InvalidName {
-                    name: label.name().to_string(),
-                    reason,
-                },
-                trace.clone(),
-            ));
-        }
+        self.check_name(label.name(), check_label_name, trace.clone());
         self.nets[node].labels.push(NodeLabel {
             label,
             scope: HierPath::default(),
@@ -347,12 +358,13 @@ impl<B> CircuitBuilder<B> {
         F: Fn(&B) -> G::Options + Clone + 'static,
     {
         let location = Location::caller();
-        let name = self.subcircuit_names.assign(
-            name,
-            &generator.base_name(),
-            &Trace::new(location),
-            &mut self.errors,
-        );
+        let base_name = generator.base_name();
+        if name.is_none() {
+            self.check_name(&base_name, check_base_name, Trace::new(location));
+        }
+        let name =
+            self.subcircuit_names
+                .assign(name, &base_name, &Trace::new(location), &mut self.errors);
         let interface = G::Interface::from_fn(|_| self.add_node_at(location));
         self.subcircuits.push(SubcircuitInstance::new(
             generator,
@@ -392,9 +404,11 @@ impl<B> CircuitBuilder<B> {
         part: Box<dyn Part>,
     ) -> HashMap<String, NodeIndex> {
         let trace = Trace::new(Location::caller());
-        let name =
-            self.part_names
-                .assign(name, &part.get_ref_base_name(), &trace, &mut self.errors);
+        let prefix = part.get_ref_base_name();
+        self.check_name(&prefix, check_ref_prefix, trace.clone());
+        let name = self
+            .part_names
+            .assign(name, &prefix, &trace, &mut self.errors);
         let mut pin_mapping = HashMap::new();
         for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
@@ -1141,6 +1155,48 @@ mod tests {
             })
             .collect();
         assert_eq!(invalid, ["a{slash}b", "I{slash}O"]);
+    }
+
+    #[test]
+    fn test_invalid_ref_prefixes_and_base_names_are_rejected() {
+        #[derive(Debug, Clone)]
+        struct Based(&'static str);
+        impl SubcircuitGenerator for Based {
+            type Options = ();
+            type Interface = ();
+            fn construct_subcircuit(&self, _: &(), _: &mut CircuitBuilder<()>, _: ()) {}
+            fn base_name(&self) -> String {
+                self.0.into()
+            }
+        }
+        let mut circuit = CircuitBuilder::<()>::new();
+        for prefix in ["U1", "", "R 1", "U?", "#PWR", "a/b", "{x}", "Q"] {
+            circuit.instantiate_part(Box::new(crate::test_parts::CustomPart {
+                ref_base_name: prefix,
+                ..crate::test_parts::CustomPart::valid()
+            }));
+        }
+        circuit.instantiate_subcircuit(Based("{slash}"));
+        circuit.instantiate_subcircuit(Based("a#1"));
+        circuit.instantiate_subcircuit(Based(""));
+        // Only used for automatic names.
+        circuit.instantiate_subcircuit_named("named", Based("{x}"));
+        circuit.instantiate_subcircuit(Based("Stage2"));
+        let invalid: Vec<_> = circuit
+            .build(&())
+            .errors()
+            .iter()
+            .filter_map(|error| match &error.kind {
+                CircuitErrorKind::InvalidName { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            invalid,
+            [
+                "U1", "", "R 1", "U?", "#PWR", "a/b", "{x}", "{slash}", "a#1", ""
+            ]
+        );
     }
 
     #[derive(Debug, Clone)]

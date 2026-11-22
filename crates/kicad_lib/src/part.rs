@@ -642,11 +642,14 @@ pub fn load_spice_part(
     })
 }
 
+/// A reference prefix starts with a letter, has only letters, digits and `_`, and does not end
+/// with a digit (the reference appends a number: `U1` + `1` would be `U11`).
 fn check_ref_base(ref_base: &str) -> Result<(), PartError> {
     if !ref_base.starts_with(|c: char| c.is_ascii_alphabetic())
         || !ref_base
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || ref_base.ends_with(|c: char| c.is_ascii_digit())
     {
         return err(
             OptionKey::RefBase,
@@ -904,6 +907,12 @@ mod tests {
         let (key, message) = error(opts);
         assert_eq!(key, OptionKey::Spice);
         assert!(message.starts_with("cannot simulate test:R"), "{message}");
+        let mut opts = options("test:R", "test:R_0603");
+        opts.common.ref_base = Some("U1".into());
+        assert_eq!(
+            error(opts),
+            (OptionKey::RefBase, "invalid reference prefix \"U1\"".into())
+        );
     }
 
     #[test]

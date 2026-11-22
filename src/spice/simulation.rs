@@ -127,9 +127,14 @@ pub(crate) fn finish_run(
 }
 
 /// Whether ngspice reports an error with `line`: it starts with the word `error` (`Error: ...`,
-/// `ERROR ...`), but is not a value printed as `name = value` (`error_max = 1.0` of `meas`).
+/// `ERROR ...`), but is not a value printed as `name = value` (`error_max = 1.0` of `meas`), or it
+/// reports an analysis that stopped (`tran simulation(s) aborted`, after `Timestep too small` in
+/// the middle of a transient analysis, which prints no `Error` line and exits with 0).
 fn is_error_line(line: &str) -> bool {
-    let line = line.trim_start();
+    let line = line.trim();
+    if line.ends_with("simulation(s) aborted") {
+        return true;
+    }
     let end = line
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .unwrap_or(line.len());
@@ -431,6 +436,8 @@ mod tests {
         assert!(!is_error_line("errors: none"));
         assert!(!is_error_line("PPerror: syntax error in line segment"));
         assert!(!is_error_line("Warning: error ignored"));
+        assert!(is_error_line("tran simulation(s) aborted"));
+        assert!(is_error_line("op simulation(s) aborted  "));
     }
 
     #[test]

@@ -71,6 +71,22 @@ break the API).
   `${SIM.PARAMS}`, the value of `Simulation_SPICE:OPAMP`, which was written as is.
 - ERC treated internal connection groups sharing a pin (e.g. `["4", "5"]` and `["4", "ep"]`) as
   separate stacks, so pins of the same type in them could be reported as conflicting.
+- A transient analysis that ngspice stops in the middle (`Timestep too small`, then
+  `tran simulation(s) aborted`) is a `SimulationError::Ngspice`; ngspice prints no `Error` line
+  for it and exits with 0, so the run succeeded with truncated results.
+- `DigitalSequence::voltage_waveform` and `enable_waveform` repeated a time point for two events
+  at one time that cancel each other (`.at(1.0, High).at(1.0, Low)`), which made the source panic.
+- Reading SPICE libraries for generated parts: `;`, `//` and `$` inside quotes or `{...}` (e.g.
+  `.include "a;b.lib"`) were taken as the start of a comment, and a value whose exponent
+  overflows with its prefix (`1e2147483647P`) panicked.
+- `KicadPartInfo::check_pins` reported a pad shared by three pins twice, and put pins that are not
+  in the part on their pads, which could add a `DuplicatePad`. Problems are now in the order
+  missing pins, unknown pins, pads.
+- Reference prefixes (`Part::get_ref_base_name`) are checked when the part is instantiated: one
+  that is empty, ends with a digit (`U1` + `1` and `U` + `11` were both `U11`), or contains
+  whitespace, `?`, `#`, `/` or `{` is an `InvalidName`, and so is a `SubcircuitGenerator::base_name`
+  that is empty or contains `#` or `{` when it makes an automatic name. The `ref_base` of
+  `kicad_part!` and `spice_part!` must not end with a digit either.
 
 ## [0.2.0] - 2026-11-21
 
