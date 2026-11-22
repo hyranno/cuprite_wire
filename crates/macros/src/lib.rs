@@ -47,7 +47,7 @@ use quote::{format_ident, quote};
 /// | `symbol` | `"Library:Name"` | |
 /// | `footprint` | `"Library:Name"` or `none` | the symbol's `Footprint` property |
 /// | `value` | `"text"` or `param` (a constructor argument) | the symbol's `Value`; text variables such as `${SIM.PARAMS}` are expanded from the fields |
-/// | `ref_base` | reference prefix | the symbol's `Reference` |
+/// | `ref_prefix` | reference prefix | the symbol's `Reference` |
 /// | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin number | the pin numbers |
 /// | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs | stacked pins |
 /// | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins | none (such pads are an error) |
@@ -106,7 +106,7 @@ pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// | `internal_connections` | `[["a", "b"], ...]`: groups of pin IDs | none |
 /// | `params` | `{ "TD" => "1m" }`: parameters of the `.subckt` | the model's defaults |
 /// | `value` | `"text"` or `param` | the model name |
-/// | `ref_base` | reference prefix | `U` for a `.subckt`; `D` or `Q` for a `.model` |
+/// | `ref_prefix` | reference prefix | `U` for a `.subckt`; `D` or `Q` for a `.model` |
 /// | `dialect` | `auto`, `ngspice`, `pspice` or `ltspice` | `auto` (detected from the library) |
 /// | `sim_model` | `include` or `inline` | `include` |
 ///
@@ -284,7 +284,7 @@ fn generate(
         }
     });
 
-    let ref_base = &part.ref_base;
+    let ref_prefix = &part.ref_prefix;
     let groups = part
         .internal_connections
         .iter()
@@ -313,8 +313,8 @@ fn generate(
         #default_impl
 
         impl #krate::parts::Part for #name {
-            fn get_ref_base_name(&self) -> ::std::string::String {
-                ::std::string::String::from(#ref_base)
+            fn ref_prefix(&self) -> ::std::string::String {
+                ::std::string::String::from(#ref_prefix)
             }
             fn pin_ids(&self) -> ::std::vec::Vec<::std::string::String> {
                 Self::PINS.iter().copied().map(::std::string::String::from).collect()
@@ -599,7 +599,7 @@ mod tests {
                 description: None,
                 datasheet: None,
             }),
-            ref_base: "U".into(),
+            ref_prefix: "U".into(),
             value: Value::Fixed("PART".into()),
             pins: vec![PinDef {
                 id: "a|b".into(),

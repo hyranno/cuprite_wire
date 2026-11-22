@@ -73,7 +73,7 @@ kicad_part! {
 #[test]
 fn test_resistor() {
     let r = Resistor::new("10k");
-    assert_eq!(r.get_ref_base_name(), "R");
+    assert_eq!(r.ref_prefix(), "R");
     assert_eq!(r.pin_ids(), strings(&["1", "2"]));
     assert_eq!(r.value(), "10k");
     assert!(r.internal_connections().is_empty());
@@ -128,7 +128,7 @@ fn test_dual_amp() {
     );
     assert_eq!(DualAmp::OUT_A, "out_a");
     assert_eq!(amp.value(), "DUAL_AMP");
-    assert_eq!(amp.get_ref_base_name(), "U");
+    assert_eq!(amp.ref_prefix(), "U");
     assert_eq!(amp.internal_connections(), vec![strings(&["4", "ep"])]);
     let info = amp.kicad().unwrap();
     assert_eq!(

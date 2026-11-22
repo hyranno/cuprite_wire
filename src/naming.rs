@@ -111,12 +111,12 @@ pub(crate) fn check_base_name(name: &str) -> Result<(), &'static str> {
     }
 }
 
-/// Checks the prefix of reference designators ([`Part::get_ref_base_name`]): the reference is
+/// Checks the prefix of reference designators ([`Part::ref_prefix`]): the reference is
 /// the prefix followed by a number, so the prefix must not end with a digit (`U1` + `1` and
 /// `U` + `11` would both be `U11`). KiCad rejects whitespace in references, treats `?` as an
 /// unannotated number and `#` as a virtual part (`#PWR`).
 ///
-/// [`Part::get_ref_base_name`]: crate::parts::Part::get_ref_base_name
+/// [`Part::ref_prefix`]: crate::parts::Part::ref_prefix
 pub(crate) fn check_ref_prefix(prefix: &str) -> Result<(), &'static str> {
     if prefix.is_empty() {
         Err("reference prefixes must not be empty")

@@ -95,7 +95,7 @@ fn test_golden_hierarchy() {
     let connector = circuit.instantiate_part(Named(
         "connector",
         CustomPart {
-            ref_base_name: "J",
+            ref_prefix: "J",
             spice: Some(SpicePartInfo::Excluded),
             ..CustomPart::valid()
         },
@@ -111,7 +111,7 @@ fn test_golden_hierarchy() {
 struct DualOpAmp;
 
 impl crate::parts::Part for DualOpAmp {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -202,11 +202,11 @@ fn test_spice_errors_are_collected() {
         },
         // XX1 and Xx1: element names differing only in case.
         CustomPart {
-            ref_base_name: "XX",
+            ref_prefix: "XX",
             ..valid()
         },
         CustomPart {
-            ref_base_name: "Xx",
+            ref_prefix: "Xx",
             ..valid()
         },
     ];
@@ -412,7 +412,7 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
     let deck = |model: ModelSource| {
         let mut circuit = CircuitBuilder::new();
         let window = circuit.instantiate_part(CustomPart {
-            ref_base_name: "U",
+            ref_prefix: "U",
             pin_ids: vec!["in", "out"],
             internal_connections: vec![],
             kicad: None,
@@ -487,7 +487,7 @@ fn aborted_transient_error(simulator: &dyn Simulator) {
     );
     let mut circuit = CircuitBuilder::new();
     let source = circuit.instantiate_part(CustomPart {
-        ref_base_name: "B",
+        ref_prefix: "B",
         spice: Some(SpicePartInfo::element(element)),
         ..CustomPart::valid()
     });
@@ -562,7 +562,7 @@ fn test_golden_kicad_pair() {
     let connector = circuit.instantiate_part(Named(
         "connector",
         CustomPart {
-            ref_base_name: "J",
+            ref_prefix: "J",
             spice: Some(SpicePartInfo::Excluded),
             ..CustomPart::valid()
         },
@@ -777,7 +777,7 @@ fn test_shared_library_recovers() {
         let mut circuit = CircuitBuilder::new();
         let element = SpiceElement::new('B', ["1", "2"], args);
         let source = circuit.instantiate_part(CustomPart {
-            ref_base_name: "B",
+            ref_prefix: "B",
             spice: Some(SpicePartInfo::element(element)),
             ..CustomPart::valid()
         });

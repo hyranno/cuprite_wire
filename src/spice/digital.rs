@@ -105,7 +105,7 @@ impl DigitalDriver {
 }
 
 impl Part for DigitalDriver {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "DRV".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -152,7 +152,7 @@ impl DigitalLoad {
 }
 
 impl Part for DigitalLoad {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "DL".into()
     }
     fn pin_ids(&self) -> Vec<String> {

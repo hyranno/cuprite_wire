@@ -244,7 +244,7 @@ impl IndependentSource {
 }
 
 impl Part for IndependentSource {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         self.device().to_string()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -275,7 +275,7 @@ impl Ammeter {
 }
 
 impl Part for Ammeter {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "VM".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -365,6 +365,6 @@ mod tests {
             IndependentSource::voltage(0.0).with_waveform(pwl).value(),
             "DC 0 PWL( 0 0 0.001 1 )"
         );
-        assert_eq!(IndependentSource::current(1e-3).get_ref_base_name(), "I");
+        assert_eq!(IndependentSource::current(1e-3).ref_prefix(), "I");
     }
 }

@@ -377,7 +377,7 @@ impl<B> CircuitBuilder<B> {
     pub fn instantiate_part(&mut self, part: impl IntoPart) -> HashMap<String, Node> {
         let (name, part) = part.into_named_part();
         let trace = Trace::new(Location::caller());
-        let prefix = part.get_ref_base_name();
+        let prefix = part.ref_prefix();
         self.check_name(&prefix, check_ref_prefix, trace.clone());
         let name = self
             .part_names
@@ -547,7 +547,7 @@ impl From<ExpandedCircuit> for BuiltCircuit {
             .parts
             .iter()
             .map(|part| {
-                let prefix = part.part.get_ref_base_name();
+                let prefix = part.part.ref_prefix();
                 let counter = counters.entry(prefix.clone()).or_insert(0);
                 *counter += 1;
                 format!("{prefix}{counter}")
@@ -686,7 +686,7 @@ mod tests {
         pub pin2: Node,
     }
     impl Part for TestPart {
-        fn get_ref_base_name(&self) -> String {
+        fn ref_prefix(&self) -> String {
             "U".to_string()
         }
 
@@ -899,7 +899,7 @@ mod tests {
         TestPart::instantiate(&mut circuit);
         let _subcircuit_pins = TestSubcircuitGenerator2::instantiate(&mut circuit);
         circuit.instantiate_part(crate::test_parts::CustomPart {
-            ref_base_name: "R",
+            ref_prefix: "R",
             ..crate::test_parts::CustomPart::valid()
         });
         TestPart::instantiate(&mut circuit);
@@ -979,7 +979,7 @@ mod tests {
     #[derive(Debug, Clone)]
     struct MultiGndPart;
     impl Part for MultiGndPart {
-        fn get_ref_base_name(&self) -> String {
+        fn ref_prefix(&self) -> String {
             "U".to_string()
         }
 
@@ -1194,7 +1194,7 @@ mod tests {
         let mut circuit = CircuitBuilder::<()>::new();
         for prefix in ["U1", "", "R 1", "U?", "#PWR", "a/b", "{x}", "Q"] {
             circuit.instantiate_part(crate::test_parts::CustomPart {
-                ref_base_name: prefix,
+                ref_prefix: prefix,
                 ..crate::test_parts::CustomPart::valid()
             });
         }

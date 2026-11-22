@@ -115,7 +115,7 @@ fn test_spice_part() {
         ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]
     );
     assert_eq!(Supervisor::RESET_N, "reset_n");
-    assert_eq!(part.get_ref_base_name(), "U");
+    assert_eq!(part.ref_prefix(), "U");
     assert_eq!(part.value(), "VSUP01");
     assert_eq!(part.kicad(), None);
     assert_eq!(
@@ -128,7 +128,7 @@ fn test_spice_part() {
 
     let clamp = Clamp::new();
     assert_eq!(
-        (clamp.get_ref_base_name(), clamp.pin_ids()),
+        (clamp.ref_prefix(), clamp.pin_ids()),
         ("D".to_string(), strings(&["A", "K"]))
     );
     assert_eq!(

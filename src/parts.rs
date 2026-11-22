@@ -24,7 +24,7 @@ pub trait Part: Debug + DynClone {
     /// It must not be empty, end with a digit (`U1` + `1` would be `U11`), or contain whitespace,
     /// `?`, `#`, `/` or `{`; other prefixes are reported as
     /// [`CircuitErrorKind::InvalidName`](crate::error::CircuitErrorKind::InvalidName).
-    fn get_ref_base_name(&self) -> String;
+    fn ref_prefix(&self) -> String;
     /// IDs of the pins. One pin ID corresponds to one footprint pad, except for duplicate pins
     /// (several pins on one pad, which KiCad 10 allows): they must be connected by
     /// [`Part::internal_connections`], and the KiCad netlist writes the pad once, with the first
@@ -185,7 +185,7 @@ impl PartPins {
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
     pub pin_mapping: HashMap<String, NodeIndex>,
-    /// Explicit or automatic (`<ref base name>#<n>`) instance name, unique in its subcircuit instance.
+    /// Explicit or automatic (`<reference prefix>#<n>`) instance name, unique in its subcircuit instance.
     pub name: String,
     /// Path of the subcircuit instance containing the part.
     pub path: HierPath,

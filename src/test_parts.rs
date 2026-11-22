@@ -84,7 +84,7 @@ fn two_pin_kicad_info(footprint: &str, symbol: &str) -> KicadPartInfo {
 pub struct Resistor(pub &'static str);
 
 impl Part for Resistor {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "R".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -112,7 +112,7 @@ impl Part for Resistor {
 pub struct Capacitor(pub &'static str);
 
 impl Part for Capacitor {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "C".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -141,7 +141,7 @@ impl Part for Capacitor {
 pub struct OpAmp;
 
 impl Part for OpAmp {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -191,7 +191,7 @@ E1 out 0 inp inn 100k
 pub struct MultiGndIc;
 
 impl Part for MultiGndIc {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -229,7 +229,7 @@ impl Part for MultiGndIc {
 /// A part whose information is given directly, for testing invalid definitions.
 #[derive(Debug, Clone)]
 pub struct CustomPart {
-    pub ref_base_name: &'static str,
+    pub ref_prefix: &'static str,
     pub pin_ids: Vec<&'static str>,
     pub internal_connections: Vec<Vec<&'static str>>,
     pub kicad: Option<KicadPartInfo>,
@@ -240,7 +240,7 @@ impl CustomPart {
     /// A two-pin part with valid KiCad information.
     pub fn valid() -> Self {
         CustomPart {
-            ref_base_name: "X",
+            ref_prefix: "X",
             pin_ids: vec!["1", "2"],
             internal_connections: vec![],
             kicad: Some(two_pin_kicad_info("Custom:Footprint", "Custom:Symbol")),
@@ -254,8 +254,8 @@ impl CustomPart {
 }
 
 impl Part for CustomPart {
-    fn get_ref_base_name(&self) -> String {
-        self.ref_base_name.into()
+    fn ref_prefix(&self) -> String {
+        self.ref_prefix.into()
     }
     fn pin_ids(&self) -> Vec<String> {
         self.pin_ids.iter().map(|s| s.to_string()).collect()

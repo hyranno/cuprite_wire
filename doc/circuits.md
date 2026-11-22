@@ -33,7 +33,7 @@ ready-made basic parts. Parts can also be written by hand.
 
 ```rust
 impl Part for Passive {
-    fn get_ref_base_name(&self) -> String { "R".into() }      // reference prefix
+    fn ref_prefix(&self) -> String { "R".into() }      // reference prefix
     fn pin_ids(&self) -> Vec<String> { vec!["1".into(), "2".into()] }
     fn value(&self) -> String { "10k".into() }
     fn kicad(&self) -> Option<KicadPartInfo> { ... }         // doc/kicad_netlist_usage.md section 2
@@ -176,7 +176,7 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 
 | Error | Cause |
 |---|---|
-| `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label; a reference prefix (`Part::get_ref_base_name`) that is empty, ends with a digit, or contains whitespace, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#` or `{` |
+| `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label; a reference prefix (`Part::ref_prefix`) that is empty, ends with a digit, or contains whitespace, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#` or `{` |
 | `DuplicateInstanceName` | the same explicit name twice in one (sub)circuit (the note points at the first) |
 | `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections |
 | `DuplicateRef` | two parts with the same reference designator |

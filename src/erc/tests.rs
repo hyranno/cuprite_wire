@@ -158,7 +158,7 @@ fn ground_pins_part() -> CustomPart {
         ("shield", "4", "GND", PinType::Passive),
     ];
     CustomPart {
-        ref_base_name: "U",
+        ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![],
         kicad: Some(KicadPartInfo {
@@ -269,7 +269,7 @@ fn test_overlapping_internal_connections() {
         ("in", PinType::Input),
     ];
     let part = CustomPart {
-        ref_base_name: "U",
+        ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![vec!["4", "5"], vec!["4", "ep"]],
         kicad: Some(KicadPartInfo {
@@ -521,8 +521,8 @@ fn test_display() {
 struct WithExtraTypes(CustomPart, Vec<(&'static str, PinType)>);
 
 impl Part for WithExtraTypes {
-    fn get_ref_base_name(&self) -> String {
-        self.0.get_ref_base_name()
+    fn ref_prefix(&self) -> String {
+        self.0.ref_prefix()
     }
     fn pin_ids(&self) -> Vec<String> {
         self.0.pin_ids()

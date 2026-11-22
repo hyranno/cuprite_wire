@@ -187,7 +187,7 @@ impl CosimDevice {
 }
 
 impl Part for CosimDevice {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
