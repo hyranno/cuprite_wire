@@ -352,7 +352,7 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
         };
         let pin_type = format_ident!("{}", pin.electrical_type.variant_name());
         quote! {
-            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::kicad::PinType::#pin_type))
+            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::parts::PinType::#pin_type))
         }
     });
     let field_entries = kicad

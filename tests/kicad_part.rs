@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 use common::{check_golden, strings};
 use cuprite_wire::{
     circuit::{CircuitBuilder, Named},
-    kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags, PinType},
+    kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags},
     kicad_part,
     naming::NetLabel,
-    parts::{Part, PartPins},
+    parts::{Part, PartPins, PinType},
     spice::{ModelSource, SpiceElement, SpicePartInfo},
 };
 

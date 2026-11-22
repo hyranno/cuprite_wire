@@ -61,7 +61,7 @@ impl ElectricalType {
         }
     }
 
-    /// The name of the variant (`PowerIn`), which is also that of `cuprite_wire::kicad::PinType`.
+    /// The name of the variant (`PowerIn`), which is also that of `cuprite_wire::parts::PinType`.
     pub fn variant_name(self) -> &'static str {
         match self {
             ElectricalType::Input => "Input",

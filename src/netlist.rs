@@ -492,7 +492,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit::{CircuitBuilder, Named, Node},
-        kicad::{KicadPinInfo, PinType},
+        kicad::KicadPinInfo,
         spice::IndependentSource,
         subcircuit::SubcircuitGenerator,
         test_parts::{Capacitor, CustomPart, MultiGndIc, OpAmp, Resistor},

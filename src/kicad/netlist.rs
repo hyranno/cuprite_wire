@@ -323,8 +323,9 @@ mod tests {
     use super::*;
     use crate::{
         circuit::{CircuitBuilder, Named},
-        kicad::{KicadPinInfo, PinType},
+        kicad::KicadPinInfo,
         naming::NetLabel,
+        parts::PinType,
         spice::IndependentSource,
         subcircuit::SubcircuitGenerator,
         test_parts::{

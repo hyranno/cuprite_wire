@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 
 use crate::{
     circuit::{CircuitBuilder, Named, Node},
-    kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
+    kicad::{KicadPartInfo, KicadPinInfo, LibId},
     naming::NetLabel,
-    parts::Part,
+    parts::{Part, PinType},
     spice::{ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo},
     subcircuit::SubcircuitGenerator,
 };
