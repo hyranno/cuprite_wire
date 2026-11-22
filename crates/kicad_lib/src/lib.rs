@@ -19,6 +19,7 @@ pub mod spice_lib;
 pub mod symbol;
 #[cfg(test)]
 mod test_util;
+pub mod text_var;
 pub mod value;
 
 use std::fmt;

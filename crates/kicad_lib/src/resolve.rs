@@ -13,6 +13,7 @@ use crate::{
     footprint::Footprint,
     spice_lib::{self, SpiceLib},
     symbol::SymbolLib,
+    text_var,
 };
 
 /// The environment variables naming the library directories, in the order they are looked up
@@ -123,27 +124,17 @@ impl Resolver {
 
     /// Resolves a `Sim.Library` value: expands `${VAR}` and makes relative paths absolute.
     pub fn sim_library_path(&mut self, value: &str) -> Result<PathBuf, Error> {
-        let mut expanded = String::new();
-        let mut rest = value;
-        while let Some(start) = rest.find("${") {
-            expanded.push_str(&rest[..start]);
-            let end = rest[start..]
-                .find('}')
-                .ok_or_else(|| Error::new(format!("unterminated variable in {value:?}")))?;
-            let name = &rest[start + 2..start + end];
-            let replacement = if is_symbol_dir_var(name) {
-                self.symbol_dir().to_string_lossy().into_owned()
+        let expanded = text_var::expand(value, |name| {
+            if is_symbol_dir_var(name) {
+                Ok(Some(self.symbol_dir().to_string_lossy().into_owned()))
             } else {
-                self.var(name).ok_or_else(|| {
+                self.var(name).map(Some).ok_or_else(|| {
                     Error::new(format!(
                         "environment variable {name} in {value:?} is not set"
                     ))
-                })?
-            };
-            expanded.push_str(&replacement);
-            rest = &rest[start + end + 1..];
-        }
-        expanded.push_str(rest);
+                })
+            }
+        })?;
         let path = PathBuf::from(expanded);
         Ok(if path.is_absolute() {
             path

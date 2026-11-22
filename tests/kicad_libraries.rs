@@ -42,8 +42,6 @@ kicad_part! {
     struct OpAmp {
         symbol: "Simulation_SPICE:OPAMP",
         footprint: "Package_TO_SOT_SMD:SOT-23-5",
-        // The symbol's value is `${SIM.PARAMS}`, a text variable KiCad expands.
-        value: "OPAMP",
     }
 }
 
