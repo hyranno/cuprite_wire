@@ -2,8 +2,8 @@
 
 Reads IBIS (I/O Buffer Information Specification) model files (`.ibs`).
 
-It is developed with [cuprite_wire](https://crates.io/crates/cuprite_wire), which will use it to
-simulate I/O buffers with ngspice, but it does not depend on it.
+It is developed with [cuprite_wire](https://crates.io/crates/cuprite_wire), which uses it to
+simulate I/O buffers with ngspice (feature `ibis`), but it does not depend on it.
 
 The parser covers the header, `[Component]` (`[Manufacturer]`, `[Package]`, `[Pin]`) and the
 `[Model]` keywords of the I-V behavior (`[Pullup]`, `[Pulldown]`, `[GND Clamp]`,

@@ -13,6 +13,7 @@ repository = "https://github.com/hyranno/cuprite_wire"
 [workspace.dependencies]
 # Keep the versions equal to workspace.package.version.
 cuprite_wire = { version = "0.3.0", path = "." }
+cuprite_wire_ibis = { version = "0.3.0", path = "crates/ibis" }
 cuprite_wire_kicad_lib = { version = "0.3.0", path = "crates/kicad_lib" }
 cuprite_wire_macros = { version = "0.3.0", path = "crates/macros" }
 
@@ -41,7 +42,7 @@ exclude = [
 ]
 
 [package.metadata.docs.rs]
-features = ["shared-ngspice"]
+features = ["ibis", "shared-ngspice"]
 # Marks the items needing a feature in the documentation (`doc_cfg` in src/lib.rs).
 rustdoc-args = ["--cfg", "docsrs"]
 
@@ -50,6 +51,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 ignored-paths = ["tests/ui/*.rs"]
 
 [dependencies]
+cuprite_wire_ibis = { workspace = true, optional = true }
 cuprite_wire_kicad_lib.workspace = true
 cuprite_wire_macros.workspace = true
 dyn-clone = "1.0.20"
@@ -72,6 +74,9 @@ vendor-models = []
 # Runs decks in the ngspice shared library (libngspice), loaded at run time: the backend of
 # co-simulation with Rust models.
 shared-ngspice = ["dep:libloading"]
+
+# Simulation parts of IBIS models (spice::ibis), read with cuprite_wire_ibis.
+ibis = ["dep:cuprite_wire_ibis"]
 
 [[test]]
 name = "kicad_libraries"

@@ -87,7 +87,8 @@ Analyses and stimuli belong to the test, not to the circuit:
     `.with_ac(magnitude)` and `.with_waveform(Waveform::sin(..) | Waveform::Pulse { .. } | Waveform::Pwl(..))`.
   - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` (`Ammeter::P` / `Ammeter::N`)
     is the vector `i(VM1)`.
-  - Digital stimuli in `cuprite_wire::spice::digital` (see below).
+  - Digital stimuli in `cuprite_wire::spice::digital` (see below), and drivers and receivers of
+    IBIS models in `cuprite_wire::spice::ibis` (feature `ibis`, see below).
 
   These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
   under test still can.
@@ -135,6 +136,58 @@ let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
 - `input.read(voltage, previous)` gives the level an input reads; `input.decode(time, voltage)`
   turns the samples of a transient analysis into a `DigitalSequence`, with the times of the
   changes interpolated at the thresholds.
+
+### IBIS buffers
+
+With the feature `ibis`, `cuprite_wire::spice::ibis` simulates the I/O buffers of a device from its
+IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`: the I-V tables of
+the driver and the clamps, the edge rates of `[Ramp]`, `C_comp` and the package parasitics of the
+pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
+
+```rust
+use cuprite_wire::{
+    ibis::Corner,
+    spice::{digital::*, ibis::*},
+};
+
+let ibs = cuprite_wire::ibis::parse(&std::fs::read_to_string("mcu.ibs")?)?;
+let tx = IbisBuffer::of_pin(&ibs, "MCU", "12", Corner::Typ)?;
+let rx = IbisBuffer::of_pin(&ibs, "MCU", "13", Corner::Typ)?;
+let seq = DigitalSequence::new(Level::High).uart(1e-6, 1e6, b"Hi");
+let driver = bench.instantiate_part(IbisDriver::new(tx, seq));
+let receiver = bench.instantiate_part(IbisReceiver::new(rx.clone()));
+// ... connect `driver[IbisDriver::OUT]` / `receiver[IbisReceiver::IN]`, run a transient analysis ...
+let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
+```
+
+- `IbisBuffer::of_pin(&file, component, pin, corner)` takes the `[Model]` of a pin of a
+  `[Component]` with the parasitics of the pin (`R_pin` / `L_pin` / `C_pin`, or else `R_pkg` /
+  `L_pkg` / `C_pkg`); `IbisBuffer::new(&model, &parasitics, corner)` takes any model, e.g. one of a
+  `[Model Selector]`, which `of_pin` does not choose. `Corner::Typ` / `Min` / `Max` select the
+  column of the values (`NA` falls back to typical). The supported model types are `Input`,
+  `Output`, `I/O`, `3-state` and the open drain, sink and source types.
+- `IbisDriver::new(buffer, sequence)` (pins `out`, `gnd`; `XDRV1`) plays a `DigitalSequence`. The
+  model's `[Pullup]` and `[Pulldown]` are weighted by two PWL sources that switch linearly over
+  the edge times of `[Ramp]` (its 20-80 % time divided by 0.6, as KiCad does); `HiZ` turns both off.
+  A level the model cannot drive (`HiZ` on an `Output`, `High` on an open drain) panics.
+- `IbisReceiver::new(buffer)` (pins `in`, `gnd`; `XRX1`) is the package, `C_comp` and the clamps;
+  an I/O model is its receiver with the driver off.
+- `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` as the
+  thresholds, to `decode` the voltage of the pin (`None` if the model lacks them).
+- Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
+  model, `cuprite_ibis_<hash>` for the driver); the I-V tables are XSPICE `pwl` code models, which
+  the usual builds of ngspice load. Beyond the voltages of a table, its end segments are extended.
+- `[Rising Waveform]` / `[Falling Waveform]`, `[Model Selector]`, differential and series models
+  are not used.
+
+Which to use:
+
+| | `spice::digital` | `spice::ibis` | co-simulation (`doc/cosimulation.md`) |
+|---|---|---|---|
+| Pin model | linear: levels, resistance, edges from a datasheet | the device's IBIS model: nonlinear driver, clamps, package | `OutputCharacteristics` / `InputCharacteristics`, as `spice::digital` |
+| Stimulus | a `DigitalSequence` fixed before the run | a `DigitalSequence` fixed before the run | a Rust model reacting to the circuit while it runs |
+| Use for | logic-level tests of a circuit's inputs | signal integrity: ringing, overshoot, clamping, edges into a real load | closed-loop tests with firmware |
+| Needs | ngspice | ngspice with XSPICE; feature `ibis` | the ngspice shared library; feature `shared-ngspice` |
 
 ## 4. Node names and ground
 

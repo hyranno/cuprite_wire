@@ -41,6 +41,8 @@ macro_rules! on_each_simulator {
         }
     )*};
 }
+#[cfg(feature = "ibis")]
+pub(crate) use on_each_simulator;
 
 on_each_simulator!(
     simulate_ac,

@@ -6,6 +6,8 @@
 pub mod cosim;
 pub mod deck;
 pub mod digital;
+#[cfg(feature = "ibis")]
+pub mod ibis;
 pub mod netlist;
 pub mod part;
 #[cfg(feature = "shared-ngspice")]
