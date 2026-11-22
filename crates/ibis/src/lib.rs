@@ -58,12 +58,18 @@
 //! `[Package Model]`, `[Submodel]`, IBIS-AMI, ...) are skipped without an error and listed in
 //! [`IbisFile::skipped`]. The parser is lenient about what does not change the meaning: it does
 //! not check line lengths, and keywords may be indented.
+//!
+//! # Simulation
+//!
+//! [`spice::subcircuit`] writes a model as a SPICE subcircuit for ngspice, with ports that switch
+//! its driver from outside, so that a test bench can play any sequence of states on it.
 
 #![warn(missing_docs, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 mod lex;
 mod number;
 mod parse;
+pub mod spice;
 
 use std::fmt;
 
