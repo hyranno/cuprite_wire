@@ -103,8 +103,12 @@ R_load = 50
 [Rising Waveform]
 R_fixture = 50
 V_fixture = 3.3
+V_fixture_min = 3.0
+V_fixture_max = 3.6
+C_fixture = 0p
+L_fixture = 1n
 0.0ns  0.0  NA  NA
-1.0ns  3.3  NA  NA
+1.0ns  3.3  3.0 NA
 
 [Submodel]      dyn_clamp
 Submodel_type   Dynamic_clamp

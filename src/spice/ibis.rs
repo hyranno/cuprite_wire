@@ -34,7 +34,7 @@ use std::fmt;
 
 use cuprite_wire_ibis::{
     Corner, IbisFile, Model, ModelType, PinModel,
-    spice::{Drive, EdgeTimes, Parasitics, SubcircuitError, subcircuit},
+    spice::{Drive, Edges, Parasitics, SubcircuitError, subcircuit},
 };
 
 use crate::{
@@ -111,7 +111,8 @@ pub struct IbisBuffer {
     name: String,
     /// Its definition (ports `pin ref`, and `ku kd` for a driver).
     text: String,
-    edge_times: Option<EdgeTimes>,
+    edges: Option<Edges>,
+    notes: Vec<String>,
     input: Option<InputCharacteristics>,
 }
 
@@ -121,7 +122,7 @@ impl IbisBuffer {
     /// # Errors
     /// If the model cannot be written as a subcircuit (see
     /// [`cuprite_wire_ibis::spice::subcircuit`]): its type is not supported or it lacks a table
-    /// or `[Ramp]` it needs.
+    /// or the waveforms or `[Ramp]` it needs.
     pub fn new(
         model: &Model,
         parasitics: &Parasitics,
@@ -147,7 +148,8 @@ impl IbisBuffer {
             corner,
             name,
             text: subckt.text,
-            edge_times: subckt.edge_times,
+            edges: subckt.edges,
+            notes: subckt.notes,
             input,
         })
     }
@@ -209,12 +211,19 @@ impl IbisBuffer {
 
     /// Whether the model drives its pin (all the supported types but `Input`).
     pub fn is_driver(&self) -> bool {
-        self.edge_times.is_some()
+        self.edges.is_some()
     }
 
-    /// The edge times of a driver, from `[Ramp]`.
-    pub fn edge_times(&self) -> Option<EdgeTimes> {
-        self.edge_times
+    /// The edges of a driver: from its `[Rising Waveform]` and `[Falling Waveform]`, or else
+    /// linear from `[Ramp]`.
+    pub fn edges(&self) -> Option<&Edges> {
+        self.edges.as_ref()
+    }
+
+    /// What of the model was left out, such as waveforms with an unsupported fixture
+    /// ([`cuprite_wire_ibis::spice::Subcircuit::notes`]).
+    pub fn notes(&self) -> &[String] {
+        &self.notes
     }
 
     /// The input thresholds of the model, to read levels from the voltage of the pin
@@ -250,7 +259,7 @@ impl IbisBuffer {
 /// An IBIS output buffer playing a [`DigitalSequence`], with pins `out` and `gnd`.
 ///
 /// It is written as a subcircuit of its own (`cuprite_ibis_<hash>`), holding the sources of the
-/// weights `ku` and `kd` ([`EdgeTimes::weights`]) and the subcircuit of the buffer.
+/// weights `ku` and `kd` ([`Edges::weights`]) and the subcircuit of the buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IbisDriver {
     buffer: IbisBuffer,
@@ -312,8 +321,9 @@ impl IbisDriver {
             .collect();
         let weights = self
             .buffer
-            .edge_times
-            .expect("a driver has edge times")
+            .edges
+            .as_ref()
+            .expect("a driver has edges")
             .weights(drive(self.sequence.initial()), &events);
         let reference = SUBCIRCUIT_REFERENCE;
         let body = format!(
