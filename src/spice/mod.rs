@@ -12,6 +12,8 @@ pub mod part;
 pub mod shared;
 pub mod simulation;
 pub mod sources;
+mod subcircuit;
+mod temp_dir;
 pub mod xspice;
 
 pub use deck::SpiceDeck;

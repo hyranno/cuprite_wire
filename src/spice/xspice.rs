@@ -12,12 +12,13 @@ use crate::{
     parts::Part,
     spice::{
         SpicePartInfo,
-        digital::{
-            InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE,
-            assert_subcircuit_pin, hashed_subcircuit, internal_node, subcircuit_part,
-        },
+        digital::{InputCharacteristics, OutputCharacteristics},
         sources::spice_number,
         spice_path,
+        subcircuit::{
+            SUBCIRCUIT_REFERENCE, assert_subcircuit_pin, hashed_subcircuit, internal_node,
+            subcircuit_part,
+        },
     },
 };
 
@@ -205,23 +206,17 @@ impl DCosim {
         body.push_str(&model);
         body.push_str(" )\n");
         for (pin, output) in &self.outputs {
-            let (digital, analog, drive) = (
-                internal_node(pin, "do"),
-                internal_node(pin, "ao"),
-                internal_node(pin, "d"),
-            );
+            let (digital, analog) = (internal_node(pin, "do"), internal_node(pin, "ao"));
             body.push_str(&format!(
                 "AO_{pin} [{digital}] [{analog}] dac_{pin}\n\
-                 .model dac_{pin} dac_bridge( out_low={} out_high={} out_undef={} t_rise={} t_fall={} )\n\
-                 EO_{pin} {drive} {SUBCIRCUIT_REFERENCE} {analog} 0 1\n\
-                 RO_{pin} {drive} {pin} {}\n",
+                 .model dac_{pin} dac_bridge( out_low={} out_high={} out_undef={} t_rise={} t_fall={} )\n",
                 spice_number(output.low),
                 spice_number(output.high),
                 spice_number((output.low + output.high) / 2.0),
                 spice_number(output.rise_time),
                 spice_number(output.fall_time),
-                spice_number(output.resistance)
             ));
+            body.push_str(&output.stage_lines(pin, 'E', &format!("{analog} 0 1"), None));
         }
         hashed_subcircuit("dcosim", &self.pin_names(), &body)
     }

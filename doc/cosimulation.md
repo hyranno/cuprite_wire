@@ -240,7 +240,7 @@ let counter = bench.instantiate_part_named("counter", counter);
   state, without hysteresis). Each output has a `dac_bridge` from `low` to `high` with the rise and
   fall times (unknown is the middle), behind the output resistance.
 - Voltages are relative to the `gnd` pin: the bridges work against the ground, so they are connected
-  through unity-gain sources (`EI_<pin>`, `EO_<pin>`).
+  through unity-gain sources (`EI_<pin>`, `ED_<pin>`).
 - `with_delay(seconds)` sets the delay of the model's outputs (`delay`, 1 ns by default),
   `with_lib_args` the arguments of the library's shim (`lib_args`). Paths must be absolute.
 - The model runs at the time points of the analysis and at its input events: a model that changes

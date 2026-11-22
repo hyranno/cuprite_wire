@@ -1,4 +1,5 @@
-//! Helpers shared by the integration tests. Each test crate uses only some of them.
+//! Helpers shared by the integration tests and the unit tests (`src/test_parts.rs`). Each test
+//! crate uses only some of them.
 #![allow(dead_code, unused_imports)]
 
 mod golden;

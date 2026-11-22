@@ -6,13 +6,14 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use super::DCosim;
 use crate::spice::{
-    digital::{InputCharacteristics, OutputCharacteristics, check_subcircuit_pin, fnv1a},
+    digital::{InputCharacteristics, OutputCharacteristics},
     simulation::output_log,
+    subcircuit::{check_subcircuit_pin, fnv1a},
+    temp_dir::TempDir,
 };
 
 /// Where ngspice installs `verilator_shim.cpp`, `verilator_main.cpp` and the headers they include.
@@ -104,17 +105,17 @@ impl Verilator {
         let library = dir.join("libmodel.so");
         if !library.exists() || !inputs_unchanged(&dir) {
             fs::create_dir_all(&this.cache_dir)?;
-            let mut staging = Staging::new(&this.cache_dir)?;
-            match this.build_in(&staging.dir) {
+            let staging = TempDir::new_in(&this.cache_dir, "build")?;
+            match this.build_in(&staging) {
                 Ok(()) => {}
                 Err(e @ VerilatorError::Command { .. }) => {
                     // Kept for inspection; the error names it.
-                    staging.keep = true;
+                    staging.keep();
                     return Err(e);
                 }
                 Err(e) => return Err(e),
             }
-            staging.install(&dir)?;
+            install(staging, &dir)?;
         }
         let header = fs::read_to_string(dir.join("obj").join(format!("{PREFIX}.h")))?;
         let (inputs, outputs) = read_ports(&header)?;
@@ -269,56 +270,27 @@ impl Verilator {
     }
 }
 
-/// A new directory to build in, removed when dropped unless kept or installed.
-struct Staging {
-    dir: PathBuf,
-    keep: bool,
-}
-
-impl Staging {
-    fn new(parent: &Path) -> io::Result<Self> {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        loop {
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let dir = parent.join(format!("build-{}-{n}", std::process::id()));
-            match fs::create_dir(&dir) {
-                Ok(()) => return Ok(Staging { dir, keep: false }),
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e),
-            }
-        }
+/// Moves the build in `staging` to `dir`, replacing an outdated build there. Another build of
+/// the same key may have been installed first; either is fine.
+///
+/// # Errors
+/// If the build cannot be moved and `dir` has no up-to-date build either (e.g. the outdated
+/// one cannot be removed).
+fn install(staging: TempDir, dir: &Path) -> io::Result<()> {
+    if dir.exists() && !inputs_unchanged(dir) {
+        // A library already loaded keeps working after it is removed.
+        let _ = fs::remove_dir_all(dir);
     }
-
-    /// Moves the build to `dir`, replacing an outdated build there. Another build of the same
-    /// key may have been installed first; either is fine.
-    ///
-    /// # Errors
-    /// If the build cannot be moved and `dir` has no up-to-date build either (e.g. the outdated
-    /// one cannot be removed).
-    fn install(mut self, dir: &Path) -> io::Result<()> {
-        if dir.exists() && !inputs_unchanged(dir) {
-            // A library already loaded keeps working after it is removed.
-            let _ = fs::remove_dir_all(dir);
+    match fs::rename(&*staging, dir) {
+        Ok(()) => {
+            staging.keep();
+            Ok(())
         }
-        match fs::rename(&self.dir, dir) {
-            Ok(()) => {
-                self.keep = true;
-                Ok(())
-            }
-            Err(_) if dir.join("libmodel.so").exists() && inputs_unchanged(dir) => Ok(()),
-            Err(e) => Err(io::Error::new(
-                e.kind(),
-                format!("cannot move the build to {}: {e}", dir.display()),
-            )),
-        }
-    }
-}
-
-impl Drop for Staging {
-    fn drop(&mut self) {
-        if !self.keep {
-            let _ = fs::remove_dir_all(&self.dir);
-        }
+        Err(_) if dir.join("libmodel.so").exists() && inputs_unchanged(dir) => Ok(()),
+        Err(e) => Err(io::Error::new(
+            e.kind(),
+            format!("cannot move the build to {}: {e}", dir.display()),
+        )),
     }
 }
 

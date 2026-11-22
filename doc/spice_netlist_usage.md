@@ -120,8 +120,9 @@ let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
   Resistance and edge times must be positive: ideal steps make the simulation fail to converge.
   `cmos(vdd)` gives placeholder values (50 ohm, 2 ns); take the real ones from the datasheet.
 - `DigitalDriver::new(output, sequence)` (pins `out`, `gnd`; `XDRV1`) is written as a subcircuit
-  of its own, `cuprite_digital_<hash>`: a PWL source (`VD`) behind the output resistance. If the
-  sequence has `HiZ`, a switch (`SO`, controlled by the PWL `VE`) replaces the resistor and opens
+  of its own, `cuprite_digital_<hash>`: a PWL source (`VD_out`) behind the output resistance
+  (`RO_out`). If the sequence has `HiZ`, a switch (`SO_out`, controlled by the PWL `VE_out`)
+  replaces the resistor and opens
   to `HIZ_RESISTANCE` (1 Gohm); the source holds its last level meanwhile, so the edge from `HiZ`
   is set by the output resistance and the load. `sequence.voltage_waveform(&output)` gives the
   PWL alone, for an `IndependentSource`.

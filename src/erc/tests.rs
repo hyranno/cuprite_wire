@@ -131,9 +131,9 @@ fn test_label_single_pin() {
     );
     // Traced to the label, with a note at the pin.
     let diagnostic = &report.violations[0].diagnostic;
-    assert_eq!(diagnostic.trace.0[0].line(), 48);
+    assert_eq!(diagnostic.trace.0[0].line(), 31);
     assert_eq!(diagnostic.notes[0].message, "R1.1 (passive) is here");
-    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 46);
+    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 29);
 
     // A no-connect mark or an allow mark silences it.
     let mut circuit = CircuitBuilder::new();
