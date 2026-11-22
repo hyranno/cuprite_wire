@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/embedded_hal", "crates/kicad_lib", "crates/macros"]
+members = ["crates/embedded_hal", "crates/ibis", "crates/kicad_lib", "crates/macros"]
 
 [workspace.package]
 # The crates are released together, with the same version (see .github/workflows/release.yml).

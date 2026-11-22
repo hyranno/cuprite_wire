@@ -1,0 +1,322 @@
+//! Reads the hand-written fixture and checks the errors.
+
+use cuprite_wire_ibis::{Corner, Enable, ModelType, PinModel, Polarity, Slope, parse};
+
+fn fixture() -> cuprite_wire_ibis::IbisFile {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/buffers.ibs");
+    parse(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn approx(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= expected.abs() * 1e-9,
+        "{actual} != {expected}"
+    );
+}
+
+#[test]
+fn test_header() {
+    let h = fixture().header;
+    assert_eq!(h.ibis_ver, "5.0");
+    assert_eq!(h.comment_char, '!');
+    assert_eq!(h.file_name.as_deref(), Some("buffers.ibs"));
+    assert_eq!(h.file_rev.as_deref(), Some("1.0"));
+    assert_eq!(h.date.as_deref(), Some("2026-11-22"));
+    assert_eq!(h.source.as_deref(), Some("Written by hand\nfor the tests."));
+    assert_eq!(h.notes.as_deref(), Some("Two components share the models."));
+    assert_eq!(h.disclaimer.as_deref(), Some("Not a real device."));
+    assert_eq!(h.copyright.as_deref(), Some("None."));
+}
+
+#[test]
+fn test_components() {
+    let ibs = fixture();
+    let names: Vec<_> = ibs.components.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["Buffer8", "Small"]);
+
+    let c = ibs.component("Buffer8").unwrap();
+    // [Manufacturer] of [Define Package Model] does not replace it.
+    assert_eq!(c.manufacturer.as_deref(), Some("Example Corp."));
+    let r = c.package.r_pkg.unwrap();
+    assert_eq!((r.typ, r.min, r.max), (0.2, Some(0.1), Some(0.3)));
+    approx(c.package.l_pkg.unwrap().get(Corner::Max), 6e-9);
+    let cp = c.package.c_pkg.unwrap();
+    approx(cp.typ, 1e-12);
+    assert_eq!((cp.min, cp.max), (None, None));
+    assert_eq!(cp.get(Corner::Min), cp.typ);
+
+    let models: Vec<_> = c.pins.iter().map(|p| (p.name.as_str(), &p.model)).collect();
+    assert_eq!(
+        models,
+        [
+            ("1", &PinModel::Named("in_cmos".into())),
+            ("2", &PinModel::Named("out_3s".into())),
+            ("3", &PinModel::Named("io_sel".into())),
+            ("4", &PinModel::Power),
+            ("5", &PinModel::Gnd),
+            ("6", &PinModel::Nc),
+        ]
+    );
+    let p = c.pin("2").unwrap();
+    assert_eq!(p.signal_name, "Y0");
+    approx(p.r_pin.unwrap(), 0.1);
+    approx(p.l_pin.unwrap(), 3.5e-9);
+    approx(p.c_pin.unwrap(), 0.6e-12);
+    let p = c.pin("1").unwrap();
+    assert_eq!(p.l_pin, None);
+
+    let small = ibs.component("Small").unwrap();
+    let pin = small.pin("A1").unwrap();
+    assert_eq!((pin.r_pin, pin.l_pin, pin.c_pin), (None, None, None));
+    assert_eq!(ibs.model_selectors, ["io_sel"]);
+}
+
+#[test]
+fn test_input_model() {
+    let ibs = fixture();
+    let names: Vec<_> = ibs.models.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, ["in_cmos", "out_3s"]);
+
+    let m = ibs.model("in_cmos").unwrap();
+    assert_eq!(m.model_type, ModelType::Input);
+    assert_eq!(m.polarity, Some(Polarity::NonInverting));
+    assert_eq!(m.enable, None);
+    assert_eq!((m.vinl, m.vinh), (Some(0.8), Some(2.0)));
+    approx(m.c_comp.unwrap().get(Corner::Min), 1.5e-12);
+    assert_eq!(m.temperature_range.unwrap().max, Some(0.0));
+    assert_eq!(m.voltage_range.unwrap().get(Corner::Max), 3.6);
+    assert_eq!(m.pullup_reference, None);
+    let gnd = m.gnd_clamp.as_ref().unwrap();
+    let rows: Vec<_> = gnd
+        .points
+        .iter()
+        .map(|p| (p.voltage, p.current.typ, p.current.max))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (-3.3, -0.1, Some(-0.12)),
+            (-0.6, 0.0, Some(0.0)),
+            (3.3, 0.0, Some(0.0))
+        ]
+    );
+    assert_eq!(m.power_clamp.as_ref().unwrap().points.len(), 2);
+    assert_eq!((&m.pullup, &m.pulldown, &m.ramp), (&None, &None, &None));
+}
+
+#[test]
+fn test_output_model() {
+    let ibs = fixture();
+    let m = ibs.model("out_3s").unwrap();
+    assert_eq!(m.model_type, ModelType::ThreeState);
+    assert_eq!(m.polarity, Some(Polarity::Inverting));
+    assert_eq!(m.enable, Some(Enable::ActiveLow));
+    assert_eq!(
+        (m.vmeas, m.cref, m.rref, m.vref),
+        (Some(1.65), Some(0.0), Some(50.0), Some(0.0))
+    );
+    assert_eq!(m.pullup_reference.unwrap().min, Some(3.0));
+    assert_eq!(m.pulldown_reference.unwrap().typ, 0.0);
+    assert_eq!(m.power_clamp_reference.unwrap().typ, 3.3);
+    assert_eq!(m.gnd_clamp_reference.unwrap().typ, 0.0);
+    assert_eq!(m.voltage_range, None);
+    assert_eq!(m.pulldown.as_ref().unwrap().points[2].current.typ, 0.04);
+    // [Pullup] of the [Submodel] after the model does not replace it.
+    assert_eq!(m.pullup.as_ref().unwrap().points.len(), 3);
+
+    let ramp = m.ramp.unwrap();
+    let Slope { dv, dt } = ramp.dv_dt_r.get(Corner::Max);
+    assert_eq!(dv, 2.16);
+    approx(dt, 0.4e-9);
+    assert_eq!(ramp.dv_dt_f.min, None);
+    assert_eq!(ramp.r_load, Some(50.0));
+}
+
+#[test]
+fn test_skipped() {
+    let skipped: Vec<_> = fixture()
+        .skipped
+        .into_iter()
+        .map(|s| (s.name, s.line))
+        .collect();
+    let expected = [
+        ("[Diff Pin]", 31),
+        ("[Define Package Model]", 34),
+        ("[Model Selector]", 56),
+        ("C_comp_pullup", 66),
+        ("[Rising Waveform]", 103),
+        ("[Submodel]", 109),
+        // The keywords in the scope of [Submodel] are skipped too.
+        ("[Pullup]", 111),
+    ];
+    let expected: Vec<_> = expected.iter().map(|&(n, l)| (n.to_string(), l)).collect();
+    assert_eq!(skipped, expected);
+}
+
+/// Parses a file made of the header and the given lines, and returns the error.
+fn error(body: &str) -> (usize, String) {
+    let text = format!("[IBIS Ver] 4.0\n{body}");
+    let err = parse(&text).unwrap_err();
+    (err.line, err.message)
+}
+
+#[test]
+fn test_errors() {
+    assert_eq!(
+        parse("[File Name] x.ibs\n").unwrap_err().message,
+        "missing [IBIS Ver]"
+    );
+    let cases: &[(&str, usize, &str)] = &[
+        ("[IBIS Ver] 4.0\n", 2, "duplicate [IBIS Ver]"),
+        ("[Pin]\n1 A GND\n", 2, "[Pin] outside of a [Component]"),
+        (
+            "[Model] m\nModel_type Input\n[Pin]\n",
+            4,
+            "[Pin] outside of a [Component]",
+        ),
+        ("[Pullup]\n0 0\n", 2, "[Pullup] outside of a [Model]"),
+        ("[Component] c\n[Ramp]\n", 3, "[Ramp] outside of a [Model]"),
+        ("[Component]\n", 2, "[Component] needs a value"),
+        (
+            "[Component] c\n[Component] c\n",
+            3,
+            "duplicate [Component] c",
+        ),
+        ("[Component] c\n[Pin]\n1 A\n", 4, "a row of [Pin] needs"),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n1 B GND\n",
+            5,
+            "duplicate pin 1",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND x NA NA\n",
+            4,
+            "invalid value `x` in [Pin]",
+        ),
+        ("[Component] c\n[Pin]\n1 A m\n", 4, "the pin refers to `m`"),
+        (
+            "[Component] c\n[Package]\nR_pkg 1 2\n",
+            4,
+            "R_pkg needs the typical",
+        ),
+        (
+            "[Component] c\n[Package]\nR_pkg NA 1 2\n",
+            4,
+            "the typical value of R_pkg is NA",
+        ),
+        ("[Model] m\n", 2, "[Model] m has no Model_type"),
+        (
+            "[Model] m\nModel_type Bidir\n",
+            3,
+            "unknown Model_type `Bidir`",
+        ),
+        (
+            "[Model] m\nModel_type Input\nModel_type Input\n",
+            4,
+            "duplicate Model_type",
+        ),
+        (
+            "[Model] m\nModel_type Input\nPolarity up\n",
+            4,
+            "unknown Polarity",
+        ),
+        (
+            "[Model] m\nModel_type Input\nEnable on\n",
+            4,
+            "unknown Enable",
+        ),
+        (
+            "[Model] m\nModel_type Input\nVinl = x\n",
+            4,
+            "invalid value `x` for Vinl",
+        ),
+        (
+            "[Model] m\nModel_type Input\nVinl 1 2\n",
+            4,
+            "Vinl needs one value",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[Model] m\nModel_type Input\n",
+            4,
+            "duplicate [Model] m",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[Voltage Range] 3.3 x NA\n",
+            4,
+            "invalid value `x` for [Voltage Range]",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[GND Clamp]\n0 0\n[GND Clamp]\n0 0\n",
+            6,
+            "duplicate [GND Clamp]",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[GND Clamp]\n",
+            4,
+            "[GND Clamp] has no rows",
+        ),
+        (
+            "[Model] m\nModel_type Input\n[GND Clamp]\nx 0 NA NA\n",
+            5,
+            "invalid voltage `x` in [GND Clamp]",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1/1n NA NA\n",
+            4,
+            "[Ramp] needs both",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1 NA NA\n",
+            5,
+            "invalid value `1` for dV/dt_r",
+        ),
+    ];
+    for &(body, line, message) in cases {
+        let (l, m) = error(body);
+        assert!(
+            l == line && m.starts_with(message),
+            "{body:?}: got line {l}: {m}; expected line {line}: {message}"
+        );
+    }
+}
+
+#[test]
+fn test_model_type_names() {
+    for name in ["I/O_open_drain", "3-state_ECL", "Series_switch", "Input"] {
+        let t = ModelType::from_name(&name.to_lowercase()).unwrap();
+        assert_eq!(t.name(), name);
+        assert_eq!(t.to_string(), name);
+    }
+    assert_eq!(ModelType::from_name("IO"), None);
+}
+
+/// The IBIS file of the KiCad demo `simulation/ibis`, which tests odd syntax: a comment on the
+/// `[IBIS Ver]` line, `[Comment char]` in lowercase, `5mm` and `[GND_clamp]`.
+#[test]
+#[ignore = "needs the KiCad demos in /usr/share/kicad"]
+fn test_kicad_demo() {
+    let text =
+        std::fs::read_to_string("/usr/share/kicad/demos/simulation/ibis/ibis_v1_1.ibs").unwrap();
+    let ibs = parse(&text).unwrap();
+    assert_eq!(ibs.header.ibis_ver, "1.1");
+    assert_eq!(ibs.header.comment_char, '#');
+    assert_eq!(
+        ibs.header.source.as_deref(),
+        Some("This is the\nsource for the files")
+    );
+    let c = ibs.component("Virtual").unwrap();
+    assert_eq!(c.manufacturer.as_deref(), Some("KiCad"));
+    assert_eq!(c.pins.len(), 4);
+    approx(c.pin("1").unwrap().r_pin.unwrap(), 5e-3);
+    let input = ibs.model("Input").unwrap();
+    assert_eq!(input.model_type, ModelType::Input);
+    assert_eq!((input.vinl, input.vinh), (Some(0.8), Some(2.0)));
+    assert_eq!(input.gnd_clamp.as_ref().unwrap().points.len(), 3);
+    let output = ibs.model("Output").unwrap();
+    assert_eq!(output.model_type, ModelType::Output);
+    assert_eq!(output.pulldown.as_ref().unwrap().points.len(), 4);
+    let ramp = output.ramp.unwrap();
+    approx(ramp.dv_dt_r.typ.dt, 30e-9);
+    assert_eq!(ramp.dv_dt_r.max, None);
+    assert!(ibs.skipped.is_empty(), "{:?}", ibs.skipped);
+}

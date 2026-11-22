@@ -32,8 +32,8 @@ others get the same environment.
 2. Keep a pull request focused on one topic. Update the documentation (`README.md`, `doc/`) together
    with the behavior it describes, and add user-visible changes to the `[Unreleased]` section of
    [`CHANGELOG.md`](CHANGELOG.md) (mark breaking changes with **Breaking:**).
-   Public items of `cuprite_wire` and `cuprite_wire_embedded_hal` need doc comments, with
-   `# Errors` / `# Panics` sections where they apply (clippy checks this).
+   Public items of `cuprite_wire`, `cuprite_wire_embedded_hal` and `cuprite_wire_ibis` need doc
+   comments, with `# Errors` / `# Panics` sections where they apply (clippy checks this).
 3. Run the same checks as CI before opening the pull request:
 
    ```sh
@@ -42,7 +42,7 @@ others get the same environment.
    cargo clippy -p cuprite_wire --all-targets -- -D warnings
    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --features shared-ngspice
    cargo test --workspace --features kicad-libraries,shared-ngspice
-   cargo test -p cuprite_wire_kicad_lib -- --ignored
+   cargo test -p cuprite_wire_kicad_lib -p cuprite_wire_ibis -- --ignored
    ```
 
    The XSPICE tests building code models run on Linux only (see the platform notes in

@@ -1,0 +1,12 @@
+[package]
+name = "cuprite_wire_ibis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["ibis", "spice", "signal-integrity", "parser", "eda"]
+categories = ["simulation", "science", "parser-implementations"]
+description = "Reads IBIS (I/O Buffer Information Specification) models"
+
+[dependencies]

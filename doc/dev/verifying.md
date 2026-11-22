@@ -27,6 +27,10 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
 - **XSPICE code models**: `tests/xspice_models.rs` simulates a counter made of a `d_state` machine
   in a `.subckt` (`crates/kicad_lib/tests/fixtures/models/xspice/`), whose state file is named by
   a relative path, made absolute by `sim_model: inline`.
+- **IBIS files**: `crates/ibis/tests/parse.rs` reads a hand-written file
+  (`crates/ibis/tests/fixtures/buffers.ibs`) covering the keywords the parser reads and skips,
+  and, as an ignored test (`cargo test -p cuprite_wire_ibis -- --ignored`), the IBIS file of the
+  KiCad demo `simulation/ibis`.
 - **Vendor models** (opt-in, not run by CI):
   `CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
   (`doc/spice_part_macro.md` section 7).
