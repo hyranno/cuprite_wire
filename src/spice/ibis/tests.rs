@@ -119,7 +119,8 @@ fn test_buffer() {
     let io = buffer("1");
     assert_eq!(io.model_name(), "io");
     assert!(io.is_driver());
-    assert_eq!(io.edge_times().unwrap().rise, 1e-9);
+    assert_eq!(io.edges().unwrap().rising.duration(), 1e-9);
+    assert_eq!(io.notes(), [] as [String; 0]);
     let input = io.input().unwrap();
     assert_eq!((input.threshold_low, input.threshold_high), (0.8, 2.0));
     assert_eq!(input.capacitance, 2e-12);

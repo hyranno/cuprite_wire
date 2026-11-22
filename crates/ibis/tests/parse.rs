@@ -130,6 +130,20 @@ fn test_output_model() {
     approx(dt, 0.4e-9);
     assert_eq!(ramp.dv_dt_f.min, None);
     assert_eq!(ramp.r_load, Some(50.0));
+
+    assert_eq!(m.falling_waveforms, []);
+    let [w] = &m.rising_waveforms[..] else {
+        panic!("{:?}", m.rising_waveforms)
+    };
+    assert_eq!(w.r_fixture, 50.0);
+    assert_eq!(w.v_fixture.get(Corner::Min), 3.0);
+    assert_eq!(w.v_fixture.get(Corner::Max), 3.6);
+    assert_eq!((w.c_fixture, w.r_dut), (Some(0.0), None));
+    approx(w.l_fixture.unwrap(), 1e-9);
+    assert_eq!(w.points.len(), 2);
+    approx(w.points[1].time, 1e-9);
+    assert_eq!(w.points[1].voltage.get(Corner::Min), 3.0);
+    assert_eq!(w.points[1].voltage.max, None);
 }
 
 #[test]
@@ -144,10 +158,9 @@ fn test_skipped() {
         ("[Define Package Model]", 34),
         ("[Model Selector]", 56),
         ("C_comp_pullup", 66),
-        ("[Rising Waveform]", 103),
-        ("[Submodel]", 109),
+        ("[Submodel]", 113),
         // The keywords in the scope of [Submodel] are skipped too.
-        ("[Pullup]", 111),
+        ("[Pullup]", 115),
     ];
     let expected: Vec<_> = expected.iter().map(|&(n, l)| (n.to_string(), l)).collect();
     assert_eq!(skipped, expected);
@@ -239,6 +252,26 @@ fn test_errors() {
             "[Model] m\nModel_type Input\n[Model] m\nModel_type Input\n",
             4,
             "duplicate [Model] m",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Rising Waveform]\nV_fixture = 0\n0 0\n1n 1\n",
+            4,
+            "[Rising Waveform] needs R_fixture",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Falling Waveform]\nR_fixture 50\nV_fixture 0\n0 0\n",
+            4,
+            "[Falling Waveform] needs at least two rows",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Rising Waveform]\nR_fixture 50\nV_fixture 0\n1n 0\n1n 1\n",
+            4,
+            "the times of [Rising Waveform] must increase: 0.000000001 after 0.000000001",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Rising Waveform]\nR_fixture 50\nV_fixture 0\n0 0 1\n1n 1\n",
+            7,
+            "[Rising Waveform] needs the typical",
         ),
         (
             "[Model] m\nModel_type Input\n[Voltage Range] 3.3 x NA\n",

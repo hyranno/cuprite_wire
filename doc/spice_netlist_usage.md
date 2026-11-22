@@ -141,8 +141,8 @@ let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
 
 With the feature `ibis`, `cuprite_wire::spice::ibis` simulates the I/O buffers of a device from its
 IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`: the I-V tables of
-the driver and the clamps, the edge rates of `[Ramp]`, `C_comp` and the package parasitics of the
-pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
+the driver and the clamps, the edges of `[Rising Waveform]` / `[Falling Waveform]` (or `[Ramp]`),
+`C_comp` and the package parasitics of the pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
 
 ```rust
 use cuprite_wire::{
@@ -167,9 +167,15 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
   column of the values (`NA` falls back to typical). The supported model types are `Input`,
   `Output`, `I/O`, `3-state` and the open drain, sink and source types.
 - `IbisDriver::new(buffer, sequence)` (pins `out`, `gnd`; `XDRV1`) plays a `DigitalSequence`. The
-  model's `[Pullup]` and `[Pulldown]` are weighted by two PWL sources that switch linearly over
-  the edge times of `[Ramp]` (its 20-80 % time divided by 0.6, as KiCad does); `HiZ` turns both off.
-  A level the model cannot drive (`HiZ` on an `Output`, `High` on an open drain) panics.
+  model's `[Pullup]` and `[Pulldown]` are weighted by two PWL sources that follow the edges of the
+  model (`buffer.edges()`): the weights that reproduce its `[Rising Waveform]` /
+  `[Falling Waveform]` in their test fixtures, delay included, as in the IBIS specification and
+  KiCad (two waveforms with different `V_fixture` give both weights; one gives them with
+  `ku + kd = 1`). An edge without waveforms switches linearly over the time of `[Ramp]` (its
+  20-80 % time divided by 0.6, as KiCad does). Waveforms with a fixture other than `R_fixture`,
+  `V_fixture` and `C_fixture` (`L_fixture`, `R_dut`, `L_dut`, `C_dut` other than 0) are not used
+  and listed in `buffer.notes()`. `HiZ` turns both weights off. A level the model cannot drive
+  (`HiZ` on an `Output`, `High` on an open drain) panics.
 - `IbisReceiver::new(buffer)` (pins `in`, `gnd`; `XRX1`) is the package, `C_comp` and the clamps;
   an I/O model is its receiver with the driver off.
 - `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` as the
@@ -177,8 +183,7 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
 - Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
   model, `cuprite_ibis_<hash>` for the driver); the I-V tables are XSPICE `pwl` code models, which
   the usual builds of ngspice load. Beyond the voltages of a table, its end segments are extended.
-- `[Rising Waveform]` / `[Falling Waveform]`, `[Model Selector]`, differential and series models
-  are not used.
+- `[Model Selector]`, differential and series models are not used.
 
 Which to use:
 

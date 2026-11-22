@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     Component, Enable, Error, Header, IbisFile, IvPoint, IvTable, Model, ModelType, Package, Pin,
-    PinModel, Polarity, Ramp, Skipped, Slope, TypMinMax,
+    PinModel, Polarity, Ramp, Skipped, Slope, TypMinMax, VtPoint, Waveform,
     lex::{Block, Line, lex},
     number::{parse_number, parse_optional},
 };
@@ -308,6 +308,8 @@ impl<'a> Parser<'a> {
             gnd_clamp: None,
             power_clamp: None,
             ramp: None,
+            rising_waveforms: Vec::new(),
+            falling_waveforms: Vec::new(),
         };
         for s in subparams(&b.body) {
             let lower = s.name.to_ascii_lowercase();
@@ -383,6 +385,15 @@ impl<'a> Parser<'a> {
                 let ramp = self.ramp(b)?;
                 set_once(&mut self.models[m].ramp, b, ramp)
             }
+            "rising waveform" | "falling waveform" => {
+                let waveform = self.waveform(b)?;
+                let model = &mut self.models[m];
+                match name {
+                    "rising waveform" => model.rising_waveforms.push(waveform),
+                    _ => model.falling_waveforms.push(waveform),
+                }
+                Ok(())
+            }
             _ => {
                 // The ranges and references: three columns after the keyword.
                 let values: Vec<_> = b
@@ -437,8 +448,84 @@ impl<'a> Parser<'a> {
     }
 }
 
+impl Parser<'_> {
+    /// A `[Rising Waveform]` or `[Falling Waveform]`: the subparameters of the fixture, then the
+    /// rows of the table (lines starting with a number).
+    fn waveform(&mut self, b: &Block) -> Result<Waveform, Error> {
+        let (rows, others): (Vec<&Line>, Vec<&Line>) = b
+            .body
+            .iter()
+            .partition(|l| l.tokens().next().is_some_and(|t| parse_number(t).is_some()));
+        let mut r_fixture = None;
+        let (mut v_fixture, mut v_fixture_min, mut v_fixture_max) = (None, None, None);
+        let mut optional = [None; 5];
+        for s in subparams(others) {
+            let lower = s.name.to_ascii_lowercase();
+            let field = match lower.as_str() {
+                "r_fixture" => &mut r_fixture,
+                "v_fixture" => &mut v_fixture,
+                "v_fixture_min" => &mut v_fixture_min,
+                "v_fixture_max" => &mut v_fixture_max,
+                "l_fixture" => &mut optional[0],
+                "c_fixture" => &mut optional[1],
+                "r_dut" => &mut optional[2],
+                "l_dut" => &mut optional[3],
+                "c_dut" => &mut optional[4],
+                _ => {
+                    self.skip_subparam(&s);
+                    continue;
+                }
+            };
+            let value = s.single()?;
+            let v = parse_number(value).ok_or_else(|| s.invalid(value))?;
+            set_subparam(field, &s, v)?;
+        }
+        let missing = |what: &str| Error::new(b.line, format!("{} needs {what}", b.keyword));
+        let r_fixture = r_fixture.ok_or_else(|| missing("R_fixture"))?;
+        let v_fixture = v_fixture.ok_or_else(|| missing("V_fixture"))?;
+        let points = rows
+            .iter()
+            .map(|l| {
+                let tokens: Vec<_> = l.tokens().collect();
+                let (time, voltage) = tokens.split_first().unwrap();
+                Ok(VtPoint {
+                    time: parse_number(time).unwrap(),
+                    voltage: typ_min_max(voltage, l.line, &b.keyword, parse_optional)?,
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        if points.len() < 2 {
+            return Err(missing("at least two rows"));
+        }
+        if let Some(w) = points.windows(2).find(|w| w[1].time <= w[0].time) {
+            return Err(Error::new(
+                b.line,
+                format!(
+                    "the times of {} must increase: {} after {}",
+                    b.keyword, w[1].time, w[0].time
+                ),
+            ));
+        }
+        let [l_fixture, c_fixture, r_dut, l_dut, c_dut] = optional;
+        Ok(Waveform {
+            r_fixture,
+            v_fixture: TypMinMax {
+                typ: v_fixture,
+                min: v_fixture_min,
+                max: v_fixture_max,
+            },
+            l_fixture,
+            c_fixture,
+            r_dut,
+            l_dut,
+            c_dut,
+            points,
+        })
+    }
+}
+
 /// The keywords read in the scope of a `[Model]`, besides `[Model]` itself.
-const MODEL_KEYWORDS: [&str; 11] = [
+const MODEL_KEYWORDS: [&str; 13] = [
     "temperature range",
     "voltage range",
     "pullup reference",
@@ -450,6 +537,8 @@ const MODEL_KEYWORDS: [&str; 11] = [
     "gnd clamp",
     "power clamp",
     "ramp",
+    "rising waveform",
+    "falling waveform",
 ];
 
 /// The keyword that ends a block, if the keyword may start one: `[End <name>]`, with the
@@ -492,8 +581,9 @@ impl Subparam {
     }
 }
 
-fn subparams(body: &[Line]) -> Vec<Subparam> {
-    body.iter()
+fn subparams<'l>(lines: impl IntoIterator<Item = &'l Line>) -> Vec<Subparam> {
+    lines
+        .into_iter()
         .map(|l| {
             let text = l.text.replace('=', " = ");
             let mut tokens = text.split_whitespace().map(str::to_string);

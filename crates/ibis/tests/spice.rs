@@ -8,7 +8,7 @@ use std::{
 
 use cuprite_wire_ibis::{
     Corner, IbisFile, parse,
-    spice::{Drive, EdgeTimes, Parasitics, Subcircuit, Weights, subcircuit},
+    spice::{Drive, Parasitics, Subcircuit, Weights, subcircuit},
 };
 
 fn fixture() -> IbisFile {
@@ -231,10 +231,16 @@ print inside
 #[test]
 fn test_driver_transient() {
     let dut = out_3s();
-    let edges = dut.edge_times.unwrap();
+    // The [Rising Waveform] has L_fixture: the edges come from [Ramp].
+    assert_eq!(
+        dut.notes,
+        ["[Rising Waveform] 1 is not used: L_fixture 0.000000001 not supported"]
+    );
+    assert!(dut.text.contains("\n* [Rising Waveform] 1 is not used"));
+    let edges = dut.edges.unwrap();
     // dV/dt_r 1.98/0.5n, dV/dt_f 1.98/0.4n.
-    assert_close(edges.rise, 0.5e-9 / 0.6, 1e-18);
-    assert_close(edges.fall, 0.4e-9 / 0.6, 1e-18);
+    assert_close(edges.rising.duration(), 0.5e-9 / 0.6, 1e-18);
+    assert_close(edges.falling.duration(), 0.4e-9 / 0.6, 1e-18);
     let weights = edges.weights(
         Drive::HiZ,
         &[(1e-9, Drive::High), (5e-9, Drive::Low), (9e-9, Drive::HiZ)],
@@ -265,7 +271,150 @@ meas tran rise when v(pin)=2 rise=1
     assert_close(value(&values, "hiz2"), 1.65, 1e-3);
     // Within the edge.
     let rise = value(&values, "rise");
-    assert!(rise > 1e-9 && rise < 1e-9 + edges.rise, "{rise}");
+    assert!(
+        rise > 1e-9 && rise < 1e-9 + edges.rising.duration(),
+        "{rise}"
+    );
+}
+
+/// The value of a piecewise linear waveform at `t` (the last value after the end).
+fn at(points: &[(f64, f64)], t: f64) -> f64 {
+    let t = t.min(points.last().unwrap().0);
+    let i = points
+        .partition_point(|p| p.0 <= t)
+        .clamp(1, points.len() - 1);
+    let ((t0, v0), (t1, v1)) = (points[i - 1], points[i]);
+    v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+}
+
+/// Simulates the driver into fixtures of 50 ohms to ground and to `supply`, each edge starting
+/// `delay` after the start, and returns them as `[Rising Waveform]`s and `[Falling Waveform]`s
+/// (the steps of `tran`, the arguments of `.tran`).
+fn record_waveforms(dut: &Subcircuit, supply: f64, delay: f64, tran: &str) -> String {
+    let edges = dut.edges.as_ref().unwrap();
+    let rising = edges.weights(Drive::Low, &[(delay, Drive::High)]);
+    let falling = edges.weights(Drive::High, &[(delay, Drive::Low)]);
+    let mut deck = format!("fixtures\n{}", dut.text);
+    for (edge, weights) in [("r", &rising), ("f", &falling)] {
+        deck += &pwl(&format!("Vku_{edge}"), &format!("ku_{edge}"), &weights.ku);
+        deck += &pwl(&format!("Vkd_{edge}"), &format!("kd_{edge}"), &weights.kd);
+        for (fixture, v) in [("0", 0.0), ("1", supply)] {
+            deck += &format!(
+                "X{edge}{fixture} {edge}{fixture} 0 ku_{edge} kd_{edge} {}\n\
+                 R{edge}{fixture} {edge}{fixture} v{edge}{fixture} 50\n\
+                 V{edge}{fixture} v{edge}{fixture} 0 {v}\n",
+                dut.name
+            );
+        }
+    }
+    deck += &format!(
+        "\
+.tran {tran}
+.control
+set wr_singlescale
+run
+linearize v(r0) v(r1) v(f0) v(f1)
+wrdata waves.txt v(r0) v(r1) v(f0) v(f1)
+.endc
+.end
+"
+    );
+    let dir = TempDir::new();
+    run_in(&dir.0, &deck);
+    let rows: Vec<Vec<f64>> = std::fs::read_to_string(dir.0.join("waves.txt"))
+        .unwrap()
+        .lines()
+        .map(|l| l.split_whitespace().map(|n| n.parse().unwrap()).collect())
+        .collect();
+    assert!(rows.len() > 50, "{}", rows.len());
+    let mut text = String::new();
+    for (keyword, columns) in [("Rising", [1, 2]), ("Falling", [3, 4])] {
+        for (column, v_fixture) in columns.into_iter().zip([0.0, supply]) {
+            text += &format!("[{keyword} Waveform]\nR_fixture = 50\nV_fixture = {v_fixture}\n");
+            for row in &rows {
+                text += &format!("{:e} {:e} NA NA\n", row[0], row[column]);
+            }
+        }
+    }
+    text
+}
+
+/// Records the waveforms of `out_3s` (linear edges from [Ramp], `C_comp` 3 pF) into fixtures of
+/// 50 ohms to ground and to 3.3 V, writes them into a copy of the model as waveforms, and checks
+/// that the weights solved from them drive a different load as the original does.
+#[test]
+fn test_waveforms() {
+    let original = out_3s();
+    let edges = original.edges.clone().unwrap();
+    // Each edge 0.5 ns after the start of its waveform.
+    let waveforms = record_waveforms(&original, 3.3, 0.5e-9, "50p 3n 0 5p");
+
+    // The model with the waveforms.
+    let fixture = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/buffers.ibs"
+    ))
+    .unwrap();
+    let start = fixture.find("[Model]         out_3s").unwrap();
+    let end = fixture.find("[Rising Waveform]").unwrap();
+    let mut ibs = format!(
+        "[IBIS Ver] 5.0\n[File Name] w.ibs\n{}{waveforms}",
+        &fixture[start..end]
+    );
+    ibs += "[END]\n";
+    let ibs = parse(&ibs).unwrap();
+    let solved = subcircuit("solved", &ibs.models[0], &Parasitics::NONE, Corner::Typ).unwrap();
+    assert_eq!(solved.notes, Vec::<String>::new());
+    let solved_edges = solved.edges.clone().unwrap();
+
+    // The solved weights are the original ones.
+    let rising = edges.weights(Drive::Low, &[(0.5e-9, Drive::High)]);
+    let falling = edges.weights(Drive::High, &[(0.5e-9, Drive::Low)]);
+    for i in 0..=30 {
+        let t = i as f64 * 0.1e-9;
+        for (ours, theirs) in [
+            (&solved_edges.rising.ku, &rising.ku),
+            (&solved_edges.rising.kd, &rising.kd),
+            (&solved_edges.falling.ku, &falling.ku),
+            (&solved_edges.falling.kd, &falling.kd),
+        ] {
+            let (a, b) = (at(ours, t), at(theirs, t));
+            assert!(
+                (a - b).abs() < 0.03,
+                "at {t}: {a} != {b}\n{ours:?}\n{theirs:?}"
+            );
+        }
+    }
+
+    // Both drive another load alike, the original 0.5 ns later: the solved edges keep the delay
+    // of the waveforms.
+    let ours = solved_edges.weights(Drive::Low, &[(1e-9, Drive::High), (4e-9, Drive::Low)]);
+    let theirs = edges.weights(Drive::Low, &[(1.5e-9, Drive::High), (4.5e-9, Drive::Low)]);
+    let mut deck = format!("load\n{}{}", original.text, solved.text);
+    deck += &pwl("Vku1", "ku1", &theirs.ku);
+    deck += &pwl("Vkd1", "kd1", &theirs.kd);
+    deck += &pwl("Vku2", "ku2", &ours.ku);
+    deck += &pwl("Vkd2", "kd2", &ours.kd);
+    deck += "\
+X1 a 0 ku1 kd1 dut
+Ra a mid 100
+Ca a 0 5p
+X2 b 0 ku2 kd2 solved
+Rb b mid 100
+Cb b 0 5p
+Vmid mid 0 1.65
+.tran 10p 8n
+.control
+run
+let diff = abs(v(a) - v(b))
+meas tran max_diff max diff
+meas tran high find v(b) at=3.5n
+.endc
+.end
+";
+    let values = run(&deck);
+    assert!(value(&values, "high") > 2.5, "{values:?}");
+    assert!(value(&values, "max_diff") < 0.01, "{values:?}");
 }
 
 #[test]
@@ -324,7 +473,7 @@ fn test_errors() {
     );
     assert_eq!(
         error(&format!("Model_type Open_drain\n[Pulldown]{table}")),
-        "model `m`: a `Open_drain` model needs [Ramp]"
+        "model `m`: a `Open_drain` model needs [Rising Waveform] or [Ramp]"
     );
     assert_eq!(
         error("Model_type Input\n[GND Clamp]\n0 0 NA NA"),
@@ -360,17 +509,16 @@ fn kibis_pwl(text: &str, name: &str) -> Vec<(f64, f64)> {
     numbers.chunks(2).map(|c| (c[0], c[1])).collect()
 }
 
-/// Compares a driver with the conversion of KiCad, the `RECTDRIVER` U4 of the IBIS demo (pin 4,
-/// model `Output`, 100 ns high and 100 ns low from 0, each pin pulled to 5 V and ground by
-/// 10 kohm).
-#[test]
-#[ignore = "needs kicad-cli and the KiCad demos in /usr/share/kicad"]
-fn test_kicad_rectdriver() {
-    let demo = Path::new("/usr/share/kicad/demos/simulation/ibis");
-    let dir = TempDir::new();
-    for file in ["ibis.kicad_sch", "ibis.kicad_pro", "ibis_v1_1.ibs"] {
-        std::fs::copy(demo.join(file), dir.0.join(file)).unwrap();
+const KICAD_DEMO: &str = "/usr/share/kicad/demos/simulation/ibis";
+
+/// The conversion of KiCad of the `RECTDRIVER` U4 of the IBIS demo (pin 4, model `Output`,
+/// 100 ns high and 100 ns low from 0), with the demo's `ibis_v1_1.ibs` replaced by `ibs`.
+fn kibis_rectdriver(dir: &Path, ibs: &str) -> String {
+    let demo = Path::new(KICAD_DEMO);
+    for file in ["ibis.kicad_sch", "ibis.kicad_pro"] {
+        std::fs::copy(demo.join(file), dir.join(file)).unwrap();
     }
+    std::fs::write(dir.join("ibis_v1_1.ibs"), ibs).unwrap();
     // kicad-cli writes the conversion into its cache while exporting the netlist.
     let status = Command::new("kicad-cli")
         .args([
@@ -383,13 +531,13 @@ fn test_kicad_rectdriver() {
             "ibis.cir",
             "ibis.kicad_sch",
         ])
-        .env("XDG_CACHE_HOME", dir.0.join("cache"))
-        .current_dir(&dir.0)
+        .env("XDG_CACHE_HOME", dir.join("cache"))
+        .current_dir(dir)
         .output()
         .unwrap()
         .status;
     assert!(status.success());
-    let cache = std::fs::read_dir(dir.0.join("cache/kicad"))
+    let cache = std::fs::read_dir(dir.join("cache/kicad"))
         .unwrap()
         .next()
         .unwrap()
@@ -397,9 +545,13 @@ fn test_kicad_rectdriver() {
         .path()
         .join("ibis/U4.cache");
     // KIBIS ends the subcircuit with `.ENDS DRIVER`, which ngspice accepts.
-    let kibis = std::fs::read_to_string(cache).unwrap();
+    std::fs::read_to_string(cache).unwrap()
+}
 
-    let ibs = parse(&std::fs::read_to_string(demo.join("ibis_v1_1.ibs")).unwrap()).unwrap();
+/// Our driver of the model `Output` of `ibs` on pin 4, with the weights of the `RECTDRIVER` U4,
+/// and the weights.
+fn rectdriver(ibs: &str) -> (Subcircuit, Weights) {
+    let ibs = parse(ibs).unwrap();
     let component = ibs.component("Virtual").unwrap();
     let parasitics = Parasitics::of_pin(component, component.pin("4").unwrap(), Corner::Typ);
     let dut = subcircuit(
@@ -409,27 +561,26 @@ fn test_kicad_rectdriver() {
         Corner::Typ,
     )
     .unwrap();
-    let edges: EdgeTimes = dut.edge_times.unwrap();
     let events: Vec<_> = (0..50)
         .flat_map(|i| {
             let t = i as f64 * 200e-9;
             [(t, Drive::High), (t + 100e-9, Drive::Low)]
         })
         .collect();
-    let weights = edges.weights(Drive::Low, &events);
+    let weights = dut.edges.as_ref().unwrap().weights(Drive::Low, &events);
+    (dut, weights)
+}
 
-    // The same weights as KIBIS (until its last point, before the last falling edge ends).
-    for (ours, theirs) in [(&weights.ku, "Vku"), (&weights.kd, "Vkd")] {
-        let theirs = kibis_pwl(&kibis, theirs);
-        assert!(ours.len() >= theirs.len());
-        for (a, b) in ours.iter().zip(&theirs) {
-            assert_close(a.0, b.0, 1e-12);
-            assert_close(a.1, b.1, 1e-9);
-        }
-    }
-
-    // The same pin voltage.
-    let mut deck = format!("kibis\n{kibis}\n{}{}", dut.text, weight_sources(&weights));
+/// Checks that our driver and that of KIBIS give the same voltage within `tolerance` on a pin
+/// pulled to 5 V and ground by 10 kohm each.
+fn compare_with_kibis(
+    dir: &Path,
+    kibis: &str,
+    dut: &Subcircuit,
+    weights: &Weights,
+    tolerance: f64,
+) {
+    let mut deck = format!("kibis\n{kibis}\n{}{}", dut.text, weight_sources(weights));
     deck += "\
 VDD vdd 0 5
 XKIBIS 0 kibis U4.Virtual
@@ -448,8 +599,68 @@ meas tran low find v(ours) at=190n
 .endc
 .end
 ";
-    let values = run_in(&dir.0, &deck);
+    let values = run_in(dir, &deck);
     assert!(value(&values, "high") > 4.9);
     assert!(value(&values, "low") < 0.1);
-    assert!(value(&values, "max_diff") < 0.01, "{values:?}");
+    assert!(value(&values, "max_diff") < tolerance, "{values:?}");
+}
+
+/// Compares a driver with the conversion of KiCad, the `RECTDRIVER` U4 of the IBIS demo (each pin
+/// pulled to 5 V and ground by 10 kohm).
+#[test]
+#[ignore = "needs kicad-cli and the KiCad demos in /usr/share/kicad"]
+fn test_kicad_rectdriver() {
+    let dir = TempDir::new();
+    let ibs = std::fs::read_to_string(Path::new(KICAD_DEMO).join("ibis_v1_1.ibs")).unwrap();
+    let kibis = kibis_rectdriver(&dir.0, &ibs);
+    let (dut, weights) = rectdriver(&ibs);
+
+    // The same weights as KIBIS (until its last point, before the last falling edge ends).
+    for (ours, theirs) in [(&weights.ku, "Vku"), (&weights.kd, "Vkd")] {
+        let theirs = kibis_pwl(&kibis, theirs);
+        assert!(ours.len() >= theirs.len());
+        for (a, b) in ours.iter().zip(&theirs) {
+            assert_close(a.0, b.0, 1e-12);
+            assert_close(a.1, b.1, 1e-9);
+        }
+    }
+    compare_with_kibis(&dir.0, &kibis, &dut, &weights, 0.01);
+}
+
+/// Compares the weights solved from waveforms with those of KiCad: the model `Output` of the demo
+/// with the waveforms that its `[Ramp]` gives into fixtures, 5 ns after the start.
+#[test]
+#[ignore = "needs kicad-cli and the KiCad demos in /usr/share/kicad"]
+fn test_kicad_rectdriver_waveforms() {
+    let demo = std::fs::read_to_string(Path::new(KICAD_DEMO).join("ibis_v1_1.ibs")).unwrap();
+    // The waveforms of the die, without the package.
+    let original = subcircuit(
+        "original",
+        parse(&demo).unwrap().model("Output").unwrap(),
+        &Parasitics::NONE,
+        Corner::Typ,
+    )
+    .unwrap();
+    let waveforms = record_waveforms(&original, 5.0, 5e-9, "1n 100n 0 0.2n");
+    // Waveforms need version 2.1.
+    let ibs = demo
+        .replacen("[IBIS Ver]      1.1", "[IBIS Ver]      2.1", 1)
+        .replacen("\n[END]", &format!("\n{waveforms}[END]"), 1);
+    let dir = TempDir::new();
+    let kibis = kibis_rectdriver(&dir.0, &ibs);
+    let (dut, weights) = rectdriver(&ibs);
+    assert_eq!(dut.notes, Vec::<String>::new());
+
+    // The weights of the first period, rising from 5 ns and falling from 105 ns.
+    for (ours, theirs) in [(&weights.ku, "Vku"), (&weights.kd, "Vkd")] {
+        let theirs = kibis_pwl(&kibis, theirs);
+        for i in 0..200 {
+            let t = i as f64 * 1e-9;
+            let (a, b) = (at(ours, t), at(&theirs, t));
+            assert!((a - b).abs() < 0.01, "at {t}: {a} != {b}");
+        }
+    }
+    // The edges differ by a fraction of the time step of the waveforms (1 ns, about 100 mV on the
+    // edges of 5 V in 50 ns).
+    compare_with_kibis(&dir.0, &kibis, &dut, &weights, 0.03);
 }

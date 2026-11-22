@@ -52,9 +52,9 @@
 //! - `[Model]` with its subparameters (`Model_type`, `Polarity`, `Enable`, `Vinl`, `Vinh`,
 //!   `Vmeas`, `Vref`, `Cref`, `Rref`, `C_comp`), `[Temperature Range]`, `[Voltage Range]`, the
 //!   references (`[Pullup Reference]`, ...), the I-V tables (`[Pullup]`, `[Pulldown]`,
-//!   `[GND Clamp]`, `[POWER Clamp]`) and `[Ramp]`.
+//!   `[GND Clamp]`, `[POWER Clamp]`), `[Ramp]`, `[Rising Waveform]` and `[Falling Waveform]`.
 //!
-//! Other keywords and subparameters (`[Rising Waveform]`, `[Model Selector]`, `[Diff Pin]`,
+//! Other keywords and subparameters (`[Model Selector]`, `[Diff Pin]`,
 //! `[Package Model]`, `[Submodel]`, IBIS-AMI, ...) are skipped without an error and listed in
 //! [`IbisFile::skipped`]. The parser is lenient about what does not change the meaning: it does
 //! not check line lengths, and keywords may be indented.
@@ -243,6 +243,10 @@ pub struct Model {
     pub power_clamp: Option<IvTable>,
     /// `[Ramp]`.
     pub ramp: Option<Ramp>,
+    /// The `[Rising Waveform]`s, in the order of the file.
+    pub rising_waveforms: Vec<Waveform>,
+    /// The `[Falling Waveform]`s, in the order of the file.
+    pub falling_waveforms: Vec<Waveform>,
 }
 
 /// `Model_type` of a [`Model`].
@@ -421,6 +425,42 @@ pub struct Ramp {
     pub dv_dt_f: TypMinMax<Slope>,
     /// `R_load`: the test load, in ohms (`None` for the default of 50 ohms).
     pub r_load: Option<f64>,
+}
+
+/// A `[Rising Waveform]` or `[Falling Waveform]`: the voltage of the die over time as the driver
+/// switches into a test fixture, from the moment it is told to switch.
+///
+/// The fixture is `R_fixture` (in series with `L_fixture`) from the die to `V_fixture`, with
+/// `C_fixture` from the die to ground. `R_dut`, `L_dut` and `C_dut` are a package between the die
+/// and the fixture, which the waveforms usually leave out.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct Waveform {
+    /// `R_fixture`, in ohms.
+    pub r_fixture: f64,
+    /// `V_fixture` and its corners `V_fixture_min` and `V_fixture_max`, in volts.
+    pub v_fixture: TypMinMax<f64>,
+    /// `L_fixture`, in henries.
+    pub l_fixture: Option<f64>,
+    /// `C_fixture`, in farads.
+    pub c_fixture: Option<f64>,
+    /// `R_dut`, in ohms.
+    pub r_dut: Option<f64>,
+    /// `L_dut`, in henries.
+    pub l_dut: Option<f64>,
+    /// `C_dut`, in farads.
+    pub c_dut: Option<f64>,
+    /// The rows of the table, in the order of the file.
+    pub points: Vec<VtPoint>,
+}
+
+/// A row of a [`Waveform`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VtPoint {
+    /// In seconds.
+    pub time: f64,
+    /// The voltage of the die at the time, in volts.
+    pub voltage: TypMinMax<f64>,
 }
 
 /// A rate given as a voltage change over a time (`dV/dt`).

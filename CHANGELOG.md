@@ -18,8 +18,10 @@ break the API).
   will use it to simulate I/O buffers. `cuprite_wire_ibis::spice::subcircuit` writes a model as
   an ngspice subcircuit with the structure of KiCad's IBIS conversion (package, `C_comp`, the I-V
   tables as XSPICE `pwl` models), but with ports `ku` and `kd` that switch the driver from
-  outside; `EdgeTimes::weights` makes their waveforms from a sequence of high, low and
-  high-impedance states and the `[Ramp]` of the model.
+  outside; `Edges::weights` makes their waveforms from a sequence of high, low and
+  high-impedance states and the edges of the model. The edges reproduce its `[Rising Waveform]`s
+  and `[Falling Waveform]`s (the weights solved from two waveforms into different fixtures, or
+  from one with `ku + kd = 1`, as KiCad does), or else are linear from its `[Ramp]`.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes
