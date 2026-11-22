@@ -80,7 +80,7 @@ impl<K> Diagnostic<K> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CircuitErrorKind {
-    /// An instance name or a net label is not allowed.
+    /// An instance name, a net label, a reference prefix or a subcircuit base name is not allowed.
     InvalidName {
         /// The rejected name.
         name: String,

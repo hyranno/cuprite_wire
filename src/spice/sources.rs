@@ -103,6 +103,8 @@ impl Waveform {
         }
     }
 
+    /// Checks that the waveform can be written as a valid SPICE source.
+    ///
     /// # Panics
     /// If a number is not finite, or the points of `Pwl` are none or not in increasing time.
     #[track_caller]

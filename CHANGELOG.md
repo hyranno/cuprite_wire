@@ -29,27 +29,26 @@ break the API).
   e.g. `Diode:BAT54SDW`): `kicad_part!` makes each a pin (IDs `6`, `6#2`, ...) connected inside
   the part, and the KiCad netlist writes the pad once, with the first pin as KiCad does.
   A part may have several pins on one pad if they are connected inside the part.
-- `Ngspice::new` and `SharedNgspice::new`, to give the program or the library (they can no
-  longer be built with a struct literal).
+- `Ngspice::new` and `SharedNgspice::new`, to give the program or the library.
 - `PartPins` (`PartPins::of(&part)`): the pin IDs of a part and its internal connection groups,
   with overlapping groups merged. `Component::pins` holds those of each component.
+- `Component::pin_types`: the ERC pin types of the pins of each component.
 
 ### Changed
 
-- `Netlist::pinless_marks` is replaced by `Netlist::pinless_nets`: each net without part pins
-  (`PinlessNet`) with its label names and ERC marks, so that `erc_allow` applies per net.
-- `#[non_exhaustive]`, so that later versions can add fields and variants without breaking the
-  API: `ErcMark`, the types the library builds for the user to read (`Netlist`, `Component`, `Net`,
-  `NetNode`, `ErcReport`, `ErcViolation`, `NodeMark`, `ErcPin`, `Diagnostic`, `Note`, `NodeLabel`,
-  `CosimPin`, `Port`), the enums `Waveform`, `ModelSource` and `SpicePartInfo`, and the types with
-  constructors (`SpiceElement`, `IndependentSource`, `InputCharacteristics`,
+- **Breaking:** `Netlist::pinless_marks` is replaced by `Netlist::pinless_nets`: each net without
+  part pins (`PinlessNet`) with its label names and ERC marks, so that `erc_allow` applies per net.
+- **Breaking:** `#[non_exhaustive]`, so that later versions can add fields and variants without
+  breaking the API: `ErcMark`, the types the library builds for the user to read (`Netlist`,
+  `Component`, `Net`, `NetNode`, `ErcReport`, `ErcViolation`, `NodeMark`, `ErcPin`, `Diagnostic`,
+  `Note`, `NodeLabel`, `CosimPin`, `Port`), the enums `Waveform`, `ModelSource` and `SpicePartInfo`,
+  and the types with constructors (`SpiceElement`, `IndependentSource`, `InputCharacteristics`,
   `OutputCharacteristics`, `Ngspice`, `SharedNgspice`), which can no longer be built with a struct
   literal. Their fields stay public.
 - ERC follows KiCad 10: the only pin of a labeled net is reported as `LabelSinglePin` (a warning)
   instead of `PinNotConnected` (an error).
-- `Net` has a new public field (`labeled`), and `Component` too (`pins`).
-- `KicadPartInfo::check_pins` and `SpicePartInfo::check` take the pins as `&PartPins` (instead of
-  the pin IDs, and the internal connections for `check`).
+- **Breaking:** `KicadPartInfo::check_pins` and `SpicePartInfo::check` take the pins as `&PartPins`
+  (instead of the pin IDs, and the internal connections for `check`).
 - `Ngspice::default()` runs `ngspice_con` on Windows (the console program of ngspice's Windows
   builds; `ngspice` there is the GUI).
 - On Windows, paths in netlists and ngspice commands (`.include`, the `d_cosim` library, the
@@ -59,48 +58,52 @@ break the API).
   XSPICE `d_cosim` (gcc, Verilator) runs on Windows and macOS; those builds are Linux-only.
 - `Verilator::build` reports a missing shim with `shim_dir` to set, and outside Linux a missing
   program or shim with the note that the build is supported on Linux only.
-- The elements of the output stages in generated subcircuits are named after the pin, as those of
-  `CosimDevice` were: `DigitalDriver` writes `VD_out`, `RO_out`, `VE_out`, `SO_out` (instead of
-  `VD`, `RO`, `VE`, `SO`) with the nodes `out#d`, `out#e`, and the drive source of a `DCosim`
-  output is `ED_<pin>` (instead of `EO_<pin>`). The names of the subcircuits change with them.
-- Instantiating: `CircuitBuilder::instantiate_part` and `instantiate_subcircuit` replace the six
-  `instantiate_*` methods. An explicit name is given by wrapping the part or the generator in
-  `circuit::Named` (`Named("R_LOAD", part)`, instead of `instantiate_part_named` and
+- **Breaking:** the elements of the output stages in generated subcircuits are named after the pin,
+  as those of `CosimDevice` were: `DigitalDriver` writes `VD_out`, `RO_out`, `VE_out`, `SO_out`
+  (instead of `VD`, `RO`, `VE`, `SO`) with the nodes `out#d`, `out#e`, and the drive source of a
+  `DCosim` output is `ED_<pin>` (instead of `EO_<pin>`). The names of the subcircuits change with
+  them.
+- **Breaking:** instantiating: `CircuitBuilder::instantiate_part` and `instantiate_subcircuit`
+  replace the six `instantiate_*` methods. An explicit name is given by wrapping the part or the
+  generator in `circuit::Named` (`Named("R_LOAD", part)`, instead of `instantiate_part_named` and
   `instantiate_subcircuit_named`), and a generator with its own options by
   `SubcircuitGenerator::with_options` (instead of `instantiate_subcircuit_with` and
   `instantiate_subcircuit_named_with`). `instantiate_part` takes an `impl Part` or a
   `Box<dyn Part>`, so `IndependentSource::voltage` / `current`, `DigitalDriver::new`,
   `DigitalLoad::new`, `DCosim::new`, `CosimDevice::new` and `VerilatedModel::part` return the part
   instead of a `Box`, and their builder methods take `self`.
-- Nodes are `circuit::Node` instead of petgraph's `NodeIndex` (no longer re-exported), and the
-  type parameter of `Interface` defaults to it. A node used in a builder that did not create it,
-  such as a node of the circuit around a subcircuit used inside it, is reported as
+- **Breaking:** nodes are `circuit::Node` instead of petgraph's `NodeIndex`, and the type
+  parameter of `Interface` defaults to it. A node used in a builder that did not create it, such
+  as a node of the circuit around a subcircuit used inside it, is reported as
   `CircuitErrorKind::ForeignNode` instead of silently connecting to another node (or panicking).
-  The net graph is no longer public (`NetGraph`, `NodeInfo`, `BuiltCircuit::nets`,
-  `BuiltCircuit::connected_nodes`).
-- `Part::pin_types` is replaced by `Part::extra_pin_types`: ERC takes the pin types from the KiCad
-  pin information and gives these only to pins without it, so the two can no longer disagree. A
-  pin in both is a `CircuitErrorKind::DuplicatePinType`, and a key that is not a pin ID an
-  `UnknownPinId`. `Component::pin_types` holds the types of each component.
-- `Part::get_ref_base_name` is renamed `Part::ref_prefix`, and the `ref_base` key of
+- **Breaking:** `Part::pin_types` is replaced by `Part::extra_pin_types`: ERC takes the pin types
+  from the KiCad pin information and gives these only to pins without it, so the two can no longer
+  disagree. A pin in both is a `CircuitErrorKind::DuplicatePinType`, and a key that is not a pin
+  ID an `UnknownPinId`.
+- **Breaking:** `Part::get_ref_base_name` is renamed `Part::ref_prefix`, and the `ref_base` key of
   `kicad_part!` and `spice_part!` `ref_prefix`.
-- `SubcircuitInstance` is no longer public, and `kicad::PinType` is removed (use `parts::PinType`).
-- `spice_number` (from `spice::sources`) and `spice_value` (from `spice::part`) are in the new
-  module `spice::value`, and re-exported from `spice`.
-- `SimulationError::SharedLibrary` and `SimulationError::Cosimulation` exist only with the
-  `shared-ngspice` feature. `VerilatorError::Command::dir` is an `Option`: `None` for
+- **Breaking:** `spice_number` (from `spice::sources`) and `spice_value` (from `spice::part`) are in
+  the new module `spice::value`, and re-exported from `spice`.
+- **Breaking:** `SimulationError::SharedLibrary` and `SimulationError::Cosimulation` exist only with
+  the `shared-ngspice` feature. `VerilatorError::Command::dir` is an `Option`: `None` for
   `verilator --version`, which does not run in a build directory.
 - `Verilator` caches the builds in `cuprite_wire/verilator` in the user's cache directory
-  (`$XDG_CACHE_HOME`, else `~/.cache`; `%LOCALAPPDATA%` on Windows) instead of
-  `cuprite_wire-verilator` in the system temporary directory, where another user could place
-  libraries that would be loaded. On Unix, the cache directory is created with mode `0700`, and
-  `build` fails with `VerilatorError::Io` if it belongs to another user or is writable by the
-  group or others.
-
+  (`$XDG_CACHE_HOME`, else `~/.cache`; `%LOCALAPPDATA%` on Windows; the system temporary
+  directory only if none of them is set) instead of `cuprite_wire-verilator` in the system
+  temporary directory, where another user could place libraries that would be loaded. On Unix, the cache directory is created with mode `0700`, and
+  `build` fails with `VerilatorError::Io` if it is writable by the group or others, or (on Linux)
+  belongs to another user.
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
 - The API documentation has `# Errors` and `# Panics` sections for the functions that return a
   `Result` or may panic.
+
+### Removed
+
+- **Breaking:** the public net graph (`NetGraph`, `NodeInfo`, `BuiltCircuit::nets`,
+  `BuiltCircuit::connected_nodes`) and the `circuit::NodeIndex` re-export.
+- **Breaking:** `SubcircuitInstance` is no longer public, and `kicad::PinType` is removed (use
+  `parts::PinType`).
 
 ### Fixed
 

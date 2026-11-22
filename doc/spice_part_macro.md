@@ -162,10 +162,8 @@ from what the library (and the files it includes) uses, and record it in the ele
   `ltps`, with `a` appended (`psa`) if such a model is written into the deck (`sim_model: inline`).
   Without `a`, ngspice translates only the included files, so the rest of the deck keeps ngspice's
   own syntax; with it, the whole deck. Other decks run in the default mode.
-- `SpiceDeck::run` sets the mode with a `.spiceinit` file in its run directory (`.options ngbehavior=`
-  in a deck has no effect; without a mode the file unsets it, which keeps out the user's
-  `~/.spiceinit`). The deck notes it after the title, `* requires: set ngbehavior=ps (.spiceinit)`,
-  for running it by hand.
+- `SpiceDeck::run` sets the mode for the run: see "Compatibility mode" in
+  `doc/spice_netlist_usage.md` section 5.
 - KiCad 9 sets the mode in the simulator settings ("Compatibility mode", e.g. "PSpice" or
   "PSpice and LTSpice"). Its modes are `psa`, `lta`, `ltpsa` and `hsa` (strings of KiCad 9's
   eeschema), always for the whole netlist. Choose the matching mode there to simulate the schematic
@@ -201,11 +199,11 @@ definitions into your code. Give the path with an environment variable
 
 cuprite_wire's own tests follow this: the model in `crates/kicad_lib/tests/fixtures/models/vsup01.lib`
 is written for the project in the style of TI's models (CRLF, a Windows-1252 comment, `.LIB`,
-`PARAMS:`, `IF(...)` with `&`). Tests with real models are opt-in:
-`CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
-(`tests/vendor_models.rs` lists the files it expects: TI's TPS3899DL transient model and LMx58/LM2904
+`PARAMS:`, `IF(...)` with `&`). Tests with real models are opt-in (`doc/dev/verifying.md` section 1;
+`tests/vendor_models.rs` lists the files it expects: TI's TPS3899DL transient model and LMx58/LM2904
 model, checked with ngspice 44.2 on 2026-11-18). The TPS3899 model is marked "All rights reserved",
-so it is only read from that directory (e.g. the git-ignored `vendor_models.local/`).
+so it is only read from the directory given by `CUPRITE_VENDOR_MODELS_DIR` (e.g. the git-ignored
+`vendor_models.local/`).
 
 ## 7. Verifying
 

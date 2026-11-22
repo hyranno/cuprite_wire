@@ -181,8 +181,8 @@ trace of the part or the label):
 The run fails with `SimulationError::Ngspice` (the log and the kept run directory) if ngspice exits
 with an error, prints a line starting with `Error`, or reports an analysis that stopped
 (`tran simulation(s) aborted`, e.g. after `Timestep too small` in the middle of a transient
-analysis, which ngspice reports without an `Error` line and with exit status 0). Otherwise the directory is removed when the
-`Simulation` is dropped.
+analysis, which ngspice reports without an `Error` line and with exit status 0). Otherwise the
+directory is removed when the `Simulation` is dropped.
 
 **Compatibility mode.** If models are marked as PSpice or LTspice, the deck needs ngspice's
 `ngbehavior` mode (`SpiceNetlist::ngbehavior()`): `ps`, `lt` or `ltps` when the models are included,
@@ -205,8 +205,9 @@ pins but not a missing DC path; check results against what the circuit can do.
 
 **Shared library.** With the `shared-ngspice` feature, `SharedNgspice::default().run(&deck)` runs
 the same deck in the ngspice shared library (`libngspice.so.0`, `libngspice.0.dylib` on macOS and
-`ngspice.dll` on Windows, loaded at run time; another file with `SharedNgspice { library }`) and returns the same `Simulation`. It is the backend for
-co-simulation with Rust models; plain runs should keep using the CLI:
+`ngspice.dll` on Windows, loaded at run time; another file with `SharedNgspice::new(path)`) and
+returns the same `Simulation`. It is the backend for co-simulation with Rust models; plain runs
+should keep using the CLI:
 
 - The library has global state, so it runs one deck at a time in the process (other threads wait),
   and a crash of ngspice takes the test process down. The CLI runs in parallel and isolated.
@@ -240,7 +241,7 @@ The devcontainer provides `ngspice` and `libngspice0`; the simulation tests need
 
 On Windows, `Ngspice::default()` runs `ngspice_con`, the console program of the Windows builds
 (`ngspice` there is the GUI). The shared library of the official build is `ngspice.dll`; MSYS2's is
-`libngspice-0.dll`, set with `SharedNgspice { library }`. On macOS, Homebrew puts
+`libngspice-0.dll`, set with `SharedNgspice::new`. On macOS, Homebrew puts
 `libngspice.0.dylib` in `/opt/homebrew/lib`, which the dynamic loader does not search by default:
 give the path, or add the directory to `DYLD_FALLBACK_LIBRARY_PATH`. Paths are written into decks
 with `/` on Windows, since ngspice reads `\` in commands as an escape. The output is

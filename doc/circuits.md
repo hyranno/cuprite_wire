@@ -178,7 +178,9 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 |---|---|
 | `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label; a reference prefix (`Part::ref_prefix`) that is empty, ends with a digit, or contains whitespace, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#` or `{` |
 | `DuplicateInstanceName` | the same explicit name twice in one (sub)circuit (the note points at the first) |
-| `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections |
+| `ForeignNode` | a node created by another builder (section 3) |
+| `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections or in the keys of `Part::extra_pin_types` |
+| `DuplicatePinType` | a pin with a type both in its KiCad pin information and in `Part::extra_pin_types` |
 | `DuplicateRef` | two parts with the same reference designator |
 | `DuplicateNetName` | two nets with the same name |
 
