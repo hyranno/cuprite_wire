@@ -124,8 +124,9 @@ circuit.erc_allow(bus, ErcRule::PinToPin);   // outputs connected on purpose
 the net of the reported pin does. Nothing is reported for an `erc_allow` without violations: a
 subcircuit may have them when checked alone but not on the board, or the other way around. The
 rules about nets without part pins (`NoConnectDangling`, `VirtualPinDangling`, `LabelOnlyNet`)
-are allowed in the same way, by an `erc_allow` on that net. `to_netlist` still reports
-`LabelOnlyNet` as a warning, as it does `MultipleNetNames`.
+are allowed in the same way, by an `erc_allow` on that net. An allowed `LabelOnlyNet` or
+`MultipleNetNames` is left out of the ERC report only: `to_netlist` still logs it and keeps it in
+`Netlist::warnings`.
 
 ## 5. Checking a subcircuit
 

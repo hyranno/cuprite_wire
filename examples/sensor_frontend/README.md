@@ -27,8 +27,8 @@ prints it with the place in the source and writes no netlist, e.g. without the p
 
 ```text
 error: net "+5V": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)
-  at examples/sensor_frontend/bias.rs:40:21
-  in subcircuit instantiated at examples/sensor_frontend/main.rs:45:22
+  at examples/sensor_frontend/bias.rs:38:21
+  in subcircuit instantiated at examples/sensor_frontend/main.rs:48:22
 ```
 
 To import the netlist into pcbnew, add these footprint libraries to the footprint library table:

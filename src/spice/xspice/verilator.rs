@@ -55,9 +55,8 @@ pub struct Verilator {
 
 impl Verilator {
     /// The Verilog sources of the design (the top module is found by Verilator, or given with
-    /// `--top-module` in [`Verilator::arg`]). The cache is in `cuprite_wire/verilator` in the
-    /// user's cache directory: `$XDG_CACHE_HOME`, else `$HOME/.cache` (`%LOCALAPPDATA%` on
-    /// Windows), else the system temporary directory.
+    /// `--top-module` in [`Verilator::arg`]). For where the builds are cached, see
+    /// [`Verilator::cache_dir`].
     pub fn new<P: Into<PathBuf>>(sources: impl IntoIterator<Item = P>) -> Self {
         Verilator {
             sources: sources.into_iter().map(Into::into).collect(),
@@ -89,9 +88,13 @@ impl Verilator {
         self
     }
 
-    /// The directory the builds are cached in. The libraries built there are loaded into the
-    /// process, so on Unix it must belong to the user and not be writable by others; it is
-    /// created with mode `0700`.
+    /// The directory the builds are cached in. By default it is `cuprite_wire/verilator` in the
+    /// user's cache directory: `$XDG_CACHE_HOME`, else `$HOME/.cache` (`%LOCALAPPDATA%` on
+    /// Windows), else the system temporary directory.
+    ///
+    /// The libraries built there are loaded into the process, so on Unix it must not be writable
+    /// by the group or others, and on Linux it must belong to the user; it is created with mode
+    /// `0700`.
     pub fn cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cache_dir = dir.into();
         self
@@ -278,9 +281,8 @@ impl Verilator {
     }
 }
 
-/// The user's cache directory from the environment variables (`var`): `$XDG_CACHE_HOME`, else
-/// `$HOME/.cache` (`%LOCALAPPDATA%` on Windows). Relative paths are ignored, as the XDG Base
-/// Directory Specification says.
+/// The user's cache directory (see [`Verilator::cache_dir`]) from the environment variables
+/// (`var`). Relative paths are ignored, as the XDG Base Directory Specification says.
 fn cache_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
     let absolute = |name| var(name).map(PathBuf::from).filter(|p| p.is_absolute());
     if cfg!(windows) {
@@ -539,7 +541,7 @@ impl VerilatedModel {
 pub enum VerilatorError {
     /// A file operation failed, or a program of the build cannot be run.
     Io(io::Error),
-    /// A step of the build failed. Its build directory is kept; other errors remove it.
+    /// A step of the build failed. Its build directory, if any, is kept; other errors remove it.
     Command {
         /// The command line that failed.
         command: String,

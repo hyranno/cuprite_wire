@@ -17,9 +17,10 @@ redistribution (see [Licenses](#licenses)). Refer to them by name and where to d
 ## Development environment
 
 Using the devcontainer in `.devcontainer/` is recommended. It has everything needed to build and
-test: Rust, KiCad 10 (its libraries, `kicad-cli` and pcbnew), and ngspice. It is based on the
-`kicad/kicad:10.0` image. CI runs the tests with KiCad 10 on the same image and with KiCad 9 on
-`rust:trixie` (Debian's KiCad libraries). You may use your own environment or a customized
+test: Rust, KiCad 10 (its libraries, `kicad-cli` and pcbnew), ngspice (the CLI and the shared
+library), gcc/g++ and Verilator for the XSPICE tests, and Xvfb for the pcbnew import check
+(`doc/dev/verifying.md`). It is based on the `kicad/kicad:10.0` image. CI runs the tests with
+KiCad 10 on the same image and with KiCad 9 on `rust:trixie` (Debian's KiCad libraries). You may use your own environment or a customized
 devcontainer instead, as long as the checks below pass.
 
 If a change needs a new tool on the machine, adding it to the devcontainer is recommended, so that
@@ -44,19 +45,14 @@ others get the same environment.
    cargo test -p cuprite_wire_kicad_lib -- --ignored
    ```
 
-   The `shared-ngspice` tests and `cuprite_wire_embedded_hal` need the ngspice shared library
-   (`libngspice0`), and the XSPICE tests `gcc` and Verilator; the devcontainer has them. The
-   XSPICE tests building code models run on Linux only; see `.github/workflows/ci.yml` for how CI
-   installs ngspice on Windows and macOS.
+   The XSPICE tests building code models run on Linux only (see the platform notes in
+   `README.md`); see `.github/workflows/ci.yml` for how CI installs ngspice on Windows and macOS.
 
    The code is formatted with the default rustfmt settings.
 
-4. If a change intentionally alters output, regenerate the expected files and review the diff:
-   `UPDATE_GOLDEN=1 cargo test` for the golden netlists in `tests/golden/`, and
-   `TRYBUILD=overwrite cargo test --test kicad_part_errors` for the compile-error messages.
-5. Tests with real vendor SPICE models are opt-in and not run by CI:
-   `CUPRITE_VENDOR_MODELS_DIR=/path/to/models cargo test --features vendor-models --test vendor_models`
-   (see `doc/spice_part_macro.md`).
+4. If a change intentionally alters output, regenerate the expected files (golden netlists and
+   compile-error messages) and review the diff. The commands, and the opt-in tests with real
+   vendor SPICE models that CI does not run, are in `doc/dev/verifying.md` section 1.
 
 ## Refactoring aids
 
@@ -64,7 +60,7 @@ The devcontainer also has these tools. CI does not run them, and their findings 
 review, not rules.
 
 - `similarity-rs --skip-test -m 10 -t 0.9 .` lists similar functions. Many hits are thin
-  wrappers (`foo` / `foo_named`) or trait implementations in tests; look for the longer ones.
+  wrappers or trait implementations in tests; look for the longer ones.
 - `cargo shear` finds unused or misplaced dependencies and source files that no module includes.
 - `cargo public-api -p cuprite_wire --simplified` lists the public API (it switches to the nightly
   toolchain for rustdoc JSON by itself). Use it to spot items that should not be public. To compare

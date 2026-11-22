@@ -80,7 +80,8 @@ impl Node {
 }
 
 /// Assigns instance names in one (sub)circuit: explicit names are checked for validity and
-/// uniqueness, and automatic names are numbered per base name (`R#1`, `R#2`, ...).
+/// uniqueness, and automatic names are numbered per reference prefix or subcircuit base name
+/// (`R#1`, `R#2`, ...).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NameRegistry {
     counters: HashMap<String, u32>,
@@ -248,7 +249,7 @@ impl<B> CircuitBuilder<B> {
         }
     }
 
-    /// Reports `name` as an [`CircuitErrorKind::InvalidName`] if `check` rejects it.
+    /// Reports `name` as a [`CircuitErrorKind::InvalidName`] if `check` rejects it.
     fn check_name(
         &mut self,
         name: &str,
@@ -860,14 +861,17 @@ mod tests {
     fn test_expand_subcircuits() {
         let mut circuit = CircuitBuilder::new();
         let _subcircuit_pins2 = TestSubcircuitGenerator2::instantiate(&mut circuit);
-        // number of nodes before expansion should be 2 (the interface nodes of the top-level subcircuit)
+        // Before expansion: only the 2 outer nodes of the `TestSubcircuitGenerator2` instance.
         assert_eq!(circuit.nets.node_count(), 2);
         let circuit = circuit.build(&());
-        // we should have 3 part instance (the 1 inside the top-level subcircuit, and the 2 inside the subcircuit instance inside it)
+        // 1 part inside `TestSubcircuitGenerator2` and 2 inside its `TestSubcircuitGenerator1`.
         assert_eq!(circuit.parts.len(), 3);
-        // we should have 2 + 4 + 4 = 10 nodes: 2 from the top-level subcircuit, 4 from the subcircuit instance inside it, and 4 from the part instance inside that
+        // Nodes: the 2 outer ones; 4 inside `TestSubcircuitGenerator2` (the outer nodes of its
+        // `TestSubcircuitGenerator1` instance and the pins of its part); 4 inside
+        // `TestSubcircuitGenerator1` (the pins of its two parts). Interface nodes are not copied.
         assert_eq!(circuit.nets.node_count(), 2 + 4 + 4);
-        // we should have 3 + 4 = 7 edges: 3 from the top-level subcircuit, and 4 from the subcircuit instance inside it
+        // Edges: the 3 connections in `TestSubcircuitGenerator2` and the 4 in
+        // `TestSubcircuitGenerator1`.
         assert_eq!(circuit.nets.edge_count(), 3 + 4);
     }
 

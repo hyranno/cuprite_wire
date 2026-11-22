@@ -1,5 +1,5 @@
 //! Describe electronic circuits in Rust, test them with ERC and SPICE simulations, and hand them to
-//! the KiCad 9 PCB editor (pcbnew) as a netlist.
+//! the KiCad 9 or 10 PCB editor (pcbnew) as a netlist.
 //!
 //! ```
 //! use cuprite_wire::{
@@ -17,8 +17,9 @@
 //! c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
 //! ```
 //!
-//! A circuit is described with a [`circuit::CircuitBuilder`] and built into a
-//! [`netlist::Netlist`], which is exported to KiCad ([`netlist::Netlist::to_kicad`]), to SPICE
+//! A circuit is described with a [`circuit::CircuitBuilder`], built
+//! ([`circuit::CircuitBuilder::build`]) and converted into a [`netlist::Netlist`]
+//! ([`circuit::BuiltCircuit::to_netlist`]), which is exported to KiCad ([`netlist::Netlist::to_kicad`]), to SPICE
 //! ([`netlist::Netlist::to_spice`]) or checked by ERC ([`netlist::Netlist::erc`]).
 //!
 //! # Guides

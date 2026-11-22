@@ -54,8 +54,8 @@ and the instance name** of each part (`doc/circuits.md` section 4), never from r
 designators or source locations. The `tstamps` of a `sheetpath` joins the UUIDs of the subcircuit
 instances with `/`.
 
-An automatic instance name changes when a part of the same kind is added before it, and so does
-its UUID: give explicit names to parts whose placement you want to keep.
+Automatic instance names, and with them the UUIDs, can change when the circuit is edited: see the
+note in `doc/circuits.md` section 4.
 
 ## 4. Output
 

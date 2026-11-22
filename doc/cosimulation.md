@@ -45,7 +45,7 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
   `tran` with a `tstart` and `option interp` are `SimulationError::Cosimulation`. The commands of
   the background thread (`bg_run`, ...) are not supported (`SimulationError::SharedLibrary`).
 - `deck.run_with(DeviceModels::new().with(name, &mut model))` runs the deck in the shared library
-  (`SharedNgspice::default().run_with(...)` for another library file) and returns the same
+  (`SharedNgspice::new(path).run_with(...)` for another library file) and returns the same
   `Simulation` as `run()`. Models are bound to devices by name. Every device needs a model and every
   model a device; a mismatch is `SimulationError::Cosimulation`.
 
@@ -269,12 +269,12 @@ let counter = model.part(&InputCharacteristics::cmos(3.3), &OutputCharacteristic
   program or shim is reported as `VerilatorError::Io` that names it (and `shim_dir`, for the shim).
 - Builds take a few seconds and are cached by the contents of the sources, the arguments, the
   current directory and the version of Verilator, in `cuprite_wire/verilator` in the user's
-  cache directory (`$XDG_CACHE_HOME`, else `~/.cache`; `cache_dir` to change it). The libraries
-  built there are loaded into the process, so on Unix the cache directory is created with mode
-  `0700`, and one that belongs to another user or is writable by the group or others is
-  rejected (`VerilatorError::Io`). The files Verilator read in besides the sources
-  (`` `include ``, `-y`, `-v`, `-f`) are recorded with their size and modification time, and a
-  change to them rebuilds the design.
+  cache directory (`$XDG_CACHE_HOME`, else `~/.cache`, else the system temporary directory;
+  `cache_dir` to change it). The libraries built there are loaded into the process, so on Unix
+  the cache directory is created with mode `0700`, and one that is writable by the group or
+  others, or (on Linux) belongs to another user, is rejected (`VerilatorError::Io`). The files
+  Verilator read in besides the sources (`` `include ``, `-y`, `-v`, `-f`) are recorded with their
+  size and modification time, and a change to them rebuilds the design.
 - Relative paths (the sources, `shim_dir`, `cache_dir` and paths in the arguments) are resolved
   against the current directory.
 - A failed step returns `VerilatorError::Command` with the log, and keeps its build directory;
