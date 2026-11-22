@@ -37,11 +37,15 @@
 
 #![warn(missing_docs, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
-use std::{cell::RefCell, convert::Infallible, rc::Rc};
+use std::{
+    cell::{Ref, RefCell, RefMut},
+    convert::Infallible,
+    rc::Rc,
+};
 
 use cuprite_wire::spice::{
     cosim::{
-        DeviceIo, DeviceModel,
+        DeviceIo, DeviceModel, PinIndex,
         peripherals::{Adc, Periodic, Pwm},
     },
     digital::Level,
@@ -61,18 +65,47 @@ pub trait AdcChannel {
 /// What the pins of a [`Board`] read and set during a step.
 #[derive(Debug, Default)]
 struct State {
-    /// Each input: (pin name, the level read at the step).
-    inputs: Vec<(String, bool)>,
+    inputs: Vec<Input>,
     /// Each ADC: (converter, the code converted at the step).
     adcs: Vec<(Adc, u16)>,
     outputs: Vec<Output>,
     pwms: Vec<Pwm>,
 }
 
+/// A pin of the device, looked up by name once per transient analysis.
+#[derive(Debug)]
+struct Pin {
+    name: String,
+    index: Option<PinIndex>,
+}
+
+impl Pin {
+    fn new(name: &str) -> Self {
+        Pin {
+            name: name.to_string(),
+            index: None,
+        }
+    }
+
+    /// The index of the pin in the device of `io`.
+    #[track_caller]
+    fn index(&mut self, io: &DeviceIo<'_>) -> PinIndex {
+        *self.index.get_or_insert_with(|| io.pin_index(&self.name))
+    }
+}
+
+/// A digital input of a [`Board`].
+#[derive(Debug)]
+struct Input {
+    pin: Pin,
+    /// The level read at the step.
+    high: bool,
+}
+
 /// A digital output of a [`Board`].
 #[derive(Debug)]
 struct Output {
-    pin: String,
+    pin: Pin,
     /// The level set last; `None` until it is set.
     level: Option<Level>,
     /// Whether it was set during the step.
@@ -96,11 +129,11 @@ impl Board {
     /// A digital input (`InputPin`) on a pin with input characteristics.
     pub fn input_pin(&self, pin: &str) -> InputPinHandle {
         let mut state = self.state.borrow_mut();
-        state.inputs.push((pin.to_string(), false));
-        InputPinHandle {
-            state: self.state.clone(),
-            index: state.inputs.len() - 1,
-        }
+        state.inputs.push(Input {
+            pin: Pin::new(pin),
+            high: false,
+        });
+        InputPinHandle(self.handle(state.inputs.len()))
     }
 
     /// A digital output (`OutputPin`, `StatefulOutputPin`) on a pin with output characteristics.
@@ -109,14 +142,11 @@ impl Board {
     pub fn output_pin(&self, pin: &str) -> OutputPinHandle {
         let mut state = self.state.borrow_mut();
         state.outputs.push(Output {
-            pin: pin.to_string(),
+            pin: Pin::new(pin),
             level: None,
             changed: false,
         });
-        OutputPinHandle {
-            state: self.state.clone(),
-            index: state.outputs.len() - 1,
-        }
+        OutputPinHandle(self.handle(state.outputs.len()))
     }
 
     /// A PWM channel (`SetDutyCycle`) on an output pin, with `period` seconds and duty steps of
@@ -131,8 +161,7 @@ impl Board {
         let mut state = self.state.borrow_mut();
         state.pwms.push(Pwm::new(pin, period, 0.0));
         PwmChannel {
-            state: self.state.clone(),
-            index: state.pwms.len() - 1,
+            handle: self.handle(state.pwms.len()),
             max_duty,
         }
     }
@@ -150,9 +179,14 @@ impl Board {
         );
         let mut state = self.state.borrow_mut();
         state.adcs.push((Adc::new(pin, bits, reference), 0));
-        AdcPin {
+        AdcPin(self.handle(state.adcs.len()))
+    }
+
+    /// A handle to the last of `len` pins of a kind.
+    fn handle(&self, len: usize) -> Handle {
+        Handle {
             state: self.state.clone(),
-            index: state.adcs.len() - 1,
+            index: len - 1,
         }
     }
 
@@ -160,8 +194,8 @@ impl Board {
     fn capture(&self, io: &DeviceIo<'_>) {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
-        for (pin, read) in &mut state.inputs {
-            *read = io.read(pin);
+        for input in &mut state.inputs {
+            input.high = io.read(input.pin.index(io));
         }
         for (adc, code) in &mut state.adcs {
             *code = adc.read(io) as u16;
@@ -169,9 +203,15 @@ impl Board {
     }
 
     /// At the first point of a transient analysis, the pins of the device start over (`Low` or
-    /// `HiZ`): drives the outputs that have been set to their levels again.
+    /// `HiZ`): drives the outputs that have been set to their levels again. The pins are looked up
+    /// again in the device of the analysis.
     fn restart(&self) {
-        for output in &mut self.state.borrow_mut().outputs {
+        let mut state = self.state.borrow_mut();
+        for input in &mut state.inputs {
+            input.pin.index = None;
+        }
+        for output in &mut state.outputs {
+            output.pin.index = None;
             output.changed |= output.level.is_some();
         }
     }
@@ -187,7 +227,8 @@ impl Board {
     fn apply(&self, io: &mut DeviceIo<'_>) {
         for output in &mut self.state.borrow_mut().outputs {
             if let (true, Some(level)) = (std::mem::take(&mut output.changed), output.level) {
-                io.set(&output.pin, level);
+                let pin = output.pin.index(io);
+                io.set(pin, level);
             }
         }
     }
@@ -244,12 +285,26 @@ impl<T, F: FnMut(&mut T)> DeviceModel for Firmware<T, F> {
     }
 }
 
-/// A digital input of a [`Board`].
+/// A pin of a kind (the index of its entry in the [`State`] of a [`Board`]).
 #[derive(Debug)]
-pub struct InputPinHandle {
+struct Handle {
     state: Rc<RefCell<State>>,
     index: usize,
 }
+
+impl Handle {
+    fn state(&self) -> Ref<'_, State> {
+        self.state.borrow()
+    }
+
+    fn state_mut(&self) -> RefMut<'_, State> {
+        self.state.borrow_mut()
+    }
+}
+
+/// A digital input of a [`Board`].
+#[derive(Debug)]
+pub struct InputPinHandle(Handle);
 
 impl digital::ErrorType for InputPinHandle {
     type Error = Infallible;
@@ -257,7 +312,7 @@ impl digital::ErrorType for InputPinHandle {
 
 impl digital::InputPin for InputPinHandle {
     fn is_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.state.borrow().inputs[self.index].1)
+        Ok(self.0.state().inputs[self.0.index].high)
     }
 
     fn is_low(&mut self) -> Result<bool, Infallible> {
@@ -267,17 +322,18 @@ impl digital::InputPin for InputPinHandle {
 
 /// A digital output of a [`Board`].
 #[derive(Debug)]
-pub struct OutputPinHandle {
-    state: Rc<RefCell<State>>,
-    index: usize,
-}
+pub struct OutputPinHandle(Handle);
 
 impl OutputPinHandle {
     fn set(&mut self, level: Level) {
-        let mut state = self.state.borrow_mut();
-        let output = &mut state.outputs[self.index];
+        let mut state = self.0.state_mut();
+        let output = &mut state.outputs[self.0.index];
         output.level = Some(level);
         output.changed = true;
+    }
+
+    fn level(&self) -> Option<Level> {
+        self.0.state().outputs[self.0.index].level
     }
 }
 
@@ -299,19 +355,18 @@ impl digital::OutputPin for OutputPinHandle {
 
 impl digital::StatefulOutputPin for OutputPinHandle {
     fn is_set_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.state.borrow().outputs[self.index].level == Some(Level::High))
+        Ok(self.level() == Some(Level::High))
     }
 
     fn is_set_low(&mut self) -> Result<bool, Infallible> {
-        Ok(self.state.borrow().outputs[self.index].level == Some(Level::Low))
+        Ok(self.level() == Some(Level::Low))
     }
 }
 
 /// A PWM channel of a [`Board`].
 #[derive(Debug)]
 pub struct PwmChannel {
-    state: Rc<RefCell<State>>,
-    index: usize,
+    handle: Handle,
     max_duty: u16,
 }
 
@@ -326,24 +381,21 @@ impl pwm::SetDutyCycle for PwmChannel {
 
     fn set_duty_cycle(&mut self, duty: u16) -> Result<(), Infallible> {
         let duty = f64::from(duty.min(self.max_duty)) / f64::from(self.max_duty);
-        self.state.borrow_mut().pwms[self.index].set_duty(duty);
+        self.handle.state_mut().pwms[self.handle.index].set_duty(duty);
         Ok(())
     }
 }
 
 /// An ADC channel of a [`Board`].
 #[derive(Debug)]
-pub struct AdcPin {
-    state: Rc<RefCell<State>>,
-    index: usize,
-}
+pub struct AdcPin(Handle);
 
 impl AdcChannel for AdcPin {
     fn bits(&self) -> u32 {
-        self.state.borrow().adcs[self.index].0.bits()
+        self.0.state().adcs[self.0.index].0.bits()
     }
 
     fn read(&mut self) -> u16 {
-        self.state.borrow().adcs[self.index].1
+        self.0.state().adcs[self.0.index].1
     }
 }
