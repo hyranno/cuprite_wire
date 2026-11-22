@@ -26,6 +26,15 @@ C_pkg 0.5p NA NA
 4 VCC POWER
 5 SEL sel
 7 OUT out
+8 TX+ out
+9 TX- out
+10 RX+ in
+11 RX- in
+[Diff Pin] inv_pin vdiff tdelay_typ tdelay_min tdelay_max
+8 9 NA 0.5n NA NA
+11 10 0.1 NA NA NA
+[Series Pin Mapping] pin_2 model_name
+10 11 term
 [Model Selector] sel
 io I/O
 in Input
@@ -83,6 +92,9 @@ Model_type Output
 [Ramp]
 dV/dt_r 1.98/0.6n NA NA
 dV/dt_f 1.98/0.6n NA NA
+[Model] term
+Model_type Series
+[R Series] 100 NA NA
 [END]
 ";
 
@@ -102,7 +114,7 @@ fn test_of_pin_errors() {
             .to_string()
     };
     assert_eq!(error("Other", "1"), "no [Component] `Other`");
-    assert_eq!(error("Chip", "9"), "component `Chip` has no pin `9`");
+    assert_eq!(error("Chip", "99"), "component `Chip` has no pin `99`");
     assert_eq!(
         error("Chip", "4"),
         "pin `4` has no model: it is a POWER pin"
@@ -168,6 +180,138 @@ fn test_buffer() {
 }
 
 #[test]
+fn test_diff_buffer() {
+    let ibs = ibs();
+    let tx = IbisDiffBuffer::of_pin(&ibs, "Chip", "9", Corner::Typ).unwrap();
+    assert_eq!(tx.p(), &buffer("8"));
+    assert_eq!(tx.n(), &buffer("9"));
+    assert_eq!((tx.vdiff(), tx.tdelay()), (None, 0.5e-9));
+    assert_eq!(tx.termination(), None);
+    // The inverting pin comes first in the row; the termination is mapped from 10 to 11.
+    let rx = IbisDiffBuffer::of_pin(&ibs, "Chip", "10", Corner::Typ).unwrap();
+    assert_eq!(rx.p(), &buffer("11"));
+    assert_eq!((rx.vdiff(), rx.tdelay()), (Some(0.1), 0.0));
+    let term = rx.termination().unwrap();
+    assert_eq!(term.model_name(), "term");
+    assert_eq!(
+        term,
+        &IbisSeries::of_pins(&ibs, "Chip", "11", "10", Corner::Typ).unwrap()
+    );
+    assert!(
+        term.name.starts_with("cuprite_ibis_series_"),
+        "{}",
+        term.name
+    );
+    assert!(term.text.contains("\nRS pin1 pin2 1e2\n"), "{}", term.text);
+
+    assert_eq!(
+        IbisDiffBuffer::of_pin(&ibs, "Chip", "1", Corner::Typ)
+            .unwrap_err()
+            .to_string(),
+        "pin `1` of component `Chip` is not in [Diff Pin]"
+    );
+    assert_eq!(
+        IbisDiffBuffer::of_pin_model(&ibs, "Chip", "8", "in", Corner::Typ)
+            .unwrap_err()
+            .to_string(),
+        "pin `8` has no model: `in` is not a model of `out`"
+    );
+    assert_eq!(
+        IbisSeries::of_pins(&ibs, "Chip", "8", "9", Corner::Typ)
+            .unwrap_err()
+            .to_string(),
+        "component `Chip` has no [Series Pin Mapping] between pins `8` and `9`"
+    );
+    assert_eq!(
+        IbisSeries::new(ibs.model("in").unwrap(), Corner::Typ)
+            .unwrap_err()
+            .to_string(),
+        "model `in`: a series subcircuit needs a `Series` model, not `Input`"
+    );
+}
+
+#[test]
+fn test_diff_driver_subcircuit() {
+    let tx = IbisDiffBuffer::of_pin(&ibs(), "Chip", "8", Corner::Typ).unwrap();
+    let driver = IbisDiffDriver::new(
+        tx.clone(),
+        DigitalSequence::new(Level::Low).at(1e-9, Level::High),
+    );
+    // The inverting pin plays the complement 0.5 ns later.
+    let (start, end) = (1e-9 + 0.5e-9, 1e-9 + 0.5e-9 + 1e-9);
+    assert_eq!(
+        driver.body(),
+        format!(
+            "VKUP kuP ref PWL( 0 0 1e-9 0 2e-9 1 )\n\
+             VKDP kdP ref PWL( 0 1 1e-9 1 2e-9 0 )\n\
+             XBP p ref kuP kdP {0}\n\
+             VKUN kuN ref PWL( 0 1 {start:e} 1 {end:e} 0 )\n\
+             VKDN kdN ref PWL( 0 0 {start:e} 0 {end:e} 1 )\n\
+             XBN n ref kuN kdN {0}\n",
+            tx.p().name
+        )
+    );
+    // A negative delay delays the non-inverting pin instead.
+    let early = IbisDiffDriver::new(
+        IbisDiffBuffer::new(tx.p().clone(), tx.n().clone(), None, -0.5e-9),
+        DigitalSequence::new(Level::Low).at(1e-9, Level::High),
+    );
+    assert!(
+        early
+            .body()
+            .starts_with(&format!("VKUP kuP ref PWL( 0 0 {start:e} 0 {end:e} 1 )\n")),
+        "{}",
+        early.body()
+    );
+    let Some(SpicePartInfo::Elements { elements, .. }) = driver.spice() else {
+        panic!()
+    };
+    assert_eq!(elements[0].nodes, ["p", "n", "gnd"]);
+    // Both buffers and the wrapper.
+    assert_eq!(elements[0].models.len(), 3);
+
+    let rx = IbisDiffBuffer::of_pin(&ibs(), "Chip", "10", Corner::Typ).unwrap();
+    let Some(SpicePartInfo::Elements { elements, .. }) = IbisDiffReceiver::new(rx.clone()).spice()
+    else {
+        panic!()
+    };
+    let ModelSource::Inline { text, .. } = &elements[0].models[3] else {
+        panic!()
+    };
+    assert!(
+        text.contains(&format!(
+            "\nXBP p ref {0}\nXBN n ref {0}\nXT p n {1}\n",
+            rx.p().name,
+            rx.termination().unwrap().name
+        )),
+        "{text}"
+    );
+}
+
+#[test]
+fn test_diff_driver_open_drain() {
+    // An open drain pin releases where it would drive high.
+    let od = buffer("3");
+    let pair = IbisDiffBuffer::new(od.clone(), od.clone(), None, 0.0);
+    let driver = IbisDiffDriver::new(pair, DigitalSequence::new(Level::Low));
+    assert_eq!(
+        driver.body(),
+        format!(
+            "VKUP kuP ref PWL( 0 0 )\nVKDP kdP ref PWL( 0 1 )\nXBP p ref kuP kdP {0}\n\
+             VKUN kuN ref PWL( 0 0 )\nVKDN kdN ref PWL( 0 0 )\nXBN n ref kuN kdN {0}\n",
+            od.name
+        )
+    );
+}
+
+#[test]
+#[should_panic(expected = "the IBIS model `out` (Output) cannot drive HiZ")]
+fn test_diff_driver_hiz_not_driven() {
+    let pair = IbisDiffBuffer::new(buffer("1"), buffer("7"), None, 0.0);
+    let _ = IbisDiffDriver::new(pair, DigitalSequence::new(Level::HiZ));
+}
+
+#[test]
 #[should_panic(expected = "the IBIS model `out` (Output) cannot drive HiZ")]
 fn test_driver_level_not_driven() {
     let _ = IbisDriver::new(
@@ -227,7 +371,11 @@ fn test_driver_subcircuit() {
     assert_eq!(elements[0].models.len(), 1);
 }
 
-on_each_simulator!(simulate_ibis_line, simulate_ibis_open_drain);
+on_each_simulator!(
+    simulate_ibis_line,
+    simulate_ibis_open_drain,
+    simulate_ibis_diff_line
+);
 
 /// The voltage of the line in the table of [`simulate`].
 const LINE: &str = r#"v("/LINE")"#;
@@ -315,4 +463,52 @@ fn simulate_ibis_open_drain(simulator: &dyn Simulator) {
     let low = 3.3 * 82.5 / 1082.5;
     assert!((at(28e-9) - low).abs() < 1e-3, "{}", at(28e-9));
     assert!((at(59e-9) - 3.3).abs() < 0.05, "{}", at(59e-9));
+}
+
+/// The differential driver into the receiver with its 100 ohm termination: the voltage between
+/// the pins is that of the termination between the two 82.5 ohm drivers.
+fn simulate_ibis_diff_line(simulator: &dyn Simulator) {
+    let ibs = ibs();
+    let tx = IbisDiffBuffer::of_pin(&ibs, "Chip", "8", Corner::Typ).unwrap();
+    let rx = IbisDiffBuffer::of_pin(&ibs, "Chip", "10", Corner::Typ).unwrap();
+    let vdiff = rx.vdiff().unwrap();
+    let sent = DigitalSequence::new(Level::Low)
+        .at(5e-9, Level::High)
+        .at(25e-9, Level::Low);
+    let mut circuit = CircuitBuilder::new();
+    let driver = circuit.instantiate_part(IbisDiffDriver::new(tx, sent));
+    let receiver = circuit.instantiate_part(IbisDiffReceiver::new(rx));
+    circuit.connect(driver[IbisDiffDriver::P], receiver[IbisDiffReceiver::P]);
+    circuit.connect(driver[IbisDiffDriver::N], receiver[IbisDiffReceiver::N]);
+    circuit.label(driver[IbisDiffDriver::P], NetLabel::local("P"));
+    circuit.label(driver[IbisDiffDriver::N], NetLabel::local("N"));
+    for gnd in [driver[IbisDiffDriver::GND], receiver[IbisDiffReceiver::GND]] {
+        circuit.label(gnd, NetLabel::global("GND"));
+    }
+    let control = vec![
+        "tran 10p 40e-9".to_string(),
+        r#"wrdata line.txt v("/P") v("/N")"#.to_string(),
+    ];
+    let deck = deck_of(&circuit).control(control);
+    let table = simulator.run(&deck).unwrap().table("line.txt").unwrap();
+    let diff = |t| {
+        table.interpolate(r#"v("/P")"#, t).unwrap() - table.interpolate(r#"v("/N")"#, t).unwrap()
+    };
+    // R_pkg (0.1 ohm) is in series with each driver.
+    let swing = 3.3 * 100.0 / (2.0 * 82.6 + 100.0);
+    assert!((diff(4e-9) + swing).abs() < 1e-3, "{}", diff(4e-9));
+    assert!((diff(20e-9) - swing).abs() < 1e-3, "{}", diff(20e-9));
+    assert!((diff(39e-9) + swing).abs() < 1e-3, "{}", diff(39e-9));
+    // The common mode stays at half the supply.
+    let common = table.interpolate(r#"v("/P")"#, 20e-9).unwrap() - swing / 2.0;
+    assert!((common - 1.65).abs() < 1e-3, "{common}");
+    // The receiver reads high from the time the difference crosses vdiff, after the edge starts.
+    let scale = table.scale();
+    let p = table.column(r#"v("/P")"#).unwrap();
+    let n = table.column(r#"v("/N")"#).unwrap();
+    let rise = (0..scale.len())
+        .find(|&i| p[i] - n[i] > vdiff)
+        .map(|i| scale[i])
+        .unwrap();
+    assert!(rise > 5.5e-9 && rise < 7e-9, "{rise}");
 }

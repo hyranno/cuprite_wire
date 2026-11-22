@@ -67,6 +67,14 @@ fn test_components() {
     approx(p.c_pin.unwrap(), 0.6e-12);
     let p = c.pin("1").unwrap();
     assert_eq!(p.l_pin, None);
+    let [diff] = &c.diff_pins[..] else {
+        panic!("{:?}", c.diff_pins)
+    };
+    assert_eq!((diff.pin.as_str(), diff.inv_pin.as_str()), ("1", "2"));
+    approx(diff.vdiff.unwrap(), 0.1);
+    assert_eq!(diff.tdelay, None);
+    assert_eq!(c.diff_pin("2"), Some(diff));
+    assert_eq!(c.diff_pin("3"), None);
 
     let small = ibs.component("Small").unwrap();
     let pin = small.pin("A1").unwrap();
@@ -215,7 +223,6 @@ fn test_skipped() {
         .collect();
     let expected = [
         ("[Package Model]", 26),
-        ("[Diff Pin]", 34),
         ("[Define Package Model]", 37),
         ("Vmeas", 75),
         ("[Submodel]", 121),
@@ -224,6 +231,88 @@ fn test_skipped() {
     ];
     let expected: Vec<_> = expected.iter().map(|&(n, l)| (n.to_string(), l)).collect();
     assert_eq!(skipped, expected);
+}
+
+#[test]
+fn test_diff_and_series() {
+    let ibs = parse(
+        "\
+[IBIS Ver] 4.0
+[Component] c
+[Pin] signal_name model_name
+1 P in
+2 N in
+3 Q+ in
+4 Q- in
+5 A in
+6 B in
+[Diff Pin] inv_pin vdiff tdelay_typ tdelay_min tdelay_max
+1 2 0.2 1n NA 2n
+3 4 NA
+[Series Pin Mapping] pin_2 model_name function_table_group
+2 1 term
+5 6 switch g1
+[Model] in
+Model_type Input
+[Model] term
+Model_type Series
+[R Series] 100 95 105
+[L Series] 1n NA NA
+[Rl Series] 0.5 NA NA
+[C Series] 1p NA NA
+[Rc Series] 2 NA NA
+[Model] switch
+Model_type Series_switch
+[On]
+[R Series] 5 NA NA
+[Off]
+[R Series] 1M NA NA
+[Series MOSFET]
+Vds = 1.0
+0 0 NA NA
+[END]
+",
+    )
+    .unwrap();
+    let c = ibs.component("c").unwrap();
+    let d = c.diff_pin("1").unwrap();
+    approx(d.vdiff.unwrap(), 0.2);
+    let tdelay = d.tdelay.unwrap();
+    approx(tdelay.typ, 1e-9);
+    assert_eq!(tdelay.min, None);
+    approx(tdelay.get(Corner::Max), 2e-9);
+    let d = c.diff_pin("4").unwrap();
+    assert_eq!((d.vdiff, d.tdelay), (None, None));
+
+    let m = c.series_pin_mapping("1", "2").unwrap();
+    assert_eq!((m.pin1.as_str(), m.model.as_str()), ("2", "term"));
+    assert_eq!(m.function_table_group, None);
+    let m = c.series_pin_mapping("6", "5").unwrap();
+    assert_eq!(m.function_table_group.as_deref(), Some("g1"));
+    assert_eq!(c.series_pin_mapping("1", "3"), None);
+
+    let series = ibs.model("term").unwrap().series;
+    approx(series.r.unwrap().get(Corner::Min), 95.0);
+    approx(series.l.unwrap().typ, 1e-9);
+    approx(series.rl.unwrap().typ, 0.5);
+    approx(series.c.unwrap().typ, 1e-12);
+    assert_eq!(series.lc, None);
+    approx(series.rc.unwrap().typ, 2.0);
+    assert!(!series.nonlinear);
+    // A series switch skips the elements under [On] and [Off].
+    let switch = ibs.model("switch").unwrap();
+    assert_eq!(switch.series, Default::default());
+    let skipped: Vec<_> = ibs.skipped.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        skipped,
+        [
+            "[On]",
+            "[R Series]",
+            "[Off]",
+            "[R Series]",
+            "[Series MOSFET]"
+        ]
+    );
 }
 
 /// Parses a file made of the header and the given lines, and returns the error.
@@ -357,6 +446,46 @@ fn test_errors() {
             "[Model] m\nModel_type Input\n[GND Clamp]\n0 NA 0 0\n1 NA 1 1\n",
             4,
             "the typical column of [GND Clamp] is all NA",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n[Diff Pin]\n1 2 0.1\n",
+            6,
+            "[Diff Pin] names the pin 2, which is not in [Pin]",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n2 B GND\n3 C GND\n[Diff Pin]\n1 2 0.1\n3 1 0.1\n",
+            9,
+            "the pin 1 is in two rows of [Diff Pin]",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n2 B GND\n[Diff Pin]\n1 2\n",
+            7,
+            "a row of [Diff Pin] needs",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n2 B GND\n[Diff Pin]\n1 2 x\n",
+            7,
+            "invalid value `x` in [Diff Pin]",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n2 B GND\n[Series Pin Mapping]\n1 2 s\n",
+            7,
+            "the pin refers to `s`",
+        ),
+        (
+            "[Component] c\n[Pin]\n1 A GND\n[Series Pin Mapping]\n1 2 s\n",
+            6,
+            "[Series Pin Mapping] names the pin 2",
+        ),
+        (
+            "[Diff Pin]\n1 2 0.1\n",
+            2,
+            "[Diff Pin] outside of a [Component]",
+        ),
+        (
+            "[Model] m\nModel_type Series\n[R Series] 1\n[R Series] 2\n",
+            5,
+            "duplicate [R Series]",
         ),
         ("[Model Selector] s\n", 2, "[Model Selector] has no models"),
         (

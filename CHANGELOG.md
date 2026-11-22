@@ -24,7 +24,15 @@ break the API).
   from one with `ku + kd = 1`, as KiCad does), or else are linear from its `[Ramp]`.
   `[Model Selector]`s are read (`IbisFile::pin_model` takes the default or a chosen model),
   `[Model Spec]` gives `Vinl`/`Vinh` by corner, and `Terminator` models (`[Rgnd]`, `[Rpower]`,
-  `[Rac]`, `[Cac]`) are written as receivers. Checked against 20 IBIS files of real devices.
+  `[Rac]`, `[Cac]`) are written as receivers. ECL models are written as their single-ended
+  counterparts, `[Diff Pin]` and `[Series Pin Mapping]` are read, and
+  `cuprite_wire_ibis::spice::series_subcircuit` writes the passive elements of a `Series` model.
+  Checked against 20 IBIS files of real devices.
+- `cuprite_wire::spice::ibis` (feature `ibis`): `IbisDiffBuffer`, `IbisDiffDriver` and
+  `IbisDiffReceiver` (pins `p`, `n`, `gnd`) simulate the differential pairs of `[Diff Pin]`, the
+  inverting pin driven with the complement of the sequence after `tdelay`, with the series
+  termination that `[Series Pin Mapping]` puts between the pins; `IbisSeries` is a `Series`
+  model as a part.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes

@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    Component, Corner, CornerValues, Enable, Error, Header, IbisFile, IvPoint, IvTable, Model,
-    ModelSelector, ModelSpec, ModelType, Package, Pin, PinModel, Polarity, Ramp, SelectorOption,
-    Skipped, Slope, TypMinMax, VtPoint, Waveform,
+    Component, Corner, CornerValues, DiffPin, Enable, Error, Header, IbisFile, IvPoint, IvTable,
+    Model, ModelSelector, ModelSpec, ModelType, Package, Pin, PinModel, Polarity, Ramp,
+    SelectorOption, SeriesElements, SeriesPinMapping, Skipped, Slope, TypMinMax, VtPoint, Waveform,
     lex::{Block, Line, lex},
     number::{parse_number, parse_optional},
 };
@@ -99,6 +99,8 @@ impl<'a> Parser<'a> {
                         manufacturer: None,
                         package: Package::default(),
                         pins: Vec::new(),
+                        diff_pins: Vec::new(),
+                        series_pin_mappings: Vec::new(),
                     });
                     context = Context::Component(self.components.len() - 1);
                 }
@@ -133,16 +135,18 @@ impl<'a> Parser<'a> {
                     self.skip(b);
                     context = Context::Skipped;
                 }
-                ("manufacturer" | "package" | "pin", Context::Component(c)) => {
+                (_, Context::Component(c)) if COMPONENT_KEYWORDS.contains(&name) => {
                     self.component_keyword(c, b)?
                 }
-                ("manufacturer" | "package" | "pin", Context::Top | Context::Model(_)) => {
+                (_, Context::Top | Context::Model(_)) if COMPONENT_KEYWORDS.contains(&name) => {
                     return Err(Error::new(
                         b.line,
                         format!("{} outside of a [Component]", b.keyword),
                     ));
                 }
-                (_, Context::Model(m)) if MODEL_KEYWORDS.contains(&name) => {
+                (_, Context::Model(m))
+                    if MODEL_KEYWORDS.contains(&name) || SERIES_KEYWORDS.contains(&name) =>
+                {
                     self.model_keyword(m, b)?
                 }
                 (_, Context::Top | Context::Component(_)) if MODEL_KEYWORDS.contains(&name) => {
@@ -257,8 +261,114 @@ impl<'a> Parser<'a> {
                 Ok(())
             }
             "pin" => self.pins(c, b),
+            "diff pin" => self.diff_pins(c, b),
+            "series pin mapping" => self.series_pin_mappings(c, b),
             _ => unreachable!(),
         }
+    }
+
+    /// Checks that the pin is in the `[Pin]` of the component.
+    fn check_pin(&self, c: usize, b: &Block, line: usize, pin: &str) -> Result<(), Error> {
+        if self.components[c].pin(pin).is_none() {
+            return Err(Error::new(
+                line,
+                format!("{} names the pin {pin}, which is not in [Pin]", b.keyword),
+            ));
+        }
+        Ok(())
+    }
+
+    fn diff_pins(&mut self, c: usize, b: &Block) -> Result<(), Error> {
+        let mut rows = Vec::new();
+        for l in &b.body {
+            let tokens: Vec<_> = l.tokens().collect();
+            let value = |s: &str| {
+                parse_optional(s).ok_or_else(|| {
+                    Error::new(l.line, format!("invalid value `{s}` in {}", b.keyword))
+                })
+            };
+            let (pin, inv_pin, vdiff, tdelay) = match tokens[..] {
+                [pin, inv_pin, vdiff, ref tdelay @ ..] if tdelay.len() <= 3 => {
+                    (pin, inv_pin, value(vdiff)?, tdelay)
+                }
+                _ => {
+                    return Err(Error::new(
+                        l.line,
+                        format!(
+                            "a row of {} needs a pin, inv_pin and vdiff, optionally followed by \
+                             tdelay_typ, tdelay_min and tdelay_max",
+                            b.keyword
+                        ),
+                    ));
+                }
+            };
+            let mut delays = [None; 3];
+            for (delay, s) in delays.iter_mut().zip(tdelay) {
+                *delay = value(s)?;
+            }
+            for p in [pin, inv_pin] {
+                self.check_pin(c, b, l.line, p)?;
+                if rows.iter().any(|d: &DiffPin| d.pin == p || d.inv_pin == p) {
+                    return Err(Error::new(
+                        l.line,
+                        format!("the pin {p} is in two rows of {}", b.keyword),
+                    ));
+                }
+            }
+            rows.push(DiffPin {
+                pin: pin.to_string(),
+                inv_pin: inv_pin.to_string(),
+                vdiff,
+                tdelay: delays[0].map(|typ| TypMinMax {
+                    typ,
+                    min: delays[1],
+                    max: delays[2],
+                }),
+            });
+        }
+        let component = &mut self.components[c];
+        if !component.diff_pins.is_empty() {
+            return Err(Error::new(b.line, format!("duplicate {}", b.keyword)));
+        }
+        component.diff_pins = rows;
+        Ok(())
+    }
+
+    fn series_pin_mappings(&mut self, c: usize, b: &Block) -> Result<(), Error> {
+        let mut rows = Vec::new();
+        for l in &b.body {
+            let tokens: Vec<_> = l.tokens().collect();
+            let (pin1, pin2, model, group) = match tokens[..] {
+                [pin1, pin2, model] => (pin1, pin2, model, None),
+                [pin1, pin2, model, group] => (pin1, pin2, model, Some(group.to_string())),
+                _ => {
+                    return Err(Error::new(
+                        l.line,
+                        format!(
+                            "a row of {} needs two pins and a model name, optionally followed \
+                             by a function_table_group",
+                            b.keyword
+                        ),
+                    ));
+                }
+            };
+            for p in [pin1, pin2] {
+                self.check_pin(c, b, l.line, p)?;
+            }
+            self.pin_refs.push((l.line, model.to_string()));
+            rows.push(SeriesPinMapping {
+                pin1: pin1.to_string(),
+                pin2: pin2.to_string(),
+                model: model.to_string(),
+                function_table_group: group,
+            });
+        }
+        let component = &mut self.components[c];
+        if !component.series_pin_mappings.is_empty() {
+            return Err(Error::new(b.line, format!("duplicate {}", b.keyword)));
+        }
+        component.series_pin_mappings = rows;
+        Ok(())
     }
 
     fn pins(&mut self, c: usize, b: &Block) -> Result<(), Error> {
@@ -346,6 +456,7 @@ impl<'a> Parser<'a> {
             rising_waveforms: Vec::new(),
             falling_waveforms: Vec::new(),
             model_spec: ModelSpec::default(),
+            series: SeriesElements::default(),
         };
         let mut c_comp_parts = Vec::new();
         for s in subparams(&b.body) {
@@ -423,6 +534,9 @@ impl<'a> Parser<'a> {
 
     fn model_keyword(&mut self, m: usize, b: &Block) -> Result<(), Error> {
         let name = b.name.as_str();
+        if SERIES_KEYWORDS.contains(&name) {
+            return self.series_keyword(m, b);
+        }
         match name {
             "pullup" | "pulldown" | "gnd clamp" | "power clamp" => {
                 let table = iv_table(b)?;
@@ -493,6 +607,37 @@ impl<'a> Parser<'a> {
                 set_once(field, b, value)
             }
         }
+    }
+
+    /// A keyword of the elements of a `Series` model. The other types skip them: a
+    /// `Series_switch` model repeats them under `[On]` and `[Off]`.
+    fn series_keyword(&mut self, m: usize, b: &Block) -> Result<(), Error> {
+        let model = &mut self.models[m];
+        if model.model_type != ModelType::Series {
+            self.skip(b);
+            return Ok(());
+        }
+        let series = &mut model.series;
+        let field = match b.name.as_str() {
+            "r series" => &mut series.r,
+            "l series" => &mut series.l,
+            "rl series" => &mut series.rl,
+            "c series" => &mut series.c,
+            "lc series" => &mut series.lc,
+            "rc series" => &mut series.rc,
+            _ => {
+                series.nonlinear = true;
+                self.skip(b);
+                return Ok(());
+            }
+        };
+        let values: Vec<_> = b
+            .args
+            .split_whitespace()
+            .chain(b.body.iter().flat_map(Line::tokens))
+            .collect();
+        let value = typ_min_max(&values, b.line, &b.keyword, parse_optional)?;
+        set_once(field, b, value)
     }
 
     fn ramp(&mut self, b: &Block) -> Result<Ramp, Error> {
@@ -603,7 +748,29 @@ impl Parser<'_> {
     }
 }
 
-/// The keywords read in the scope of a `[Model]`, besides `[Model]` itself.
+/// The keywords read in the scope of a `[Component]`, besides `[Component]` itself.
+const COMPONENT_KEYWORDS: [&str; 5] = [
+    "manufacturer",
+    "package",
+    "pin",
+    "diff pin",
+    "series pin mapping",
+];
+
+/// The keywords of the elements of a `Series` model, read in the scope of a `[Model]`.
+const SERIES_KEYWORDS: [&str; 8] = [
+    "r series",
+    "l series",
+    "rl series",
+    "c series",
+    "lc series",
+    "rc series",
+    "series current",
+    "series mosfet",
+];
+
+/// The keywords read in the scope of a `[Model]`, besides `[Model]` itself and
+/// [`SERIES_KEYWORDS`].
 const MODEL_KEYWORDS: [&str; 18] = [
     "rgnd",
     "rpower",

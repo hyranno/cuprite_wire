@@ -48,16 +48,18 @@
 //!
 //! - the header: `[IBIS Ver]`, `[Comment Char]`, `[File Name]`, `[File Rev]`, `[Date]`,
 //!   `[Source]`, `[Notes]`, `[Disclaimer]`, `[Copyright]`;
-//! - `[Component]` with `[Manufacturer]`, `[Package]` and `[Pin]`;
+//! - `[Component]` with `[Manufacturer]`, `[Package]`, `[Pin]`, `[Diff Pin]` and
+//!   `[Series Pin Mapping]`;
 //! - `[Model Selector]`;
 //! - `[Model]` with its subparameters (`Model_type`, `Polarity`, `Enable`, `Vinl`, `Vinh`,
 //!   `Vmeas`, `Vref`, `Cref`, `Rref`, `C_comp`, or the `C_comp_*` parts), `[Model Spec]`
 //!   (`Vinl` and `Vinh`), `[Temperature Range]`, `[Voltage Range]`, the references
 //!   (`[Pullup Reference]`, ...), the I-V tables (`[Pullup]`, `[Pulldown]`, `[GND Clamp]`,
 //!   `[POWER Clamp]`), the terminations (`[Rgnd]`, `[Rpower]`, `[Rac]`, `[Cac]`), `[Ramp]`,
-//!   `[Rising Waveform]` and `[Falling Waveform]`.
+//!   `[Rising Waveform]` and `[Falling Waveform]`, and the passive elements of a `Series` model
+//!   (`[R Series]`, `[L Series]`, `[Rl Series]`, `[C Series]`, `[Lc Series]`, `[Rc Series]`).
 //!
-//! Other keywords and subparameters (`[Diff Pin]`, `[Package Model]`, `[Submodel]`,
+//! Other keywords and subparameters (`[Package Model]`, `[Submodel]`, `[Series Current]`,
 //! `[Receiver Thresholds]`, IBIS-AMI, ...) are skipped without an error and listed in
 //! [`IbisFile::skipped`]. The parser is lenient about what does not change the meaning: it does
 //! not check line lengths, keywords may be indented, and the keywords of text (`[Notes]`, ...)
@@ -248,6 +250,10 @@ pub struct Component {
     pub package: Package,
     /// The rows of `[Pin]`, in order.
     pub pins: Vec<Pin>,
+    /// The rows of `[Diff Pin]`: the differential pairs, in order.
+    pub diff_pins: Vec<DiffPin>,
+    /// The rows of `[Series Pin Mapping]`: the series models between pins, in order.
+    pub series_pin_mappings: Vec<SeriesPinMapping>,
 }
 
 impl Component {
@@ -255,6 +261,51 @@ impl Component {
     pub fn pin(&self, name: &str) -> Option<&Pin> {
         self.pins.iter().find(|p| p.name == name)
     }
+
+    /// The differential pair of the pin, which is either its non-inverting or its inverting pin.
+    pub fn diff_pin(&self, pin: &str) -> Option<&DiffPin> {
+        self.diff_pins
+            .iter()
+            .find(|d| d.pin == pin || d.inv_pin == pin)
+    }
+
+    /// The `[Series Pin Mapping]` between the two pins, in either order.
+    pub fn series_pin_mapping(&self, pin1: &str, pin2: &str) -> Option<&SeriesPinMapping> {
+        self.series_pin_mappings
+            .iter()
+            .find(|m| (m.pin1 == pin1 && m.pin2 == pin2) || (m.pin1 == pin2 && m.pin2 == pin1))
+    }
+}
+
+/// A row of `[Diff Pin]`: two pins of a component that form a differential pair. Each pin keeps
+/// the model of its row of `[Pin]`.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct DiffPin {
+    /// The non-inverting pin.
+    pub pin: String,
+    /// The inverting pin.
+    pub inv_pin: String,
+    /// The differential voltage threshold of a receiver, in volts (`None` for `NA`): the input
+    /// is high above `vdiff` and low below `-vdiff`.
+    pub vdiff: Option<f64>,
+    /// The delay of the inverting pin after the non-inverting one when driving, in seconds
+    /// (`None` when `tdelay_typ` is `NA` or absent).
+    pub tdelay: Option<TypMinMax<f64>>,
+}
+
+/// A row of `[Series Pin Mapping]`: a `Series` or `Series_switch` model between two pins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SeriesPinMapping {
+    /// The first pin.
+    pub pin1: String,
+    /// The second pin.
+    pub pin2: String,
+    /// The name of the model.
+    pub model: String,
+    /// `function_table_group` of a series switch, if given.
+    pub function_table_group: Option<String>,
 }
 
 /// The default package parasitics of a component (`[Package]`), for pins without their own.
@@ -369,6 +420,30 @@ pub struct Model {
     pub falling_waveforms: Vec<Waveform>,
     /// `[Model Spec]`: the values of the model that depend on the corner.
     pub model_spec: ModelSpec,
+    /// The elements of a `Series` model (all `None` for the other types).
+    pub series: SeriesElements,
+}
+
+/// The passive elements of a `Series` model between its two pins, which are in parallel:
+/// `[R Series]`, `[L Series]` in series with `[Rl Series]`, and `[C Series]` in series with
+/// `[Lc Series]` and `[Rc Series]`. `None` leaves the element out.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct SeriesElements {
+    /// `[R Series]`, in ohms.
+    pub r: Option<TypMinMax<f64>>,
+    /// `[L Series]`, in henries.
+    pub l: Option<TypMinMax<f64>>,
+    /// `[Rl Series]`: the resistance in series with `[L Series]`, in ohms.
+    pub rl: Option<TypMinMax<f64>>,
+    /// `[C Series]`, in farads.
+    pub c: Option<TypMinMax<f64>>,
+    /// `[Lc Series]`: the inductance in series with `[C Series]`, in henries.
+    pub lc: Option<TypMinMax<f64>>,
+    /// `[Rc Series]`: the resistance in series with `[C Series]`, in ohms.
+    pub rc: Option<TypMinMax<f64>>,
+    /// Whether the model has `[Series Current]` or `[Series MOSFET]`, which are not read.
+    pub nonlinear: bool,
 }
 
 impl Model {
