@@ -73,9 +73,9 @@ Use no features for both, and repeat for the other public crates as needed
   token) and configure its trusted publisher on crates.io; if needed, create the release by hand:
   `gh release create vX.Y.Z --verify-tag --generate-notes`.
 - **Workflow changes**: commits that change `.github/workflows/` cannot be pushed with Claude's
-  token (no workflow scope). Commit on a separate branch and ask the user to push and open the
-  PR. Give `gh pr create` an explicit `--title` / `--body` (not `--fill`), so the body has no
-  commit trailers.
+  token (no workflow scope). Commit on a separate branch, ask the user to push it, and open the
+  PR yourself (creating the PR needs no workflow scope). Give `gh pr create` an explicit
+  `--title` / `--body` (not `--fill`), so the body has no commit trailers.
 - **Old toolchains** (e.g. checking the MSRV):
   `RUSTUP_HOME=$TMPDIR/rustup rustup toolchain install <ver> --profile minimal`
   (allowed domain: `static.rust-lang.org`).
