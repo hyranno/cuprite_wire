@@ -5,11 +5,14 @@ use crate::{
     spice::{
         SpicePartInfo,
         digital::{
-            InputCharacteristics, OutputCharacteristics, SUBCIRCUIT_REFERENCE,
-            assert_subcircuit_pin, internal_node, is_identifier, subcircuit_part, subcircuit_text,
+            InputCharacteristics, OutputCharacteristics, StageSource, assert_subcircuit_pin,
+            is_identifier, subcircuit_part, subcircuit_text,
         },
     },
 };
+
+/// The value of the sources the models set.
+const EXTERNAL: &str = "DC 0 EXTERNAL";
 
 /// A pin of a [`CosimDevice`]: an output, an input, or both (a bidirectional GPIO).
 #[derive(Debug, Clone, PartialEq)]
@@ -169,12 +172,7 @@ impl CosimDevice {
         for pin in &self.pins {
             let p = &pin.name;
             if let Some(output) = &pin.output {
-                let (drive, enable) = (internal_node(p, "d"), internal_node(p, "e"));
-                body.push_str(&format!(
-                    "VD_{p} {drive} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n\
-                     VE_{p} {enable} {SUBCIRCUIT_REFERENCE} DC 0 EXTERNAL\n"
-                ));
-                body.push_str(&output.switch_lines(&format!("_{p}"), &drive, p, &enable));
+                body.push_str(&output.stage_lines(p, 'V', EXTERNAL, Some(EXTERNAL)));
             }
             if let Some(input) = &pin.input {
                 body.push_str(&input.load_lines(p));
@@ -183,10 +181,10 @@ impl CosimDevice {
         subcircuit_text(&self.subcircuit_name(), &ports, &body)
     }
 
-    /// The name of the `EXTERNAL` source of a pin (`VD_p` drive, `VE_p` enable) as the callbacks
-    /// of ngspice give it for the element `element` (`XU1`): `v.xu1.vd_p`.
-    pub(crate) fn source_name(element: &str, kind: char, pin: &str) -> String {
-        format!("v.{element}.v{kind}_{pin}").to_ascii_lowercase()
+    /// The name of the `EXTERNAL` source `source` of a pin (`VD_p` drive, `VE_p` enable) as the
+    /// callbacks of ngspice give it for the element `element` (`XU1`): `v.xu1.vd_p`.
+    pub(crate) fn source_name(element: &str, source: StageSource, pin: &str) -> String {
+        format!("v.{element}.{}", source.element('V', pin)).to_ascii_lowercase()
     }
 }
 
@@ -239,7 +237,10 @@ mod tests {
              CC_adc adc ref 1e-11\n\
              .ends cuprite_cosim_mcu\n"
         );
-        assert_eq!(CosimDevice::source_name("XU1", 'd', "PA0"), "v.xu1.vd_pa0");
+        assert_eq!(
+            CosimDevice::source_name("XU1", StageSource::Drive, "PA0"),
+            "v.xu1.vd_pa0"
+        );
     }
 
     #[test]

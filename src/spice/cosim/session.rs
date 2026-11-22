@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use super::{CosimDevice, CosimInstance, DeviceIo, DeviceModel, Drive, PinState};
 use crate::spice::{
     GROUND,
-    digital::{Level, OutputCharacteristics, Pwl},
+    digital::{Level, OutputCharacteristics, Pwl, StageSource},
     shared::Session,
 };
 
@@ -120,18 +120,11 @@ fn time_error(last: Option<f64>, time: f64) -> Option<String> {
     }
 }
 
-/// Which source of an output pin.
-#[derive(Debug, Clone, Copy)]
-enum Source {
-    Drive,
-    Enable,
-}
-
 /// The models of a run and the state of their devices.
 pub(crate) struct CosimSession<'m> {
     devices: Vec<DeviceRun<'m>>,
     /// `EXTERNAL` source name -> (device, pin, source).
-    sources: HashMap<String, (usize, usize, Source)>,
+    sources: HashMap<String, (usize, usize, StageSource)>,
     /// The index of the `time` vector, in a transient analysis.
     time: Option<usize>,
     /// The time of the last accepted point of the transient analysis.
@@ -182,9 +175,9 @@ impl<'m> CosimSession<'m> {
                 .collect();
             for (pin_index, pin) in pins.iter().enumerate() {
                 if pin.pin.output.is_some() {
-                    for (kind, source) in [('d', Source::Drive), ('e', Source::Enable)] {
+                    for source in [StageSource::Drive, StageSource::Enable] {
                         sources.insert(
-                            CosimDevice::source_name(&instance.element, kind, &pin.pin.name),
+                            CosimDevice::source_name(&instance.element, source, &pin.pin.name),
                             (devices.len(), pin_index, source),
                         );
                     }
@@ -307,8 +300,8 @@ impl Session for CosimSession<'_> {
             return 0.0;
         };
         match source {
-            Source::Drive => waves.drive.value_at(time),
-            Source::Enable => waves.enable.value_at(time),
+            StageSource::Drive => waves.drive.value_at(time),
+            StageSource::Enable => waves.enable.value_at(time),
         }
     }
 }

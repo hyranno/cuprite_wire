@@ -4,10 +4,9 @@ use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
-    sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::spice::SpiceDeck;
+use crate::spice::{SpiceDeck, temp_dir::TempDir};
 
 /// The ngspice program, run in batch mode (`ngspice -b deck.cir`).
 ///
@@ -87,8 +86,8 @@ pub(crate) const DECK_FILE: &str = "deck.cir";
 /// [`ngbehavior_command`] (ngspice reads it from its working directory before the deck; the mode
 /// cannot be set from the deck). The file is always written: without it the CLI would read the
 /// user's `~/.spiceinit` instead.
-pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<RunDir> {
-    let dir = RunDir::create()?;
+pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<TempDir> {
+    let dir = TempDir::new("sim")?;
     fs::write(dir.join(DECK_FILE), deck.to_string())?;
     fs::write(
         dir.join(".spiceinit"),
@@ -117,7 +116,7 @@ pub(crate) fn output_log(output: &std::process::Output) -> String {
 
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
 pub(crate) fn finish_run(
-    dir: RunDir,
+    dir: TempDir,
     log: String,
     succeeded: bool,
 ) -> Result<Simulation, SimulationError> {
@@ -147,62 +146,10 @@ fn is_error_line(line: &str) -> bool {
     word.eq_ignore_ascii_case("error") && !rest.trim_start().starts_with('=')
 }
 
-/// A temporary directory a deck runs in, removed when dropped unless kept.
-#[derive(Debug)]
-pub(crate) struct RunDir {
-    /// `None` once kept.
-    path: Option<PathBuf>,
-}
-
-impl RunDir {
-    /// A new, empty directory in the temporary directory of the system.
-    fn create() -> io::Result<Self> {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        loop {
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "{}-sim-{}-{n}",
-                env!("CARGO_PKG_NAME"),
-                std::process::id()
-            ));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(RunDir { path: Some(path) }),
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e),
-            }
-        }
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        self.path.as_deref().expect("the directory is not kept yet")
-    }
-
-    /// The path of the directory, which is no longer removed.
-    fn keep(mut self) -> PathBuf {
-        self.path.take().expect("the directory is not kept yet")
-    }
-}
-
-impl std::ops::Deref for RunDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Path {
-        self.path()
-    }
-}
-
-impl Drop for RunDir {
-    fn drop(&mut self) {
-        if let Some(path) = &self.path {
-            let _ = fs::remove_dir_all(path);
-        }
-    }
-}
-
 /// The results of a successful run. The run directory is removed when this is dropped.
 #[derive(Debug)]
 pub struct Simulation {
-    dir: RunDir,
+    dir: TempDir,
     log: String,
 }
 
@@ -393,9 +340,7 @@ mod tests {
 
     fn simulation(log: &str) -> Simulation {
         Simulation {
-            dir: RunDir {
-                path: Some(std::env::temp_dir().join("cuprite_wire-no-such-run-dir")),
-            },
+            dir: TempDir::new("sim").unwrap(),
             log: log.to_string(),
         }
     }
@@ -414,16 +359,10 @@ mod tests {
         simulation("Note: ...\n").expect_value("gain");
     }
 
-    /// The run directory is removed when dropped, and kept when ngspice reports an error.
+    /// The run directory is kept when ngspice reports an error.
     #[test]
-    fn test_run_dir_removed() {
-        let dir = RunDir::create().unwrap();
-        let path = dir.to_path_buf();
-        assert!(path.is_dir());
-        drop(dir);
-        assert!(!path.exists());
-
-        let dir = RunDir::create().unwrap();
+    fn test_run_dir_kept_on_error() {
+        let dir = TempDir::new("sim").unwrap();
         let path = dir.to_path_buf();
         let error = finish_run(dir, "Error: no circuit loaded.".into(), true).unwrap_err();
         assert!(matches!(&error, SimulationError::Ngspice { dir, .. } if *dir == path));

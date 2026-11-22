@@ -1,7 +1,6 @@
 //! Tests with models in C, built with `gcc` against the `cosim.h` of ngspice.
 
 use std::{
-    ops::Deref,
     path::{Component, Path, PathBuf},
     process::Command,
 };
@@ -17,38 +16,14 @@ use crate::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics,
         },
+        temp_dir::TempDir,
     },
     test_parts::deck_of,
 };
 
 /// A new empty temporary directory for a test, removed when dropped.
-struct TestDir(PathBuf);
-
-impl TestDir {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "{}-xspice-{}-{name}",
-            env!("CARGO_PKG_NAME"),
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        TestDir(dir)
-    }
-}
-
-impl Deref for TestDir {
-    type Target = Path;
-
-    fn deref(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TestDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+fn test_dir(name: &str) -> TempDir {
+    TempDir::new(&format!("xspice-{name}")).unwrap()
 }
 
 /// An absolute library path, for the tests not loading it.
@@ -60,9 +35,9 @@ const LIBRARY: &str = if cfg!(windows) {
 
 /// Builds `tests/fixtures/xspice/<name>.c` into a shared library in a new temporary directory.
 /// Returns the directory, to be kept while the library is used, and the library.
-fn build_library(name: &str) -> (TestDir, PathBuf) {
+fn build_library(name: &str) -> (TempDir, PathBuf) {
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/xspice");
-    let dir = TestDir::new(name);
+    let dir = test_dir(name);
     let library = dir.join(format!("lib{name}.so"));
     let status = Command::new("gcc")
         .args(["-shared", "-fPIC", "-I/usr/share/ngspice/scripts/src", "-o"])
@@ -101,7 +76,7 @@ fn test_subcircuit() {
              .model cosim d_cosim( simulation=\"{LIBRARY}\" sim_args=[\"design.vvp\"] delay=2e-9 )\n\
              AO_q [q#do] [q#ao] dac_q\n\
              .model dac_q dac_bridge( out_low=0 out_high=3.3 out_undef=1.65 t_rise=2e-9 t_fall=2e-9 )\n\
-             EO_q q#d ref q#ao 0 1\n\
+             ED_q q#d ref q#ao 0 1\n\
              RO_q q#d q 50\n\
              .ends {name}\n"
         )
@@ -314,7 +289,7 @@ fn staging_dirs(cache: &Path) -> Vec<String> {
     ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_error() {
-    let dir = TestDir::new("broken");
+    let dir = test_dir("broken");
     let source = dir.join("broken.v");
     std::fs::write(
         &source,
@@ -339,7 +314,7 @@ fn test_verilator_error() {
     ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_port_error() {
-    let dir = TestDir::new("gnd-port");
+    let dir = test_dir("gnd-port");
     let source = dir.join("buffer.v");
     std::fs::write(
         &source,
@@ -373,7 +348,7 @@ fn write_buffer(dir: &Path) -> PathBuf {
 /// with the note that the build is supported on Linux only).
 #[test]
 fn test_verilator_missing_shim() {
-    let dir = TestDir::new("missing-shim");
+    let dir = test_dir("missing-shim");
     let source = write_buffer(&dir);
     let error = Verilator::new([&source])
         .program(dir.join("no-such-verilator"))
@@ -401,7 +376,7 @@ fn test_verilator_missing_shim() {
 /// supported on Linux only).
 #[test]
 fn test_verilator_missing_program() {
-    let dir = TestDir::new("missing-verilator");
+    let dir = test_dir("missing-verilator");
     let source = write_buffer(&dir);
     let shim = dir.join("shim");
     std::fs::create_dir(&shim).unwrap();
@@ -432,7 +407,7 @@ fn test_verilator_missing_program() {
     ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_latin1_source() {
-    let dir = TestDir::new("latin1");
+    let dir = test_dir("latin1");
     let source = dir.join("buffer.v");
     let mut text = b"// caf\xe9\n".to_vec();
     text.extend_from_slice(b"module buffer(input a, output y);\n  assign y = a;\nendmodule\n");
@@ -452,7 +427,7 @@ fn test_verilator_latin1_source() {
     ignore = "Verilator builds are supported on Linux only"
 )]
 fn test_verilator_relative_paths_and_includes() {
-    let dir = TestDir::new("include");
+    let dir = test_dir("include");
     std::fs::create_dir(dir.join("inc")).unwrap();
     std::fs::write(
         dir.join("top.v"),

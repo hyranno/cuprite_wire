@@ -40,6 +40,34 @@ pub(crate) fn internal_node(pin: &str, role: &str) -> String {
     format!("{pin}#{role}")
 }
 
+/// A source of the output stage of a pin ([`OutputCharacteristics::stage_lines`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StageSource {
+    /// The voltage of the output, at the node `<pin>#d`.
+    Drive,
+    /// Above 0.5 V while the output is driven, below it in high impedance, at `<pin>#e`.
+    Enable,
+}
+
+impl StageSource {
+    fn role(self) -> &'static str {
+        match self {
+            StageSource::Drive => "d",
+            StageSource::Enable => "e",
+        }
+    }
+
+    /// The node of the source: `<pin>#d` or `<pin>#e`.
+    pub(crate) fn node(self, pin: &str) -> String {
+        internal_node(pin, self.role())
+    }
+
+    /// The name of the source, an element of the device `device`: e.g. `VD_<pin>`, `VE_<pin>`.
+    pub(crate) fn element(self, device: char, pin: &str) -> String {
+        format!("{device}{}_{pin}", self.role().to_ascii_uppercase())
+    }
+}
+
 /// Checks the name of a pin added to a generated subcircuit, of a part that has the pins
 /// `existing` and `gnd`: an identifier ([`is_identifier`]), none of the part's pin names
 /// (case-insensitively, as ngspice reads them), and not [`SUBCIRCUIT_REFERENCE`] or [`GROUND`],
@@ -426,22 +454,39 @@ impl OutputCharacteristics {
         self.rise_time.min(self.fall_time)
     }
 
-    /// The lines of the high-impedance switch from the source node `drive` to `out`,
-    /// closed while the voltage of `enable` above [`SUBCIRCUIT_REFERENCE`] is above 0.5 V:
-    /// an `S` element `SO<suffix>` and its model `hiz<suffix>`.
-    pub(crate) fn switch_lines(
+    /// The lines of the output stage of the pin `pin` of a generated subcircuit: the drive
+    /// source `<device>D_<pin>` from [`SUBCIRCUIT_REFERENCE`] to the node `<pin>#d`, with the
+    /// arguments `drive` after its nodes, behind the output resistance `RO_<pin>`. With `enable`
+    /// (the arguments of the voltage source `VE_<pin>` at `<pin>#e`), the resistance is the switch
+    /// `SO_<pin>` (model `hiz_<pin>`) instead, closed while `VE_<pin>` is above 0.5 V and at
+    /// [`HIZ_RESISTANCE`] otherwise.
+    pub(crate) fn stage_lines(
         &self,
-        suffix: &str,
+        pin: &str,
+        device: char,
         drive: &str,
-        out: &str,
-        enable: &str,
+        enable: Option<&str>,
     ) -> String {
-        format!(
-            "SO{suffix} {drive} {out} {enable} {SUBCIRCUIT_REFERENCE} hiz{suffix}\n\
-             .model hiz{suffix} SW( vt=0.5 vh=0 ron={} roff={} )\n",
-            spice_number(self.resistance),
-            spice_number(HIZ_RESISTANCE)
-        )
+        let drive_node = StageSource::Drive.node(pin);
+        let mut text = format!(
+            "{} {drive_node} {SUBCIRCUIT_REFERENCE} {drive}\n",
+            StageSource::Drive.element(device, pin)
+        );
+        let resistance = spice_number(self.resistance);
+        match enable {
+            None => text.push_str(&format!("RO_{pin} {drive_node} {pin} {resistance}\n")),
+            Some(enable) => {
+                let enable_node = StageSource::Enable.node(pin);
+                text.push_str(&format!(
+                    "{} {enable_node} {SUBCIRCUIT_REFERENCE} {enable}\n\
+                     SO_{pin} {drive_node} {pin} {enable_node} {SUBCIRCUIT_REFERENCE} hiz_{pin}\n\
+                     .model hiz_{pin} SW( vt=0.5 vh=0 ron={resistance} roff={} )\n",
+                    StageSource::Enable.element('V', pin),
+                    spice_number(HIZ_RESISTANCE)
+                ));
+            }
+        }
+        text
     }
 
     #[track_caller]
@@ -699,20 +744,13 @@ impl DigitalDriver {
     /// The subcircuit name and definition ([`hashed_subcircuit`]).
     fn subcircuit(&self) -> (String, String) {
         let output = &self.output;
-        let mut body = format!(
-            "VD d {SUBCIRCUIT_REFERENCE} {}\n",
-            self.sequence.voltage_waveform(output).to_spice()
+        let enable = self.sequence.enable_waveform(output.enable_transition());
+        let body = output.stage_lines(
+            Self::OUT,
+            'V',
+            &self.sequence.voltage_waveform(output).to_spice(),
+            enable.map(|enable| enable.to_spice()).as_deref(),
         );
-        match self.sequence.enable_waveform(output.enable_transition()) {
-            None => body.push_str(&format!("RO d out {}\n", spice_number(output.resistance))),
-            Some(enable) => {
-                body.push_str(&format!(
-                    "VE e {SUBCIRCUIT_REFERENCE} {}\n",
-                    enable.to_spice()
-                ));
-                body.push_str(&output.switch_lines("", "d", "out", "e"));
-            }
-        }
         hashed_subcircuit("digital", &[Self::OUT], &body)
     }
 }
@@ -956,8 +994,8 @@ mod tests {
             text,
             format!(
                 ".subckt {name} out ref\n\
-                 VD d ref PWL( 0 0 1e-6 0 {edge_end} 3.3 )\n\
-                 RO d out 50\n\
+                 VD_out out#d ref PWL( 0 0 1e-6 0 {edge_end} 3.3 )\n\
+                 RO_out out#d out 50\n\
                  .ends {name}\n"
             )
         );
@@ -969,9 +1007,9 @@ mod tests {
         assert_ne!(other, name);
         assert!(
             text.contains(&format!(
-                "VE e ref PWL( 0 1 1e-6 1 {edge_end} 0 )\n\
-                     SO d out e ref hiz\n\
-                     .model hiz SW( vt=0.5 vh=0 ron=50 roff=1e9 )\n"
+                "VE_out out#e ref PWL( 0 1 1e-6 1 {edge_end} 0 )\n\
+                     SO_out out#d out out#e ref hiz_out\n\
+                     .model hiz_out SW( vt=0.5 vh=0 ron=50 roff=1e9 )\n"
             )),
             "{text}"
         );

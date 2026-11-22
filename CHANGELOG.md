@@ -56,6 +56,10 @@ break the API).
   XSPICE `d_cosim` (gcc, Verilator) runs on Windows and macOS; those builds are Linux-only.
 - `Verilator::build` reports a missing shim with `shim_dir` to set, and outside Linux a missing
   program or shim with the note that the build is supported on Linux only.
+- The elements of the output stages in generated subcircuits are named after the pin, as those of
+  `CosimDevice` were: `DigitalDriver` writes `VD_out`, `RO_out`, `VE_out`, `SO_out` (instead of
+  `VD`, `RO`, `VE`, `SO`) with the nodes `out#d`, `out#e`, and the drive source of a `DCosim`
+  output is `ED_<pin>` (instead of `EO_<pin>`). The names of the subcircuits change with them.
 
 - Warnings of `to_netlist` are no longer printed to stderr. They are emitted with the `log` crate
   (`log::warn!`) and are still available from `Netlist::warnings` and the ERC report.
