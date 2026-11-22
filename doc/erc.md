@@ -119,9 +119,10 @@ circuit.erc_allow(bus, ErcRule::PinToPin);   // outputs connected on purpose
 
 `SimilarNetNames` is left out if either of the two nets allows it, and `GroundPinNotGround` if
 the net of the reported pin does. Nothing is reported for an `erc_allow` without violations: a
-subcircuit may have them when checked alone but not on the board, or the other way around. The rules about nets without part pins (`NoConnectDangling`,
-`VirtualPinDangling`, `LabelOnlyNet`) cannot be allowed; remove the mark or the label instead, or
-change their severity.
+subcircuit may have them when checked alone but not on the board, or the other way around. The
+rules about nets without part pins (`NoConnectDangling`, `VirtualPinDangling`, `LabelOnlyNet`)
+are allowed in the same way, by an `erc_allow` on that net. `to_netlist` still reports
+`LabelOnlyNet` as a warning, as it does `MultipleNetNames`.
 
 ## 5. Checking a subcircuit
 

@@ -413,6 +413,25 @@ fn test_dangling_virtual_pin_and_label() {
 }
 
 #[test]
+fn test_allow_on_nets_without_part_pins() {
+    let mut circuit = follower_circuit(true);
+    let probe = circuit.add_node();
+    circuit.virtual_pin(probe, PinType::Input, "probe");
+    let label = circuit.add_node();
+    circuit.label(label, NetLabel::local("NOWHERE"));
+    circuit.no_connect(label);
+    // Each mark allows only its own rule on its own net.
+    circuit.erc_allow(probe, ErcRule::VirtualPinDangling);
+    circuit.erc_allow(label, ErcRule::NoConnectDangling);
+    assert_eq!(
+        summary(&erc(&circuit)),
+        vec![warning("net \"/NOWHERE\" has no part pins")]
+    );
+    circuit.erc_allow(label, ErcRule::LabelOnlyNet);
+    erc(&circuit).assert_clean();
+}
+
+#[test]
 fn test_similar_net_names() {
     let mut circuit = follower_circuit(true);
     let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));

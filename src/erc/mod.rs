@@ -26,13 +26,13 @@ use std::{
 pub use subcircuit::check_subcircuit;
 
 use crate::{
-    error::{CircuitWarningKind, Diagnostic},
+    error::{CircuitWarningKind, Diagnostic, write_lines},
     naming::case_insensitive_duplicates,
     netlist::{Net, Netlist},
     parts::PinType,
     trace::Trace,
 };
-use rules::{NetFinding, NetFlags, NetPin, check_net};
+use rules::{NetFinding, NetFlags, NetPin, Stack, check_net};
 
 /// A mark attached to a node for ERC.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -461,13 +461,7 @@ impl ErcReport {
 
 impl fmt::Display for ErcReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, violation) in self.violations.iter().enumerate() {
-            if i > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "{violation}")?;
-        }
-        Ok(())
+        write_lines(f, &self.violations)
     }
 }
 
@@ -483,7 +477,7 @@ impl Netlist {
         let pin_types: Vec<_> = self.components.iter().map(|c| c.part.pin_types()).collect();
         self.check_nets(&pin_types, &mut report);
         self.check_ground_pins(&pin_types, &mut report);
-        self.check_pinless_marks(&mut report);
+        self.check_pinless_nets(&mut report);
         self.check_similar_net_names(&mut report);
         self.report_warnings(&mut report);
         ErcReport {
@@ -523,21 +517,20 @@ impl Netlist {
                 .get(&node.pin_id)
                 .copied()
                 .unwrap_or(PinType::Passive);
-            // Pins not in an internal connection get their own group, after the real ones.
             let component = &self.components[node.component];
-            let group = component
-                .pins
-                .group(&node.pin_id)
-                .unwrap_or(usize::MAX - net_pins.len());
+            let stack = match component.pins.group(&node.pin_id) {
+                Some(group) => Stack::Group {
+                    component: node.component,
+                    group,
+                },
+                None => Stack::Alone,
+            };
             pins.push(ErcPin::Part {
                 ref_name: component.ref_name.clone(),
                 pin_id: node.pin_id.clone(),
                 pin_type,
             });
-            net_pins.push(NetPin {
-                pin_type,
-                stack: Some((node.component, group)),
-            });
+            net_pins.push(NetPin { pin_type, stack });
             traces.push(component.trace.clone());
         }
         for mark in &net.marks {
@@ -548,7 +541,7 @@ impl Netlist {
                 });
                 net_pins.push(NetPin {
                     pin_type: *pin_type,
-                    stack: None,
+                    stack: Stack::Virtual,
                 });
                 traces.push(mark.trace.clone());
             }
@@ -569,7 +562,7 @@ impl Netlist {
             })
             .collect();
         for (index, component) in self.components.iter().enumerate() {
-            let Some(info) = component.part.kicad() else {
+            let Some(info) = &component.kicad else {
                 continue;
             };
             let mut has_ground_net = false;
@@ -614,11 +607,14 @@ impl Netlist {
         }
     }
 
-    /// Reports the marks on nets without part pins.
-    fn check_pinless_marks(&self, report: &mut Reporter) {
-        for mark in &self.pinless_marks {
+    /// Reports the marks on nets without part pins, unless the net allows their rule.
+    fn check_pinless_nets(&self, report: &mut Reporter) {
+        for (net, mark) in self
+            .pinless_nets
+            .iter()
+            .flat_map(|net| net.marks.iter().map(move |mark| (net, mark)))
+        {
             let (rule, kind) = match &mark.mark {
-                // Nothing to allow on a net without part pins.
                 ErcMark::Allow(_) => continue,
                 ErcMark::NoConnect => (
                     ErcRule::NoConnectDangling,
@@ -629,6 +625,9 @@ impl Netlist {
                     ErcViolationKind::VirtualPinDangling { name: name.clone() },
                 ),
             };
+            if allows(&net.marks, rule) {
+                continue;
+            }
             report.push(
                 report.settings.severity(rule),
                 Diagnostic::new(kind, mark.trace.clone()),
@@ -667,7 +666,13 @@ impl Netlist {
                     }
                     ErcRule::MultipleNetNames
                 }
-                CircuitWarningKind::LabelOnlyNet { .. } => ErcRule::LabelOnlyNet,
+                CircuitWarningKind::LabelOnlyNet { names } => {
+                    let net = self.pinless_nets.iter().find(|net| &net.names == names);
+                    if net.is_some_and(|net| allows(&net.marks, ErcRule::LabelOnlyNet)) {
+                        continue;
+                    }
+                    ErcRule::LabelOnlyNet
+                }
             };
             let diagnostic = Diagnostic {
                 kind: ErcViolationKind::Netlist(warning.kind.clone()),
@@ -706,6 +711,13 @@ impl Reporter<'_> {
         let name = net.name.clone();
         // The severity given by the pin map, for pin conflicts.
         let mut map_severity = None;
+        // A violation about one pin, traced to it.
+        let at_pin = |pin: usize, kind: fn(String, ErcPin) -> ErcViolationKind| {
+            Diagnostic::new(
+                kind(net.name.clone(), pins[pin].clone()),
+                traces[pin].clone(),
+            )
+        };
         let (rule, diagnostic) = match finding {
             NetFinding::PinToPin {
                 pin,
@@ -725,36 +737,24 @@ impl Reporter<'_> {
                         .with_note(note, traces[other].clone()),
                 )
             }
-            NetFinding::PinNotConnected { pin } => {
-                let kind = ErcViolationKind::PinNotConnected {
-                    net: name,
-                    pin: pins[pin].clone(),
-                };
-                (
-                    ErcRule::PinNotConnected,
-                    Diagnostic::new(kind, traces[pin].clone()),
-                )
-            }
-            NetFinding::PinNotDriven { pin } => {
-                let kind = ErcViolationKind::PinNotDriven {
-                    net: name,
-                    pin: pins[pin].clone(),
-                };
-                (
-                    ErcRule::PinNotDriven,
-                    Diagnostic::new(kind, traces[pin].clone()),
-                )
-            }
-            NetFinding::PowerPinNotDriven { pin } => {
-                let kind = ErcViolationKind::PowerPinNotDriven {
-                    net: name,
-                    pin: pins[pin].clone(),
-                };
-                (
-                    ErcRule::PowerPinNotDriven,
-                    Diagnostic::new(kind, traces[pin].clone()),
-                )
-            }
+            NetFinding::PinNotConnected { pin } => (
+                ErcRule::PinNotConnected,
+                at_pin(pin, |net, pin| ErcViolationKind::PinNotConnected {
+                    net,
+                    pin,
+                }),
+            ),
+            NetFinding::PinNotDriven { pin } => (
+                ErcRule::PinNotDriven,
+                at_pin(pin, |net, pin| ErcViolationKind::PinNotDriven { net, pin }),
+            ),
+            NetFinding::PowerPinNotDriven { pin } => (
+                ErcRule::PowerPinNotDriven,
+                at_pin(pin, |net, pin| ErcViolationKind::PowerPinNotDriven {
+                    net,
+                    pin,
+                }),
+            ),
             NetFinding::LabelSinglePin { pin } => {
                 let kind = ErcViolationKind::LabelSinglePin {
                     net: name,
@@ -804,11 +804,14 @@ fn is_ground_name(name: &str) -> bool {
         || upper == "VSSA"
 }
 
+/// Whether `marks` has an [`ErcMark::Allow`] mark for `rule`.
+fn allows(marks: &[NodeMark], rule: ErcRule) -> bool {
+    marks.iter().any(|mark| mark.mark == ErcMark::Allow(rule))
+}
+
 impl Net {
     /// Whether the net has an [`ErcMark::Allow`] mark for `rule`.
     fn allows(&self, rule: ErcRule) -> bool {
-        self.marks
-            .iter()
-            .any(|mark| mark.mark == ErcMark::Allow(rule))
+        allows(&self.marks, rule)
     }
 }

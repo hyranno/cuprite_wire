@@ -8,7 +8,7 @@ use std::{
 };
 
 use dyn_clone::DynClone;
-use petgraph::graph::NodeIndex;
+use petgraph::{graph::NodeIndex, unionfind::UnionFind};
 
 use crate::{kicad::KicadPartInfo, naming::HierPath, spice::SpicePartInfo, trace::Trace};
 
@@ -110,15 +110,8 @@ impl PartPins {
             }
         }
 
-        // Union-find over the pin indices; `None` for pins in no group.
-        let mut parent: Vec<Option<usize>> = vec![None; ids.len()];
-        fn root(parent: &mut [Option<usize>], mut pin: usize) -> usize {
-            while let Some(next) = parent[pin].filter(|&next| next != pin) {
-                parent[pin] = parent[next];
-                pin = next;
-            }
-            pin
-        }
+        let mut union_find = UnionFind::<usize>::new(ids.len());
+        let mut grouped = vec![false; ids.len()];
         let mut unknown_ids = Vec::new();
         for group in internal_connections {
             let mut first = None;
@@ -127,22 +120,18 @@ impl PartPins {
                     unknown_ids.push(id.clone());
                     continue;
                 };
-                parent[pin].get_or_insert(pin);
-                let pin_root = root(&mut parent, pin);
-                match first {
-                    None => first = Some(pin_root),
-                    Some(first) => parent[pin_root] = Some(first),
-                }
+                grouped[pin] = true;
+                union_find.union(*first.get_or_insert(pin), pin);
             }
         }
         // Number the groups in the order of their first pins.
         let mut number: HashMap<usize, usize> = HashMap::new();
         let groups = (0..ids.len())
             .map(|pin| {
-                parent[pin]?;
-                let pin_root = root(&mut parent, pin);
-                let next = number.len();
-                Some(*number.entry(pin_root).or_insert(next))
+                grouped[pin].then(|| {
+                    let next = number.len();
+                    *number.entry(union_find.find(pin)).or_insert(next)
+                })
             })
             .collect();
         PartPins {
@@ -195,7 +184,6 @@ impl PartPins {
 #[derive(Debug, Clone)]
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
-    pub ref_number: u32,
     pub pin_mapping: HashMap<String, NodeIndex>,
     /// Explicit or automatic (`<ref base name>#<n>`) instance name, unique in its subcircuit instance.
     pub name: String,
@@ -208,10 +196,6 @@ impl PartInstance {
     /// Deterministic UUID derived from the path and the instance name.
     pub fn uuid(&self) -> uuid::Uuid {
         self.path.part_uuid(&self.name)
-    }
-
-    pub fn ref_name(&self) -> String {
-        format!("{}{}", self.part.get_ref_base_name(), self.ref_number)
     }
 }
 

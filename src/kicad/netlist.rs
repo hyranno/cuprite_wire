@@ -58,7 +58,7 @@ impl Netlist {
     /// the trace of the component.
     pub fn to_kicad(&self) -> Result<KicadNetlist, CircuitErrors> {
         let mut errors = Vec::new();
-        let infos: Vec<Option<KicadPartInfo>> = self
+        let infos: Vec<Option<&KicadPartInfo>> = self
             .components
             .iter()
             .map(|component| check_component(component, &mut errors))
@@ -69,7 +69,7 @@ impl Netlist {
             .iter()
             .zip(&infos)
             .filter_map(|(component, info)| {
-                let info = info.as_ref()?;
+                let info = (*info)?;
                 Some(KicadComponent {
                     ref_name: component.ref_name.clone(),
                     value: component.part.value(),
@@ -155,9 +155,12 @@ impl Netlist {
 }
 
 /// Returns the KiCad information of a component if it can be exported.
-fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Option<KicadPartInfo> {
+fn check_component<'a>(
+    component: &'a Component,
+    errors: &mut Vec<CircuitError>,
+) -> Option<&'a KicadPartInfo> {
     let ref_name = || component.ref_name.clone();
-    let check = |info: &KicadPartInfo| {
+    let check = |info: &&KicadPartInfo| {
         let footprint = info
             .footprint
             .is_none()
@@ -184,7 +187,7 @@ fn check_component(component: &Component, errors: &mut Vec<CircuitError>) -> Opt
         footprint.into_iter().chain(pins).collect()
     };
     component.checked_info(
-        component.part.kicad(),
+        component.kicad.as_ref(),
         |ref_name| CircuitErrorKind::KicadUnsupported { ref_name },
         check,
         errors,

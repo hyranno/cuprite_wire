@@ -27,8 +27,9 @@ pub struct Netlist {
     pub components: Vec<Component>,
     /// The nets with at least one part pin.
     pub nets: Vec<Net>,
-    /// ERC marks on nets without part pins (such nets are not in [`Netlist::nets`]).
-    pub pinless_marks: Vec<NodeMark>,
+    /// The groups of connected nodes without part pins that have labels or ERC marks (they are
+    /// not in [`Netlist::nets`]).
+    pub pinless_nets: Vec<PinlessNet>,
     /// The warnings of the conversion (several names on a net, labels on nets without part pins).
     pub warnings: Vec<CircuitWarning>,
 }
@@ -43,6 +44,8 @@ pub struct Component {
     pub part: Box<dyn Part>,
     /// The pin structure of the part.
     pub pins: PartPins,
+    /// [`Part::kicad`] of the part, made once.
+    pub(crate) kicad: Option<KicadPartInfo>,
     /// Path of the subcircuit instance containing the component.
     pub path: HierPath,
     /// Derived from the path and the instance name, so it does not change between builds.
@@ -92,6 +95,16 @@ pub struct Net {
     pub marks: Vec<NodeMark>,
 }
 
+/// A group of connected nodes without part pins, which is not a [`Net`] but is checked by ERC.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PinlessNet {
+    /// The names its labels give it, sorted (as in [`CircuitWarningKind::LabelOnlyNet`]).
+    pub names: Vec<String>,
+    /// ERC marks attached to it.
+    pub marks: Vec<NodeMark>,
+}
+
 /// A part pin on a [`Net`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -121,8 +134,8 @@ impl BuiltCircuit {
         let kicad_infos: Vec<_> = components
             .iter()
             .map(|c| {
-                c.part
-                    .kicad()
+                c.kicad
+                    .as_ref()
                     .filter(|info| info.check_pins(&c.pins).is_empty())
             })
             .collect();
@@ -130,11 +143,11 @@ impl BuiltCircuit {
         let unnamed = |nodes: &[NetNode]| unnamed_net_name(nodes, &components, &kicad_infos);
 
         let mut nets = Vec::new();
-        let mut pinless_marks = Vec::new();
+        let mut pinless_nets = Vec::new();
         for group in self.connected_nodes() {
             match self.resolve_net(&group, &pins_by_node, unnamed, &mut warnings) {
                 Ok(net) => nets.push(net),
-                Err(marks) => pinless_marks.extend(marks),
+                Err(pinless) => pinless_nets.extend(pinless),
             }
         }
         nets.sort_by(|a, b| natural_cmp(&a.name, &b.name));
@@ -153,7 +166,7 @@ impl BuiltCircuit {
             Netlist {
                 components,
                 nets,
-                pinless_marks,
+                pinless_nets,
                 warnings,
             },
         )
@@ -162,7 +175,7 @@ impl BuiltCircuit {
     /// Components in the order of the netlist, after checking the parts,
     /// and the component index of each part.
     fn sorted_components(&self, errors: &mut Vec<CircuitError>) -> (Vec<Component>, Vec<usize>) {
-        let ref_names: Vec<_> = self.parts.iter().map(|part| part.ref_name()).collect();
+        let ref_names = &self.ref_names;
         let sheet_rank = sheet_order(self.parts.iter().map(|part| &part.path));
         let mut order: Vec<usize> = (0..self.parts.len()).collect();
         order.sort_by(|&a, &b| {
@@ -182,6 +195,7 @@ impl BuiltCircuit {
                     ref_name: ref_names[i].clone(),
                     part: part.part.clone(),
                     pins: PartPins::of(part.part.as_ref()),
+                    kicad: part.part.kicad(),
                     path: part.path.clone(),
                     uuid: part.uuid(),
                     trace: part.trace.clone(),
@@ -218,14 +232,14 @@ impl BuiltCircuit {
 
     /// The net of a group of connected nodes, named by its labels or by `unnamed`. Reports a
     /// warning if the net has several names. A group without part pins is not a net: its labels
-    /// are reported, and its ERC marks are returned as the error.
+    /// are reported, and it is returned as the error if it has labels or ERC marks.
     fn resolve_net(
         &self,
         group: &[NodeIndex],
         pins_by_node: &HashMap<NodeIndex, NetNode>,
         unnamed: impl Fn(&[NetNode]) -> String,
         warnings: &mut Vec<CircuitWarning>,
-    ) -> Result<Net, Vec<NodeMark>> {
+    ) -> Result<Net, Option<PinlessNet>> {
         let marks: Vec<NodeMark> = group
             .iter()
             .flat_map(|&node| self.nets[node].marks.iter().cloned())
@@ -239,15 +253,17 @@ impl BuiltCircuit {
             .flat_map(|&node| &self.nets[node].labels)
             .collect();
         if nodes.is_empty() {
+            let names = distinct_names(&labels);
             if let Some(first) = labels.first() {
                 warnings.push(CircuitWarning::new(
                     CircuitWarningKind::LabelOnlyNet {
-                        names: distinct_names(&labels),
+                        names: names.clone(),
                     },
                     first.trace.clone(),
                 ));
             }
-            return Err(marks);
+            let kept = !names.is_empty() || !marks.is_empty();
+            return Err(kept.then_some(PinlessNet { names, marks }));
         }
         nodes.sort();
 
@@ -386,13 +402,13 @@ fn distinct_names(labels: &[&NodeLabel]) -> Vec<String> {
 fn unnamed_net_name(
     nodes: &[NetNode],
     components: &[Component],
-    kicad_infos: &[Option<KicadPartInfo>],
+    kicad_infos: &[Option<&KicadPartInfo>],
 ) -> String {
     let unconnected = nodes.len() == 1;
     let prefix = if unconnected { "unconnected" } else { "Net" };
     // (written with the pad, net name) of a pin with KiCad information.
     let candidate = |node: &NetNode| {
-        let info = kicad_infos[node.component].as_ref()?;
+        let info = kicad_infos[node.component]?;
         let pin = info.pins.get(&node.pin_id)?;
         let ref_name = escape_name(&components[node.component].ref_name);
         let pad = format!("Pad{}", escape_name(&pin.pad));
