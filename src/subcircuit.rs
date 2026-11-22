@@ -107,6 +107,19 @@ pub trait SubcircuitGenerator: Debug + Clone {
     fn base_name(&self) -> String {
         short_type_name::<Self>()
     }
+
+    /// This generator, for a circuit built with options of another type `B`:
+    /// `options_for_generator` derives its options from them. Pass the result to
+    /// [`CircuitBuilder::instantiate_subcircuit`].
+    fn with_options<B, F>(self, options_for_generator: F) -> WithOptions<Self, F>
+    where
+        F: Fn(&B) -> Self::Options + Clone,
+    {
+        WithOptions {
+            generator: self,
+            options_for_generator,
+        }
+    }
 }
 
 /// The nodes of `interface` in order.
@@ -174,17 +187,103 @@ where
     }
 }
 
+mod bound {
+    use super::ErasedSubcircuitGenerator;
+
+    /// A generator bound to the options of the circuit it is instantiated in (`B`), with its base
+    /// name. Not nameable outside the crate.
+    pub struct BoundGenerator<B> {
+        pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
+        pub(crate) base_name: String,
+    }
+}
+pub(crate) use bound::BoundGenerator;
+
+impl<B> BoundGenerator<B> {
+    fn new<G, F>(generator: G, options_for_generator: F) -> Self
+    where
+        B: 'static,
+        G: SubcircuitGenerator + 'static,
+        F: Fn(&B) -> G::Options + Clone + 'static,
+    {
+        BoundGenerator {
+            base_name: generator.base_name(),
+            generator: Box::new(BoundSubcircuitGenerator {
+                generator,
+                options_for_generator,
+                _builder_options: PhantomData,
+            }),
+        }
+    }
+}
+
+/// What [`CircuitBuilder::instantiate_subcircuit`] takes in a circuit built with options of type
+/// `B`: a [`SubcircuitGenerator`] with the options `B`, one with its own options
+/// ([`SubcircuitGenerator::with_options`]), or either [`Named`](crate::circuit::Named).
+pub trait IntoSubcircuit<B> {
+    /// The interface of the subcircuit.
+    type Interface: Interface;
+
+    /// The explicit instance name, if any, and the bound generator.
+    #[doc(hidden)]
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>);
+}
+
+impl<B, G> IntoSubcircuit<B> for G
+where
+    B: Clone + 'static,
+    G: SubcircuitGenerator<Options = B> + 'static,
+{
+    type Interface = G::Interface;
+
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>) {
+        (None, BoundGenerator::new(self, B::clone))
+    }
+}
+
+/// A [`SubcircuitGenerator`] whose options are derived from the options of the circuit it is
+/// instantiated in, made by [`SubcircuitGenerator::with_options`].
+#[derive(Clone)]
+pub struct WithOptions<G, F> {
+    generator: G,
+    options_for_generator: F,
+}
+
+impl<G: Debug, F> Debug for WithOptions<G, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WithOptions")
+            .field("generator", &self.generator)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<B, G, F> IntoSubcircuit<B> for WithOptions<G, F>
+where
+    B: 'static,
+    G: SubcircuitGenerator + 'static,
+    F: Fn(&B) -> G::Options + Clone + 'static,
+{
+    type Interface = G::Interface;
+
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>) {
+        (
+            None,
+            BoundGenerator::new(self.generator, self.options_for_generator),
+        )
+    }
+}
+
 /// A subcircuit instantiated in a [`CircuitBuilder`], expanded when the circuit is built with
 /// options of type `B`.
-pub struct SubcircuitInstance<B = ()> {
+pub(crate) struct SubcircuitInstance<B = ()> {
     pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
     /// The nodes in the circuit around the instance, connected to the subcircuit's interface nodes
     /// in order.
-    pub interface: Vec<NodeIndex>,
+    pub(crate) interface: Vec<NodeIndex>,
     /// Explicit or automatic instance name.
-    pub name: String,
+    pub(crate) name: String,
     /// Where the subcircuit was instantiated.
-    pub location: Loc,
+    pub(crate) location: Loc,
 }
 
 impl<B> Clone for SubcircuitInstance<B> {
@@ -205,32 +304,6 @@ impl<B> Debug for SubcircuitInstance<B> {
             .field("name", &self.name)
             .field("location", &self.location)
             .finish_non_exhaustive()
-    }
-}
-
-impl<B> SubcircuitInstance<B> {
-    pub(crate) fn new<G, F>(
-        generator: G,
-        options_for_generator: F,
-        interface: Vec<NodeIndex>,
-        name: String,
-        location: Loc,
-    ) -> Self
-    where
-        B: 'static,
-        G: SubcircuitGenerator + 'static,
-        F: Fn(&B) -> G::Options + Clone + 'static,
-    {
-        Self {
-            generator: Box::new(BoundSubcircuitGenerator {
-                generator,
-                options_for_generator,
-                _builder_options: PhantomData,
-            }),
-            interface,
-            name,
-            location,
-        }
     }
 }
 

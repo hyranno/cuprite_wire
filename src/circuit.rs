@@ -18,7 +18,7 @@ use crate::{
         check_label_name, check_ref_prefix,
     },
     parts::{Part, PartInstance, PinType},
-    subcircuit::{Interface, SubcircuitGenerator, SubcircuitInstance, interface_nodes},
+    subcircuit::{BoundGenerator, Interface, IntoSubcircuit, SubcircuitInstance, interface_nodes},
     trace::{Loc, Trace},
 };
 
@@ -284,129 +284,53 @@ impl<B> CircuitBuilder<B> {
         self.nets[node].marks.push(NodeMark { mark, trace });
     }
 
-    /// Instantiates a subcircuit with an automatic name (`<base name>#<n>`) and returns its
-    /// interface: new nodes in this circuit, connected to the subcircuit's interface nodes.
+    /// Instantiates a subcircuit and returns its interface: new nodes in this circuit, connected
+    /// to the subcircuit's interface nodes.
     ///
-    /// The subcircuit is generated with the options this circuit is built with; use
-    /// [`Self::instantiate_subcircuit_with`] for a generator with other options.
+    /// `subcircuit` is a [`SubcircuitGenerator`], generated with the options this circuit is built
+    /// with, or a generator with its own options ([`SubcircuitGenerator::with_options`]). Its
+    /// instance name is automatic (`<base name>#<n>`), or explicit with [`Named`]: the name is
+    /// used in hierarchical net names (`/name/LABEL`) and as the key of the deterministic UUIDs of
+    /// the parts inside it.
     #[track_caller]
-    pub fn instantiate_subcircuit<G>(&mut self, generator: G) -> G::Interface
-    where
-        B: Clone + 'static,
-        G: SubcircuitGenerator<Options = B> + 'static,
-    {
-        self.instantiate_subcircuit_impl(None, generator, B::clone)
-    }
-
-    /// Instantiates a subcircuit with an explicit name, used in hierarchical net names
-    /// (`/name/LABEL`) and as the key of the deterministic UUIDs of the parts inside it.
-    /// Returns its interface like [`Self::instantiate_subcircuit`].
-    #[track_caller]
-    pub fn instantiate_subcircuit_named<G>(&mut self, name: &str, generator: G) -> G::Interface
-    where
-        B: Clone + 'static,
-        G: SubcircuitGenerator<Options = B> + 'static,
-    {
-        self.instantiate_subcircuit_impl(Some(name), generator, B::clone)
-    }
-
-    /// [`Self::instantiate_subcircuit`] for a generator with its own options:
-    /// `options_for_generator` derives them from the options this circuit is built with.
-    #[track_caller]
-    pub fn instantiate_subcircuit_with<G, F>(
-        &mut self,
-        generator: G,
-        options_for_generator: F,
-    ) -> G::Interface
-    where
-        B: 'static,
-        G: SubcircuitGenerator + 'static,
-        F: Fn(&B) -> G::Options + Clone + 'static,
-    {
-        self.instantiate_subcircuit_impl(None, generator, options_for_generator)
-    }
-
-    /// [`Self::instantiate_subcircuit_named`] for a generator with its own options, like
-    /// [`Self::instantiate_subcircuit_with`].
-    #[track_caller]
-    pub fn instantiate_subcircuit_named_with<G, F>(
-        &mut self,
-        name: &str,
-        generator: G,
-        options_for_generator: F,
-    ) -> G::Interface
-    where
-        B: 'static,
-        G: SubcircuitGenerator + 'static,
-        F: Fn(&B) -> G::Options + Clone + 'static,
-    {
-        self.instantiate_subcircuit_impl(Some(name), generator, options_for_generator)
-    }
-
-    #[track_caller]
-    fn instantiate_subcircuit_impl<G, F>(
-        &mut self,
-        name: Option<&str>,
-        generator: G,
-        options_for_generator: F,
-    ) -> G::Interface
-    where
-        B: 'static,
-        G: SubcircuitGenerator + 'static,
-        F: Fn(&B) -> G::Options + Clone + 'static,
-    {
+    pub fn instantiate_subcircuit<S: IntoSubcircuit<B>>(&mut self, subcircuit: S) -> S::Interface {
         let location = Location::caller();
-        let base_name = generator.base_name();
+        let (name, bound) = subcircuit.into_named_subcircuit();
         if name.is_none() {
-            self.check_name(&base_name, check_base_name, Trace::new(location));
+            self.check_name(&bound.base_name, check_base_name, Trace::new(location));
         }
-        let name =
-            self.subcircuit_names
-                .assign(name, &base_name, &Trace::new(location), &mut self.errors);
-        let interface = G::Interface::from_fn(|_| self.add_node_at(location));
-        self.subcircuits.push(SubcircuitInstance::new(
-            generator,
-            options_for_generator,
-            interface_nodes(&interface),
+        let name = self.subcircuit_names.assign(
+            name.as_deref(),
+            &bound.base_name,
+            &Trace::new(location),
+            &mut self.errors,
+        );
+        let interface = S::Interface::from_fn(|_| self.add_node_at(location));
+        self.subcircuits.push(SubcircuitInstance {
+            generator: bound.generator,
+            interface: interface_nodes(&interface),
             name,
             location,
-        ));
+        });
         interface
     }
 
-    /// Instantiates a part with an automatic name (`<ref base name>#<n>`) and returns
-    /// the nodes of its pins, keyed by pin ID.
+    /// Instantiates a part and returns the nodes of its pins, keyed by pin ID.
     ///
-    /// The instance name is the key of the deterministic UUID of the part. Automatic names
-    /// shift when a part of the same kind is added or removed before this one in the same
-    /// (sub)circuit; use [`Self::instantiate_part_named`] to keep the UUID stable.
+    /// `part` is an `impl Part` or a `Box<dyn Part>`. Its instance name, the key of the
+    /// deterministic UUID of the part, is automatic (`<reference prefix>#<n>`), or explicit with
+    /// [`Named`] (unique in this (sub)circuit). Automatic names shift when a part of the same kind
+    /// is added or removed before this one in the same (sub)circuit; name the part to keep the
+    /// UUID stable.
     #[track_caller]
-    pub fn instantiate_part(&mut self, part: Box<dyn Part>) -> HashMap<String, NodeIndex> {
-        self.instantiate_part_impl(None, part)
-    }
-
-    /// Instantiates a part with an explicit name, unique in this (sub)circuit.
-    #[track_caller]
-    pub fn instantiate_part_named(
-        &mut self,
-        name: &str,
-        part: Box<dyn Part>,
-    ) -> HashMap<String, NodeIndex> {
-        self.instantiate_part_impl(Some(name), part)
-    }
-
-    #[track_caller]
-    fn instantiate_part_impl(
-        &mut self,
-        name: Option<&str>,
-        part: Box<dyn Part>,
-    ) -> HashMap<String, NodeIndex> {
+    pub fn instantiate_part(&mut self, part: impl IntoPart) -> HashMap<String, NodeIndex> {
+        let (name, part) = part.into_named_part();
         let trace = Trace::new(Location::caller());
         let prefix = part.get_ref_base_name();
         self.check_name(&prefix, check_ref_prefix, trace.clone());
         let name = self
             .part_names
-            .assign(name, &prefix, &trace, &mut self.errors);
+            .assign(name.as_deref(), &prefix, &trace, &mut self.errors);
         let mut pin_mapping = HashMap::new();
         for pin in part.pin_ids() {
             pin_mapping.insert(pin, self.nets.add_node(NodeInfo::new(trace.clone())));
@@ -429,6 +353,45 @@ impl<B> CircuitBuilder<B> {
             trace,
         });
         pin_mapping
+    }
+}
+
+/// An explicit instance name for [`CircuitBuilder::instantiate_part`] and
+/// [`CircuitBuilder::instantiate_subcircuit`], e.g. `Named("R_LOAD", part)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Named<'a, T>(pub &'a str, pub T);
+
+/// What [`CircuitBuilder::instantiate_part`] takes: an `impl Part` or a `Box<dyn Part>`,
+/// optionally [`Named`].
+pub trait IntoPart {
+    /// The explicit instance name, if any, and the part.
+    #[doc(hidden)]
+    fn into_named_part(self) -> (Option<String>, Box<dyn Part>);
+}
+
+impl<P: Part + 'static> IntoPart for P {
+    fn into_named_part(self) -> (Option<String>, Box<dyn Part>) {
+        (None, Box::new(self))
+    }
+}
+
+impl IntoPart for Box<dyn Part> {
+    fn into_named_part(self) -> (Option<String>, Box<dyn Part>) {
+        (None, self)
+    }
+}
+
+impl<P: IntoPart> IntoPart for Named<'_, P> {
+    fn into_named_part(self) -> (Option<String>, Box<dyn Part>) {
+        (Some(self.0.to_string()), self.1.into_named_part().1)
+    }
+}
+
+impl<B, S: IntoSubcircuit<B>> IntoSubcircuit<B> for Named<'_, S> {
+    type Interface = S::Interface;
+
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>) {
+        (Some(self.0.to_string()), self.1.into_named_subcircuit().1)
     }
 }
 
@@ -688,7 +651,7 @@ mod tests {
     impl TestPart {
         #[track_caller]
         fn instantiate(circuit: &mut CircuitBuilder) -> TestPartPins {
-            let pins = circuit.instantiate_part(Box::new(TestPart));
+            let pins = circuit.instantiate_part(TestPart);
             TestPartPins {
                 pin1: pins["pin1"],
                 pin2: pins["pin2"],
@@ -794,11 +757,10 @@ mod tests {
             interface: Self::Interface,
         ) {
             let [first, second] = interface;
-            let [inner_first, inner_second] = circuit.instantiate_subcircuit_with(
-                LeafOptionsGenerator,
-                |options: &NestedOptions| LeafOptions {
+            let [inner_first, inner_second] = circuit.instantiate_subcircuit(
+                LeafOptionsGenerator.with_options(|options: &NestedOptions| LeafOptions {
                     part_count: options.part_count,
-                },
+                }),
             );
             circuit.connect(first, inner_first);
             circuit.connect(second, inner_second);
@@ -819,7 +781,7 @@ mod tests {
             _interface: Self::Interface,
         ) {
             for _ in 0..options.part_count {
-                circuit.instantiate_part(Box::new(TestPart));
+                circuit.instantiate_part(TestPart);
             }
         }
     }
@@ -827,11 +789,11 @@ mod tests {
     #[test]
     fn test_generator_specific_options_expand_recursively() {
         let mut circuit = CircuitBuilder::<BuildOptions>::new();
-        circuit.instantiate_subcircuit_with(NestedOptionsGenerator, |options: &BuildOptions| {
-            NestedOptions {
+        circuit.instantiate_subcircuit(NestedOptionsGenerator.with_options(
+            |options: &BuildOptions| NestedOptions {
                 part_count: options.part_count,
-            }
-        });
+            },
+        ));
 
         let one_part = circuit.build(&BuildOptions { part_count: 1 });
         let three_parts = circuit.build(&BuildOptions { part_count: 3 });
@@ -886,10 +848,10 @@ mod tests {
         let mut circuit = CircuitBuilder::new();
         TestPart::instantiate(&mut circuit);
         let _subcircuit_pins = TestSubcircuitGenerator2::instantiate(&mut circuit);
-        circuit.instantiate_part(Box::new(crate::test_parts::CustomPart {
+        circuit.instantiate_part(crate::test_parts::CustomPart {
             ref_base_name: "R",
             ..crate::test_parts::CustomPart::valid()
-        }));
+        });
         TestPart::instantiate(&mut circuit);
 
         let circuit = circuit.build(&());
@@ -928,7 +890,7 @@ mod tests {
             _interface: Self::Interface,
         ) {
             let line = line!() + 1;
-            circuit.instantiate_part(Box::new(TestPart));
+            circuit.instantiate_part(TestPart);
             *TRACED_PART_LINE.lock().unwrap() = line;
         }
     }
@@ -991,7 +953,7 @@ mod tests {
     #[test]
     fn test_internal_connections_are_connected() {
         let mut circuit = CircuitBuilder::new();
-        circuit.instantiate_part(Box::new(MultiGndPart));
+        circuit.instantiate_part(MultiGndPart);
         let circuit = circuit.build(&());
 
         assert_eq!(
@@ -1028,8 +990,8 @@ mod tests {
     fn test_labels_connect_nets() {
         let mut circuit = CircuitBuilder::new();
         // U1 is the top-level part; U2, U3 / U4, U5 are inside the subcircuits.
-        let left = circuit.instantiate_subcircuit_named("left", LabeledSubcircuitGenerator);
-        circuit.instantiate_subcircuit_named("right", LabeledSubcircuitGenerator);
+        let left = circuit.instantiate_subcircuit(Named("left", LabeledSubcircuitGenerator));
+        circuit.instantiate_subcircuit(Named("right", LabeledSubcircuitGenerator));
         let u5 = TestPart::instantiate(&mut circuit);
         circuit.label(u5.pin1, NetLabel::global("VCC"));
         circuit.label(u5.pin2, NetLabel::local("OUT"));
@@ -1115,11 +1077,11 @@ mod tests {
             _interface: Self::Interface,
         ) {
             let first = line!() + 1;
-            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1);
+            circuit.instantiate_subcircuit(Named("a", TestSubcircuitGenerator1));
             let second = line!() + 1;
-            circuit.instantiate_subcircuit_named("a", TestSubcircuitGenerator1);
+            circuit.instantiate_subcircuit(Named("a", TestSubcircuitGenerator1));
             let hash = line!() + 1;
-            circuit.instantiate_subcircuit_named("b#1", TestSubcircuitGenerator1);
+            circuit.instantiate_subcircuit(Named("b#1", TestSubcircuitGenerator1));
             let node = circuit.add_node();
             let label = line!() + 1;
             circuit.label(node, NetLabel::local(""));
@@ -1159,8 +1121,8 @@ mod tests {
         // `I/O` and `I{slash}O` would otherwise become the same net, and the parts `a/b` and
         // `a{slash}b` would get the same UUID.
         let mut circuit = CircuitBuilder::<()>::new();
-        let a = circuit.instantiate_part_named("a/b", Box::new(TestPart));
-        let b = circuit.instantiate_part_named("a{slash}b", Box::new(TestPart));
+        let a = circuit.instantiate_part(Named("a/b", TestPart));
+        let b = circuit.instantiate_part(Named("a{slash}b", TestPart));
         circuit.label(a["pin1"], NetLabel::global("I/O"));
         circuit.label(b["pin1"], NetLabel::global("I{slash}O"));
         let invalid = invalid_names(&circuit.build(&()));
@@ -1181,16 +1143,16 @@ mod tests {
         }
         let mut circuit = CircuitBuilder::<()>::new();
         for prefix in ["U1", "", "R 1", "U?", "#PWR", "a/b", "{x}", "Q"] {
-            circuit.instantiate_part(Box::new(crate::test_parts::CustomPart {
+            circuit.instantiate_part(crate::test_parts::CustomPart {
                 ref_base_name: prefix,
                 ..crate::test_parts::CustomPart::valid()
-            }));
+            });
         }
         circuit.instantiate_subcircuit(Based("{slash}"));
         circuit.instantiate_subcircuit(Based("a#1"));
         circuit.instantiate_subcircuit(Based(""));
         // Only used for automatic names.
-        circuit.instantiate_subcircuit_named("named", Based("{x}"));
+        circuit.instantiate_subcircuit(Named("named", Based("{x}")));
         circuit.instantiate_subcircuit(Based("Stage2"));
         let invalid = invalid_names(&circuit.build(&()));
         assert_eq!(
@@ -1220,10 +1182,10 @@ mod tests {
                 names.reverse();
             }
             for name in names {
-                circuit.instantiate_part_named(name, Box::new(TestPart));
+                circuit.instantiate_part(Named(name, TestPart));
             }
-            circuit.instantiate_part(Box::new(TestPart));
-            circuit.instantiate_part(Box::new(MultiGndPart));
+            circuit.instantiate_part(TestPart);
+            circuit.instantiate_part(MultiGndPart);
         }
     }
 
@@ -1240,9 +1202,9 @@ mod tests {
         let build = |reversed: bool, extra_part: bool| {
             let mut circuit = CircuitBuilder::new();
             if extra_part {
-                circuit.instantiate_part(Box::new(MultiGndPart));
+                circuit.instantiate_part(MultiGndPart);
             }
-            circuit.instantiate_subcircuit_named("sub", NamedPartsGenerator { reversed });
+            circuit.instantiate_subcircuit(Named("sub", NamedPartsGenerator { reversed }));
             circuit.build(&())
         };
 
@@ -1314,7 +1276,7 @@ mod tests {
         let mut circuit = CircuitBuilder::new();
         let [first, second] = circuit.instantiate_subcircuit(InterfaceGenerator);
         let [named_first, named_second] =
-            circuit.instantiate_subcircuit_named("b", InterfaceGenerator);
+            circuit.instantiate_subcircuit(Named("b", InterfaceGenerator));
         let names: Vec<_> = circuit
             .subcircuits
             .iter()

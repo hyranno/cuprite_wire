@@ -74,7 +74,7 @@ impl DCosim {
     /// If the path is not absolute (ngspice would resolve it against its working directory) or
     /// cannot be written in a model.
     #[track_caller]
-    pub fn new(simulation: impl Into<PathBuf>) -> Box<Self> {
+    pub fn new(simulation: impl Into<PathBuf>) -> Self {
         let simulation = simulation.into();
         assert!(
             simulation.is_absolute(),
@@ -85,32 +85,26 @@ impl DCosim {
             "library path",
             simulation.to_str().expect("the library path is UTF-8"),
         );
-        Box::new(DCosim {
+        DCosim {
             simulation,
             sim_args: Vec::new(),
             lib_args: Vec::new(),
             delay: None,
             inputs: Vec::new(),
             outputs: Vec::new(),
-        })
+        }
     }
 
     /// The arguments of the simulation (`sim_args`), which the library reads in `Cosim_setup`.
     #[track_caller]
-    pub fn with_sim_args<S: Into<String>>(
-        mut self: Box<Self>,
-        args: impl IntoIterator<Item = S>,
-    ) -> Box<Self> {
+    pub fn with_sim_args<S: Into<String>>(mut self, args: impl IntoIterator<Item = S>) -> Self {
         self.sim_args = string_args("simulation argument", args);
         self
     }
 
     /// The arguments of the library's shim (`lib_args`).
     #[track_caller]
-    pub fn with_lib_args<S: Into<String>>(
-        mut self: Box<Self>,
-        args: impl IntoIterator<Item = S>,
-    ) -> Box<Self> {
+    pub fn with_lib_args<S: Into<String>>(mut self, args: impl IntoIterator<Item = S>) -> Self {
         self.lib_args = string_args("library argument", args);
         self
     }
@@ -120,7 +114,7 @@ impl DCosim {
     /// # Panics
     /// If `delay` is not positive.
     #[track_caller]
-    pub fn with_delay(mut self: Box<Self>, delay: f64) -> Box<Self> {
+    pub fn with_delay(mut self, delay: f64) -> Self {
         assert!(
             delay.is_finite() && delay > 0.0,
             "the delay must be positive: {delay}"
@@ -135,7 +129,7 @@ impl DCosim {
     /// If the name is not made of ASCII letters, digits and `_`, is `gnd`, `ref`, `0` or another
     /// pin's name (case-insensitively), or the characteristics are invalid.
     #[track_caller]
-    pub fn input(mut self: Box<Self>, pin: &str, input: InputCharacteristics) -> Box<Self> {
+    pub fn input(mut self, pin: &str, input: InputCharacteristics) -> Self {
         self.check_pin(pin);
         input.validate();
         self.inputs.push((pin.to_string(), input));
@@ -147,7 +141,7 @@ impl DCosim {
     /// # Panics
     /// As [`DCosim::input`].
     #[track_caller]
-    pub fn output(mut self: Box<Self>, pin: &str, output: OutputCharacteristics) -> Box<Self> {
+    pub fn output(mut self, pin: &str, output: OutputCharacteristics) -> Self {
         self.check_pin(pin);
         output.validate();
         self.outputs.push((pin.to_string(), output));

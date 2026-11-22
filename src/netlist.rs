@@ -458,7 +458,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        circuit::CircuitBuilder,
+        circuit::{CircuitBuilder, Named},
         kicad::{KicadPinInfo, PinType},
         spice::IndependentSource,
         subcircuit::SubcircuitGenerator,
@@ -499,9 +499,9 @@ mod tests {
     #[test]
     fn test_net_names_and_order() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let u = circuit.instantiate_part(Box::new(OpAmp));
-        let r = circuit.instantiate_part(Box::new(Resistor("10k")));
-        let c = circuit.instantiate_part(Box::new(Capacitor("100n")));
+        let u = circuit.instantiate_part(OpAmp);
+        let r = circuit.instantiate_part(Resistor("10k"));
+        let c = circuit.instantiate_part(Capacitor("100n"));
         circuit.label(r["1"], NetLabel::local("IN"));
         circuit.connect(r["2"], c["1"]);
         circuit.connect(c["1"], u["in_p"]);
@@ -534,7 +534,7 @@ mod tests {
     fn test_unnamed_net_names_follow_kicad() {
         let mut circuit = CircuitBuilder::<()>::new();
         let r: Vec<_> = (0..10)
-            .map(|_| circuit.instantiate_part(Box::new(Resistor("1k"))))
+            .map(|_| circuit.instantiate_part(Resistor("1k")))
             .collect();
         let named = |names: [&str; 2]| {
             let pin = |pad: &str, name| {
@@ -552,8 +552,8 @@ mod tests {
                 ..CustomPart::valid()
             }
         };
-        let x1 = circuit.instantiate_part(Box::new(named(["1", "2"])));
-        let x2 = circuit.instantiate_part(Box::new(named(["A", "B"])));
+        let x1 = circuit.instantiate_part(named(["1", "2"]));
+        let x2 = circuit.instantiate_part(named(["A", "B"]));
         circuit.connect(r[8]["1"], r[9]["1"]);
         circuit.connect(r[0]["2"], x1["1"]);
         circuit.connect(r[1]["2"], x2["1"]);
@@ -588,8 +588,8 @@ mod tests {
         ) {
             let [input, output] = interface;
             circuit.label(input, NetLabel::local("IN"));
-            let top = circuit.instantiate_part_named("top", Box::new(Resistor("10k")));
-            let bottom = circuit.instantiate_part_named("bottom", Box::new(Resistor("10k")));
+            let top = circuit.instantiate_part(Named("top", Resistor("10k")));
+            let bottom = circuit.instantiate_part(Named("bottom", Resistor("10k")));
             circuit.connect(input, top["1"]);
             circuit.connect(top["2"], output);
             circuit.connect(output, bottom["1"]);
@@ -601,8 +601,8 @@ mod tests {
     #[test]
     fn test_hierarchical_names() {
         let mut circuit = CircuitBuilder::<()>::new();
-        let first = circuit.instantiate_subcircuit_named("first", Divider);
-        let second = circuit.instantiate_subcircuit_named("second", Divider);
+        let first = circuit.instantiate_subcircuit(Named("first", Divider));
+        let second = circuit.instantiate_subcircuit(Named("second", Divider));
         circuit.connect(first[1], second[0]);
         // A name in the outer circuit is preferred to one inside the subcircuit.
         circuit.label(first[0], NetLabel::local("ZZZ"));
@@ -645,7 +645,7 @@ mod tests {
     #[test]
     fn test_label_only_net_is_warned() {
         let mut circuit = CircuitBuilder::<()>::new();
-        circuit.instantiate_part(Box::new(Resistor("1k")));
+        circuit.instantiate_part(Resistor("1k"));
         let node = circuit.add_node();
         circuit.label(node, NetLabel::global("VBUS"));
         let netlist = circuit.build(&()).to_netlist().unwrap();
@@ -666,7 +666,7 @@ mod tests {
     fn test_parts_without_kicad_info_use_pin_ids() {
         let mut circuit = CircuitBuilder::<()>::new();
         let v = circuit.instantiate_part(IndependentSource::voltage(5.0));
-        let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+        let r = circuit.instantiate_part(Resistor("1k"));
         circuit.connect(v[IndependentSource::P], r["1"]);
         circuit.connect(v[IndependentSource::N], r["2"]);
         let v2 = circuit.instantiate_part(IndependentSource::voltage(5.0));
@@ -686,15 +686,15 @@ mod tests {
     fn test_errors_are_collected() {
         let mut circuit = CircuitBuilder::<()>::new();
         let line1 = line!() + 1;
-        let a = circuit.instantiate_part(Box::new(CustomPart {
+        let a = circuit.instantiate_part(CustomPart {
             pin_ids: vec!["1", "1", "2"],
             ..CustomPart::valid()
-        }));
+        });
         let line2 = line!() + 1;
-        circuit.instantiate_part(Box::new(CustomPart {
+        circuit.instantiate_part(CustomPart {
             internal_connections: vec![vec!["1", "3"]],
             ..CustomPart::valid()
-        }));
+        });
         // Collides with the name of the unnamed net of a["2"].
         let line3 = line!() + 1;
         circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     fn test_internal_connections_and_escaped_pin_names() {
         let mut circuit = CircuitBuilder::<()>::new();
-        circuit.instantiate_part(Box::new(MultiGndIc));
+        circuit.instantiate_part(MultiGndIc);
         let netlist = circuit.build(&()).to_netlist().unwrap();
         assert_eq!(
             summary(&netlist),

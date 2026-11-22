@@ -7,7 +7,7 @@ use std::{
 
 use super::{DCosim, Verilator, VerilatorError};
 use crate::{
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     naming::NetLabel,
     parts::Part,
     spice::{
@@ -218,7 +218,7 @@ fn test_simulate_verilog_counter() {
     assert_eq!(part.pin_ids(), ["clk", "rst", "q_1", "q_0", "carry", "gnd"]);
 
     let mut bench = CircuitBuilder::new();
-    let counter = bench.instantiate_part_named("counter", part);
+    let counter = bench.instantiate_part(Named("counter", part));
     let clock = bench.instantiate_part(DigitalDriver::new(
         cmos.clone(),
         DigitalSequence::new(Level::Low).pwm(1e-6, 1e-6, 0.5, 5),

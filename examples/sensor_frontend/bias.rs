@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, NodeIndex},
+    circuit::{CircuitBuilder, Named, NodeIndex},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -31,12 +31,11 @@ impl SubcircuitGenerator for MidSupply {
         interface: Self::Interface,
     ) {
         let MidSupplyPorts { vcc, gnd, vref } = interface;
-        let upper = c.instantiate_part_named("r_upper", Box::new(Resistor0603::new("100k")));
-        let lower = c.instantiate_part_named("r_lower", Box::new(Resistor0603::new("100k")));
-        let filter = c.instantiate_part_named("c_filter", Box::new(Capacitor0603::new("1u")));
-        let decoupling =
-            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
-        let amp = c.instantiate_part_named("buffer", Box::new(RrioOpAmp::new()));
+        let upper = c.instantiate_part(Named("r_upper", Resistor0603::new("100k")));
+        let lower = c.instantiate_part(Named("r_lower", Resistor0603::new("100k")));
+        let filter = c.instantiate_part(Named("c_filter", Capacitor0603::new("1u")));
+        let decoupling = c.instantiate_part(Named("c_decoupling", Capacitor0603::new("100n")));
+        let amp = c.instantiate_part(Named("buffer", RrioOpAmp::new()));
         // Divider, filtered (corner 3.2 Hz with 50k and 1u).
         c.connect(vcc, upper["1"]);
         c.connect(upper["2"], lower["1"]);
@@ -90,14 +89,14 @@ mod tests {
             let mut bench = Bench::new(IndependentSource::voltage(0.0).with_waveform(ramp));
             let ports = bench
                 .circuit
-                .instantiate_subcircuit_named("bias", MidSupply);
+                .instantiate_subcircuit(Named("bias", MidSupply));
             bench.circuit.connect(ports.vcc, bench.vcc);
             bench.circuit.connect(ports.gnd, bench.gnd);
             bench.probe(ports.vref, "VREF");
             // A 1 mA load, as if other stages were biased from the reference.
             let load = bench
                 .circuit
-                .instantiate_part_named("load", Box::new(Resistor0603::new("2.5k")));
+                .instantiate_part(Named("load", Resistor0603::new("2.5k")));
             bench.circuit.connect(load["1"], ports.vref);
             bench.circuit.connect(load["2"], bench.gnd);
             // The divider's filter settles with a time constant of 50 ms.

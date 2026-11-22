@@ -3,7 +3,7 @@
 //! The simulation tests run the `ngspice` program, which the devcontainer provides.
 
 use crate::{
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     error::CircuitErrorKind,
     naming::NetLabel,
     spice::{
@@ -60,9 +60,9 @@ fn check_golden(name: &str, text: &impl ToString) {
 }
 
 /// [`rc_filter`] driven by a voltage source on `IN`.
-fn rc_filter_bench(source: Box<IndependentSource>) -> CircuitBuilder {
+fn rc_filter_bench(source: IndependentSource) -> CircuitBuilder {
     let mut circuit = rc_filter();
-    let v = circuit.instantiate_part_named("source", source);
+    let v = circuit.instantiate_part(Named("source", source));
     circuit.label(v[IndependentSource::P], NetLabel::local("IN"));
     circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
     circuit
@@ -85,21 +85,21 @@ fn test_golden_rc_filter() {
 #[test]
 fn test_golden_hierarchy() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let first = circuit.instantiate_subcircuit(Named("stage1", RcStage));
     let second = circuit.instantiate_subcircuit(RcStage);
     circuit.connect(first[1], second[0]);
     let v = circuit.instantiate_part(IndependentSource::voltage(1.0));
     circuit.connect(v[IndependentSource::P], first[0]);
     circuit.label(v[IndependentSource::P], NetLabel::local("IN"));
     circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
-    let connector = circuit.instantiate_part_named(
+    let connector = circuit.instantiate_part(Named(
         "connector",
-        Box::new(CustomPart {
+        CustomPart {
             ref_base_name: "J",
             spice: Some(SpicePartInfo::Excluded),
             ..CustomPart::valid()
-        }),
-    );
+        },
+    ));
     circuit.connect(connector["1"], second[1]);
     circuit.label(connector["2"], NetLabel::global("GND"));
     check_golden("hierarchy_bench.cir", &spice_netlist(&circuit));
@@ -147,8 +147,8 @@ impl crate::parts::Part for DualOpAmp {
 #[test]
 fn test_golden_multi_element() {
     let mut circuit = CircuitBuilder::new();
-    let dual = circuit.instantiate_part(Box::new(DualOpAmp));
-    let single = circuit.instantiate_part(Box::new(OpAmp));
+    let dual = circuit.instantiate_part(DualOpAmp);
+    let single = circuit.instantiate_part(OpAmp);
     for (from, to) in [("out_a", "in_n_a"), ("out_b", "in_n_b")] {
         circuit.connect(dual[from], dual[to]);
     }
@@ -211,17 +211,17 @@ fn test_spice_errors_are_collected() {
         },
     ];
     for (i, part) in parts.into_iter().enumerate() {
-        let pins = circuit.instantiate_part(Box::new(part));
+        let pins = circuit.instantiate_part(part);
         circuit.label(pins["1"], NetLabel::global("GND"));
         circuit.label(pins["2"], NetLabel::local(format!("n{i}")));
     }
     // Nets merged or broken by ngspice.
     for name in ["A", "a", "é"] {
-        let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+        let r = circuit.instantiate_part(Resistor("1k"));
         circuit.label(r["1"], NetLabel::local(name));
         circuit.label(r["2"], NetLabel::global("GND"));
     }
-    let u = circuit.instantiate_part(Box::new(MultiGndIc));
+    let u = circuit.instantiate_part(MultiGndIc);
     circuit.label(u["io"], NetLabel::local("n0"));
 
     let netlist = circuit.build(&()).to_netlist().unwrap();
@@ -268,7 +268,7 @@ fn test_spice_errors_are_collected() {
 #[test]
 fn test_ground_is_required() {
     let mut circuit = CircuitBuilder::new();
-    let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+    let r = circuit.instantiate_part(Resistor("1k"));
     circuit.label(r["1"], NetLabel::local("A"));
     circuit.label(r["2"], NetLabel::local("GND"));
     let errors = circuit
@@ -348,9 +348,9 @@ fn simulate_transient(simulator: &dyn Simulator) {
 fn simulate_operating_point(simulator: &dyn Simulator) {
     let mut circuit = CircuitBuilder::new();
     let v = circuit.instantiate_part(IndependentSource::voltage(10.0));
-    let meter = circuit.instantiate_part(Box::new(Ammeter));
-    let top = circuit.instantiate_part(Box::new(Resistor("1k")));
-    let bottom = circuit.instantiate_part(Box::new(Resistor("3k")));
+    let meter = circuit.instantiate_part(Ammeter);
+    let top = circuit.instantiate_part(Resistor("1k"));
+    let bottom = circuit.instantiate_part(Resistor("3k"));
     circuit.connect(v[IndependentSource::P], meter[Ammeter::P]);
     circuit.connect(meter[Ammeter::N], top["1"]);
     circuit.connect(top["2"], bottom["1"]);
@@ -379,9 +379,9 @@ fn simulate_operating_point(simulator: &dyn Simulator) {
 /// A non-inverting amplifier with the op-amp's inline subcircuit model: gain 1 + 9k / 1k.
 fn simulate_subcircuit_model(simulator: &dyn Simulator) {
     let mut circuit = CircuitBuilder::new();
-    let amp = circuit.instantiate_part(Box::new(OpAmp));
-    let feedback = circuit.instantiate_part(Box::new(Resistor("9k")));
-    let ground = circuit.instantiate_part(Box::new(Resistor("1k")));
+    let amp = circuit.instantiate_part(OpAmp);
+    let feedback = circuit.instantiate_part(Resistor("9k"));
+    let ground = circuit.instantiate_part(Resistor("1k"));
     circuit.connect(amp["out"], feedback["1"]);
     circuit.connect(feedback["2"], amp["in_n"]);
     circuit.connect(amp["in_n"], ground["1"]);
@@ -411,7 +411,7 @@ E1 OUT 0 VALUE = { IF(V(IN) > 1 & V(IN) < 2, 5, 0) }
 fn simulate_pspice_model(simulator: &dyn Simulator) {
     let deck = |model: ModelSource| {
         let mut circuit = CircuitBuilder::new();
-        let window = circuit.instantiate_part(Box::new(CustomPart {
+        let window = circuit.instantiate_part(CustomPart {
             ref_base_name: "U",
             pin_ids: vec!["in", "out"],
             internal_connections: vec![],
@@ -419,9 +419,9 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
             spice: Some(SpicePartInfo::element(
                 SpiceElement::new('X', ["in", "out"], "WINDOW").with_model(model),
             )),
-        }));
+        });
         let input = circuit.instantiate_part(IndependentSource::voltage(1.5));
-        let load = circuit.instantiate_part(Box::new(Resistor("1k")));
+        let load = circuit.instantiate_part(Resistor("1k"));
         circuit.connect(input[IndependentSource::P], window["in"]);
         circuit.connect(window["out"], load["1"]);
         circuit.label(window["out"], NetLabel::local("OUT"));
@@ -486,13 +486,13 @@ fn aborted_transient_error(simulator: &dyn Simulator) {
         "V = time < 0.2m ? 0.4 : (v(FB) > 0.5 ? 0 : 1)",
     );
     let mut circuit = CircuitBuilder::new();
-    let source = circuit.instantiate_part(Box::new(CustomPart {
+    let source = circuit.instantiate_part(CustomPart {
         ref_base_name: "B",
         spice: Some(SpicePartInfo::element(element)),
         ..CustomPart::valid()
-    }));
-    let r = circuit.instantiate_part(Box::new(Resistor("1k")));
-    let c = circuit.instantiate_part(Box::new(test_parts::Capacitor("1n")));
+    });
+    let r = circuit.instantiate_part(Resistor("1k"));
+    let c = circuit.instantiate_part(test_parts::Capacitor("1n"));
     circuit.connect(source["1"], r["1"]);
     circuit.connect(r["2"], c["1"]);
     circuit.label(c["1"], NetLabel::global("FB"));
@@ -541,32 +541,32 @@ fn test_parts_without_spice_model_mix_with_kicad() {
 #[test]
 fn test_golden_kicad_pair() {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+    let first = circuit.instantiate_subcircuit(Named("stage1", RcStage));
     let second = circuit.instantiate_subcircuit(RcStage);
-    let r_in = circuit.instantiate_part_named("input", Box::new(Resistor("100")));
+    let r_in = circuit.instantiate_part(Named("input", Resistor("100")));
     circuit.label(r_in["1"], NetLabel::local("I/O"));
     // An unnamed net between two parts in the root.
-    let r_mid = circuit.instantiate_part_named("mid", Box::new(Resistor("220")));
+    let r_mid = circuit.instantiate_part(Named("mid", Resistor("220")));
     circuit.connect(r_in["2"], r_mid["1"]);
     circuit.connect(r_mid["2"], first[0]);
     circuit.connect(first[1], second[0]);
-    let amp = circuit.instantiate_part_named("amp", Box::new(OpAmp));
+    let amp = circuit.instantiate_part(Named("amp", OpAmp));
     circuit.connect(amp["in_p"], second[1]);
     circuit.connect(amp["out"], amp["in_n"]);
     circuit.label(amp["out"], NetLabel::local("a(b) c"));
     circuit.label(amp["vdd"], NetLabel::global("+5V"));
     circuit.label(amp["vss"], NetLabel::global("GND"));
     // An unconnected pin.
-    let r_open = circuit.instantiate_part_named("open", Box::new(Resistor("1Meg")));
+    let r_open = circuit.instantiate_part(Named("open", Resistor("1Meg")));
     circuit.connect(r_open["1"], amp["out"]);
-    let connector = circuit.instantiate_part_named(
+    let connector = circuit.instantiate_part(Named(
         "connector",
-        Box::new(CustomPart {
+        CustomPart {
             ref_base_name: "J",
             spice: Some(SpicePartInfo::Excluded),
             ..CustomPart::valid()
-        }),
-    );
+        },
+    ));
     circuit.connect(connector["1"], amp["out"]);
     circuit.label(connector["2"], NetLabel::global("GND"));
 
@@ -592,8 +592,8 @@ const LINE: &str = r#"v("/LINE")"#;
 /// the table has the voltage of the line ([`LINE`]).
 fn simulate_line(
     simulator: &dyn Simulator,
-    driver: Box<DigitalDriver>,
-    load: Box<DigitalLoad>,
+    driver: DigitalDriver,
+    load: DigitalLoad,
     step: f64,
     stop: f64,
 ) -> Table {
@@ -776,12 +776,12 @@ fn test_shared_library_recovers() {
     let deck = |args: &str| {
         let mut circuit = CircuitBuilder::new();
         let element = SpiceElement::new('B', ["1", "2"], args);
-        let source = circuit.instantiate_part(Box::new(CustomPart {
+        let source = circuit.instantiate_part(CustomPart {
             ref_base_name: "B",
             spice: Some(SpicePartInfo::element(element)),
             ..CustomPart::valid()
-        }));
-        let load = circuit.instantiate_part(Box::new(Resistor("1k")));
+        });
+        let load = circuit.instantiate_part(Resistor("1k"));
         circuit.connect(source["1"], load["1"]);
         circuit.label(source["1"], NetLabel::local("OUT"));
         circuit.label(source["2"], NetLabel::global("GND"));
@@ -803,7 +803,7 @@ fn test_digital_driver_reference() {
         OutputCharacteristics::cmos(3.3),
         sequence,
     ));
-    let load = circuit.instantiate_part(Box::new(Resistor("1meg")));
+    let load = circuit.instantiate_part(Resistor("1meg"));
     let offset = circuit.instantiate_part(IndependentSource::voltage(1.0));
     circuit.connect(driver[DigitalDriver::OUT], load["1"]);
     circuit.label(driver[DigitalDriver::OUT], NetLabel::local("LINE"));

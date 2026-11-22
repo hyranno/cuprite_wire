@@ -23,8 +23,8 @@ kicad_part! {
     }
 }
 
-let amp = circuit.instantiate_part(Box::new(Lm358Soic::new()));
-let r = circuit.instantiate_part(Box::new(Resistor0603::new("10k")));
+let amp = circuit.instantiate_part(Lm358Soic::new());
+let r = circuit.instantiate_part(Resistor0603::new("10k"));
 circuit.connect(amp["1"], r["1"]);
 ```
 

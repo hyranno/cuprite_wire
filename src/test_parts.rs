@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use petgraph::graph::NodeIndex;
 
 use crate::{
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
     naming::NetLabel,
     parts::Part,
@@ -26,8 +26,8 @@ pub fn spice_netlist(circuit: &CircuitBuilder) -> SpiceNetlist {
 /// A 10k / 100n RC low-pass filter between the local nets `IN` and `OUT`, with `GND`.
 pub fn rc_filter() -> CircuitBuilder {
     let mut circuit = CircuitBuilder::new();
-    let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
-    let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
+    let r = circuit.instantiate_part(Named("r", Resistor("10k")));
+    let c = circuit.instantiate_part(Named("c", Capacitor("100n")));
     circuit.label(r["1"], NetLabel::local("IN"));
     circuit.connect(r["2"], c["1"]);
     circuit.label(c["1"], NetLabel::local("OUT"));
@@ -50,8 +50,8 @@ impl SubcircuitGenerator for RcStage {
         interface: Self::Interface,
     ) {
         let [input, output] = interface;
-        let r = circuit.instantiate_part(Box::new(Resistor("1k")));
-        let c = circuit.instantiate_part(Box::new(Capacitor("1u")));
+        let r = circuit.instantiate_part(Resistor("1k"));
+        let c = circuit.instantiate_part(Capacitor("1u"));
         circuit.connect(input, r["1"]);
         circuit.connect(r["2"], output);
         circuit.connect(output, c["1"]);

@@ -10,7 +10,7 @@ mod common;
 
 use common::{check_golden, deck_of, strings};
 use cuprite_wire::{
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     kicad_part,
     naming::NetLabel,
     parts::Part,
@@ -233,7 +233,7 @@ fn reset_voltage(part: Box<dyn Part>, pins: SupervisorPins, sense: f64) -> Resul
     let u = circuit.instantiate_part(part);
     let supply = circuit.instantiate_part(IndependentSource::voltage(3.3));
     let input = circuit.instantiate_part(IndependentSource::voltage(sense));
-    let load = circuit.instantiate_part(Box::new(Resistor::new("100k")));
+    let load = circuit.instantiate_part(Resistor::new("100k"));
     circuit.connect(supply[IndependentSource::P], u[vdd]);
     circuit.connect(input[IndependentSource::P], u[sense_pin]);
     circuit.connect(load["1"], u[reset]);
@@ -299,8 +299,8 @@ fn test_simulate() {
 #[test]
 fn test_golden() {
     let mut circuit = CircuitBuilder::new();
-    let u = circuit.instantiate_part_named("sup", Box::new(Vsup::new()));
-    let pullup = circuit.instantiate_part_named("pullup", Box::new(Resistor::new("100k")));
+    let u = circuit.instantiate_part(Named("sup", Vsup::new()));
+    let pullup = circuit.instantiate_part(Named("pullup", Resistor::new("100k")));
     circuit.connect(pullup["1"], u["4"]);
     circuit.connect(pullup["2"], u[Vsup::RESET_N]);
     circuit.label(u["4"], NetLabel::global("VDD"));

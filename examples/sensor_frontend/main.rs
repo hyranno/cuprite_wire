@@ -21,7 +21,11 @@ mod bench;
 
 use std::{io, process::ExitCode};
 
-use cuprite_wire::{circuit::CircuitBuilder, erc::ErcSettings, naming::NetLabel};
+use cuprite_wire::{
+    circuit::{CircuitBuilder, Named},
+    erc::ErcSettings,
+    naming::NetLabel,
+};
 
 use crate::{bias::MidSupply, filter::LowPass, parts::Header1x04, preamp::Preamp};
 
@@ -30,7 +34,7 @@ fn board() -> CircuitBuilder {
     let mut board = CircuitBuilder::new();
 
     // J1: 1 = +5V, 2 = GND, 3 = sensor signal, 4 = filtered output to the ADC.
-    let j1 = board.instantiate_part_named("j1", Box::new(Header1x04::new()));
+    let j1 = board.instantiate_part(Named("j1", Header1x04::new()));
     let vcc = j1["1"];
     let gnd = j1["2"];
     board.label(vcc, NetLabel::global("+5V"));
@@ -42,9 +46,9 @@ fn board() -> CircuitBuilder {
     board.power_flag(vcc);
     board.power_flag(gnd);
 
-    let bias = board.instantiate_subcircuit_named("bias", MidSupply);
-    let preamp = board.instantiate_subcircuit_named("preamp", Preamp::default());
-    let filter = board.instantiate_subcircuit_named("filter", LowPass);
+    let bias = board.instantiate_subcircuit(Named("bias", MidSupply));
+    let preamp = board.instantiate_subcircuit(Named("preamp", Preamp::default()));
+    let filter = board.instantiate_subcircuit(Named("filter", LowPass));
     for (stage_vcc, stage_gnd) in [
         (bias.vcc, bias.gnd),
         (preamp.vcc, preamp.gnd),

@@ -18,7 +18,7 @@ const LINE: &str = r#"v("/LINE")"#;
 
 /// `device` with its pin `pin` on the line `/LINE`, loaded by `load`; the deck runs a transient
 /// analysis of `stop` seconds and writes the voltage of the line.
-fn line_deck(device: Box<CosimDevice>, pin: &str, load: Box<DigitalLoad>, stop: f64) -> SpiceDeck {
+fn line_deck(device: CosimDevice, pin: &str, load: DigitalLoad, stop: f64) -> SpiceDeck {
     let mut circuit = CircuitBuilder::new();
     let device = circuit.instantiate_part(device);
     let load = circuit.instantiate_part(load);

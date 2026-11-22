@@ -466,11 +466,7 @@ impl VerilatedModel {
     /// A [`DCosim`] part of the design, with a pin per bit ([`Port::pins`]), all inputs with
     /// `input` and all outputs with `output`. For pins with other characteristics, add the pins
     /// to `DCosim::new(model.library())` in the same order instead.
-    pub fn part(
-        &self,
-        input: &InputCharacteristics,
-        output: &OutputCharacteristics,
-    ) -> Box<DCosim> {
+    pub fn part(&self, input: &InputCharacteristics, output: &OutputCharacteristics) -> DCosim {
         let mut part = DCosim::new(&self.library);
         for pin in self.inputs.iter().flat_map(Port::pins) {
             part = part.input(&pin, input.clone());

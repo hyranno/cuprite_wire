@@ -68,15 +68,15 @@ impl CosimDevice {
     /// # Panics
     /// If `name` is not made of ASCII letters, digits and `_`.
     #[track_caller]
-    pub fn new(name: &str) -> Box<Self> {
+    pub fn new(name: &str) -> Self {
         assert!(
             is_identifier(name),
             "the name of a co-simulated device may only contain ASCII letters, digits and '_': {name:?}"
         );
-        Box::new(CosimDevice {
+        CosimDevice {
             name: name.to_string(),
             pins: Vec::new(),
-        })
+        }
     }
 
     /// Adds an output pin.
@@ -85,7 +85,7 @@ impl CosimDevice {
     /// If the name is not made of ASCII letters, digits and `_`, is `gnd`, `ref`, `0` or another
     /// pin's name (case-insensitively), or the characteristics are invalid.
     #[track_caller]
-    pub fn output(self: Box<Self>, pin: &str, output: OutputCharacteristics) -> Box<Self> {
+    pub fn output(self, pin: &str, output: OutputCharacteristics) -> Self {
         self.pin(pin, Some(output), None)
     }
 
@@ -94,7 +94,7 @@ impl CosimDevice {
     /// # Panics
     /// As [`CosimDevice::output`].
     #[track_caller]
-    pub fn input(self: Box<Self>, pin: &str, input: InputCharacteristics) -> Box<Self> {
+    pub fn input(self, pin: &str, input: InputCharacteristics) -> Self {
         self.pin(pin, None, Some(input))
     }
 
@@ -104,21 +104,21 @@ impl CosimDevice {
     /// As [`CosimDevice::output`].
     #[track_caller]
     pub fn bidirectional(
-        self: Box<Self>,
+        self,
         pin: &str,
         output: OutputCharacteristics,
         input: InputCharacteristics,
-    ) -> Box<Self> {
+    ) -> Self {
         self.pin(pin, Some(output), Some(input))
     }
 
     #[track_caller]
     fn pin(
-        mut self: Box<Self>,
+        mut self,
         name: &str,
         output: Option<OutputCharacteristics>,
         input: Option<InputCharacteristics>,
-    ) -> Box<Self> {
+    ) -> Self {
         assert_subcircuit_pin(
             name,
             self.pins.iter().map(|pin| pin.name.as_str()),

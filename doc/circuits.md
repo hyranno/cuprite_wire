@@ -61,11 +61,11 @@ impl Part for Passive {
 ```rust
 let mut circuit = CircuitBuilder::new();
 let node = circuit.add_node();
-let r = circuit.instantiate_part(Box::new(resistor));          // automatic name
-let c = circuit.instantiate_part_named("c_bypass", Box::new(capacitor));
+let r = circuit.instantiate_part(resistor);          // automatic name
+let c = circuit.instantiate_part(Named("c_bypass", capacitor));
 circuit.connect(node, r["1"]);
 circuit.label(c["2"], NetLabel::global("GND"));
-let amp = circuit.instantiate_subcircuit_named("amp_left", Follower);
+let amp = circuit.instantiate_subcircuit(Named("amp_left", Follower));
 circuit.connect(amp.output, node);
 ```
 
@@ -74,7 +74,7 @@ written without depending on petgraph).
 
 A subcircuit is a `SubcircuitGenerator`. Its `Interface` type lists the nodes the circuit around
 it connects to, usually as a struct deriving `subcircuit::Interface`, generic over the type of its
-fields. The generator gets the interface nodes inside the subcircuit, and `instantiate_subcircuit*`
+fields. The generator gets the interface nodes inside the subcircuit, and `instantiate_subcircuit`
 returns the corresponding new nodes in the outer circuit, in the same struct:
 
 ```rust
@@ -99,16 +99,15 @@ impl SubcircuitGenerator for Follower {
 The same struct holding other values gives them per interface node, e.g. the pin types of
 `check_subcircuit` (`doc/erc.md` section 5).
 
-The generator is run when the circuit is built. `instantiate_subcircuit` /
-`instantiate_subcircuit_named` give it the options the circuit is built with (its `Options` must be
-the same type, e.g. `()`); `instantiate_subcircuit_with` / `instantiate_subcircuit_named_with` take a
-function deriving its own options from them:
+The generator is run when the circuit is built. `instantiate_subcircuit(generator)` gives it the
+options the circuit is built with (its `Options` must be the same type, e.g. `()`);
+`generator.with_options(f)` instead derives its own options from them with the function `f`:
 
 ```rust
-circuit.instantiate_subcircuit_named_with("amp", Amplifier, |board: &BoardOptions| board.amp.clone());
+let amp = circuit.instantiate_subcircuit(Amplifier.with_options(|board: &BoardOptions| board.amp.clone()));
 ```
 
-All of these record the calling source location with `#[track_caller]`, which is used in error
+`instantiate_part` and `instantiate_subcircuit` record the calling source location with `#[track_caller]`, which is used in error
 messages (section 6).
 
 ## 4. Instance names
@@ -117,9 +116,10 @@ Every part and subcircuit instance has a name, unique per kind in its (sub)circu
 sheet paths of nets (section 5) and the UUIDs of the KiCad netlist, which pcbnew uses to keep
 footprints linked to components (`doc/kicad_netlist_usage.md` section 3).
 
-- `instantiate_part_named` / `instantiate_subcircuit_named` give an explicit name. Names must be
-  non-empty, must not contain `#`, and must be unique per kind in one (sub)circuit.
-- `instantiate_part` / `instantiate_subcircuit` give an automatic name `<base>#<n>`, numbered per
+- Wrapping the part or the generator in `circuit::Named` gives an explicit name
+  (`Named("amp_left", Follower)`, also around `with_options`). Names must be non-empty, must not
+  contain `#`, and must be unique per kind in one (sub)circuit.
+- Otherwise the instance gets an automatic name `<base>#<n>`, numbered per
   kind in each (sub)circuit: the reference prefix for parts (`R#1`, `R#2`) and
   `SubcircuitGenerator::base_name()` for subcircuits (by default the type name without module path
   and generic arguments, e.g. `RcStage#1`).

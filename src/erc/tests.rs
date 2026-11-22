@@ -3,7 +3,7 @@ use petgraph::graph::NodeIndex;
 use super::*;
 use crate::{
     basic::{OpAmpSot23, Resistor0603},
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     kicad::{KicadPartInfo, KicadPinInfo},
     naming::NetLabel,
     subcircuit::{Interface, SubcircuitGenerator},
@@ -62,8 +62,8 @@ impl SubcircuitGenerator for Follower {
             vcc,
             gnd,
         } = interface;
-        let u = circuit.instantiate_part_named("u", Box::new(OpAmpSot23::new("OPA")));
-        let load = circuit.instantiate_part_named("load", Box::new(Resistor0603::new("10k")));
+        let u = circuit.instantiate_part(Named("u", OpAmpSot23::new("OPA")));
+        let load = circuit.instantiate_part(Named("load", Resistor0603::new("10k")));
         circuit.connect(input, u["in_p"]);
         circuit.connect(output, u["out"]);
         circuit.connect(u["out"], u["in_n"]);
@@ -82,7 +82,7 @@ fn follower_circuit(power_flags: bool) -> CircuitBuilder {
         output,
         vcc,
         gnd,
-    } = circuit.instantiate_subcircuit_named("f", Follower);
+    } = circuit.instantiate_subcircuit(Named("f", Follower));
     circuit.virtual_pin(input, PinType::Output, "signal");
     circuit.label(output, NetLabel::global("OUT"));
     circuit.label(vcc, NetLabel::global("VCC"));
@@ -137,7 +137,7 @@ fn test_label_single_pin() {
 
     // A no-connect mark or an allow mark silences it.
     let mut circuit = CircuitBuilder::new();
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.label(r["1"], NetLabel::global("A"));
     circuit.label(r["2"], NetLabel::global("B"));
     circuit.no_connect(r["1"]);
@@ -178,7 +178,7 @@ fn ground_pins_part() -> CustomPart {
 fn test_ground_pin_not_ground() {
     let build = |ground: &str| {
         let mut circuit = CircuitBuilder::new();
-        let u = circuit.instantiate_part(Box::new(ground_pins_part()));
+        let u = circuit.instantiate_part(ground_pins_part());
         circuit.label(u["vcc"], NetLabel::global("VCC"));
         circuit.power_flag(u["vcc"]);
         circuit.label(u["gnd"], NetLabel::global(ground));
@@ -223,7 +223,7 @@ fn test_ground_names() {
 #[test]
 fn test_conflicting_outputs() {
     let mut circuit = follower_circuit(true);
-    let u = circuit.instantiate_part(Box::new(OpAmpSot23::new("OPA")));
+    let u = circuit.instantiate_part(OpAmpSot23::new("OPA"));
     circuit.label(u["out"], NetLabel::global("OUT"));
     circuit.connect(u["out"], u["in_n"]);
     circuit.label(u["in_p"], NetLabel::global("OUT"));
@@ -286,7 +286,7 @@ fn test_overlapping_internal_connections() {
         spice: None,
     };
     let mut circuit = CircuitBuilder::new();
-    let u = circuit.instantiate_part(Box::new(part));
+    let u = circuit.instantiate_part(part);
     circuit.connect(u["in"], u["5"]);
     // The three pins are one stack, so they neither conflict nor count as several drivers.
     erc(&circuit).assert_clean();
@@ -306,7 +306,7 @@ impl SubcircuitGenerator for OpenResistor {
         circuit: &mut CircuitBuilder,
         interface: Self::Interface,
     ) {
-        let r = circuit.instantiate_part_named("r", Box::new(Resistor0603::new("1k")));
+        let r = circuit.instantiate_part(Named("r", Resistor0603::new("1k")));
         circuit.connect(interface[0], r["1"]);
         circuit.erc_allow(r["2"], ErcRule::PinNotConnected);
     }
@@ -315,8 +315,8 @@ impl SubcircuitGenerator for OpenResistor {
 #[test]
 fn test_allow() {
     let mut circuit = CircuitBuilder::new();
-    let [a] = circuit.instantiate_subcircuit_named("a", OpenResistor);
-    let [b] = circuit.instantiate_subcircuit_named("b", OpenResistor);
+    let [a] = circuit.instantiate_subcircuit(Named("a", OpenResistor));
+    let [b] = circuit.instantiate_subcircuit(Named("b", OpenResistor));
     // Allowing another rule has no effect.
     circuit.erc_allow(a, ErcRule::PinNotDriven);
     // The marks inside the subcircuits allow only the nets they are on.
@@ -347,7 +347,7 @@ fn test_allow() {
 #[test]
 fn test_allow_net_name_rules() {
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r["1"], r["2"]);
     circuit.label(r["1"], NetLabel::global("out"));
     circuit.label(r["2"], NetLabel::local("SIG"));
@@ -364,7 +364,7 @@ fn test_allow_net_name_rules() {
 
     // Either net of similar names allows it.
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r["1"], r["2"]);
     circuit.label(r["1"], NetLabel::global("out"));
     let output = circuit.add_node();
@@ -376,8 +376,8 @@ fn test_allow_net_name_rules() {
 #[test]
 fn test_no_connect_marks() {
     let mut circuit = CircuitBuilder::new();
-    let r1 = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
-    let r2 = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r1 = circuit.instantiate_part(Resistor0603::new("1k"));
+    let r2 = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r1["2"], r2["1"]);
     circuit.no_connect(r1["1"]);
     circuit.no_connect(r2["1"]);
@@ -434,7 +434,7 @@ fn test_allow_on_nets_without_part_pins() {
 #[test]
 fn test_similar_net_names() {
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.label(r["1"], NetLabel::global("out"));
     circuit.label(r["2"], NetLabel::global("GND"));
     let report = erc(&circuit);

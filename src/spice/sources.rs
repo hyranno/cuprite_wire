@@ -168,13 +168,13 @@ impl IndependentSource {
     /// # Panics
     /// If `dc` is not finite.
     #[track_caller]
-    pub fn voltage(dc: f64) -> Box<Self> {
-        let source = Box::new(IndependentSource {
+    pub fn voltage(dc: f64) -> Self {
+        let source = IndependentSource {
             kind: SourceKind::Voltage,
             dc,
             ac: None,
             waveform: None,
-        });
+        };
         source.validate();
         source
     }
@@ -182,17 +182,17 @@ impl IndependentSource {
     /// # Panics
     /// If `dc` is not finite.
     #[track_caller]
-    pub fn current(dc: f64) -> Box<Self> {
-        Box::new(IndependentSource {
+    pub fn current(dc: f64) -> Self {
+        IndependentSource {
             kind: SourceKind::Current,
-            ..*IndependentSource::voltage(dc)
-        })
+            ..IndependentSource::voltage(dc)
+        }
     }
 
     /// # Panics
     /// If `magnitude` is not finite.
     #[track_caller]
-    pub fn with_ac(mut self: Box<Self>, magnitude: f64) -> Box<Self> {
+    pub fn with_ac(mut self, magnitude: f64) -> Self {
         self.ac = Some(magnitude);
         self.validate();
         self
@@ -202,7 +202,7 @@ impl IndependentSource {
     /// As [`Waveform`]'s numbers are not finite, or the points of `Pwl` are none or not in
     /// increasing time.
     #[track_caller]
-    pub fn with_waveform(mut self: Box<Self>, waveform: Waveform) -> Box<Self> {
+    pub fn with_waveform(mut self, waveform: Waveform) -> Self {
         self.waveform = Some(waveform);
         self.validate();
         self

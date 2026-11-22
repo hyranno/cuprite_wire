@@ -75,9 +75,9 @@ impl DigitalDriver {
     /// # Panics
     /// If the levels of `output` are equal, or its resistance or an edge time is not positive.
     #[track_caller]
-    pub fn new(output: OutputCharacteristics, sequence: DigitalSequence) -> Box<Self> {
+    pub fn new(output: OutputCharacteristics, sequence: DigitalSequence) -> Self {
         output.validate();
-        Box::new(DigitalDriver { output, sequence })
+        DigitalDriver { output, sequence }
     }
 
     /// The electrical characteristics of the output.
@@ -140,9 +140,9 @@ impl DigitalLoad {
     /// If the thresholds of `input` cross, its capacitance is negative, its leakage is not
     /// finite, or its pull resistance is not positive.
     #[track_caller]
-    pub fn new(input: InputCharacteristics) -> Box<Self> {
+    pub fn new(input: InputCharacteristics) -> Self {
         input.validate();
-        Box::new(DigitalLoad { input })
+        DigitalLoad { input }
     }
 
     /// The electrical characteristics of the input.

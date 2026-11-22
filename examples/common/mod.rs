@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, NodeIndex},
+    circuit::{CircuitBuilder, Named, NodeIndex},
     naming::NetLabel,
     subcircuit::SubcircuitGenerator,
 };
@@ -22,8 +22,8 @@ impl SubcircuitGenerator for RcStage {
         interface: Self::Interface,
     ) {
         let [input, output] = interface;
-        let r = circuit.instantiate_part_named("r", Box::new(Resistor0603::new("10k")));
-        let c = circuit.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
+        let r = circuit.instantiate_part(Named("r", Resistor0603::new("10k")));
+        let c = circuit.instantiate_part(Named("c", Capacitor0603::new("100n")));
         circuit.connect(input, r["1"]);
         circuit.connect(r["2"], output);
         circuit.connect(output, c["1"]);
@@ -36,8 +36,8 @@ impl SubcircuitGenerator for RcStage {
 /// Returns the circuit and its input and output nodes.
 pub fn two_stage_filter() -> (CircuitBuilder, NodeIndex, NodeIndex) {
     let mut circuit = CircuitBuilder::new();
-    let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
-    let second = circuit.instantiate_subcircuit_named("stage2", RcStage);
+    let first = circuit.instantiate_subcircuit(Named("stage1", RcStage));
+    let second = circuit.instantiate_subcircuit(Named("stage2", RcStage));
     circuit.connect(first[1], second[0]);
     let input = first[0];
     circuit.label(input, NetLabel::local("IN"));
