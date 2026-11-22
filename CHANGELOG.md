@@ -15,7 +15,11 @@ break the API).
 - `cuprite_wire_ibis`: a new crate reading IBIS model files (`.ibs`): the header, components with
   their package and pins, and models with their I-V tables, ramp rates, voltage ranges and input
   thresholds. Other keywords are skipped and listed. It does not depend on `cuprite_wire`, which
-  will use it to simulate I/O buffers.
+  will use it to simulate I/O buffers. `cuprite_wire_ibis::spice::subcircuit` writes a model as
+  an ngspice subcircuit with the structure of KiCad's IBIS conversion (package, `C_comp`, the I-V
+  tables as XSPICE `pwl` models), but with ports `ku` and `kd` that switch the driver from
+  outside; `EdgeTimes::weights` makes their waveforms from a sequence of high, low and
+  high-impedance states and the `[Ramp]` of the model.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes
