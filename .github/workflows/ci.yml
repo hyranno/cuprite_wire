@@ -116,11 +116,14 @@ jobs:
         with:
           persist-credentials: false
       # Homebrew's libngspice is in a directory the dynamic loader does not search by default.
+      # The libngspice formula removes its spinit, so the library loads no XSPICE code models;
+      # the spinit of the ngspice formula loads those of libngspice.
       - name: Install ngspice (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install ngspice
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:/usr/local/lib:/usr/lib" >> "${GITHUB_ENV}"
+          echo "SPICE_LIB_DIR=$(brew --prefix ngspice)/share/ngspice" >> "${GITHUB_ENV}"
       # MSYS2 is on the runner. Its shared library is copied to ngspice.dll, the name of the
       # official build and the default of SharedNgspice.
       - name: Install ngspice (Windows)

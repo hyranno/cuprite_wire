@@ -296,8 +296,12 @@ On Windows, `Ngspice::default()` runs `ngspice_con`, the console program of the 
 (`ngspice` there is the GUI). The shared library of the official build is `ngspice.dll`; MSYS2's is
 `libngspice-0.dll`, set with `SharedNgspice::new`. On macOS, Homebrew puts
 `libngspice.0.dylib` in `/opt/homebrew/lib`, which the dynamic loader does not search by default:
-give the path, or add the directory to `DYLD_FALLBACK_LIBRARY_PATH`. Paths are written into decks
-with `/` on Windows, since ngspice reads `\` in commands as an escape. The output is
+give the path, or add the directory to `DYLD_FALLBACK_LIBRARY_PATH`. Homebrew's library also
+lacks `spinit`, the script that loads the XSPICE code models (needed by `spice::ibis` and models
+using `pwl`, `d_state`, ...): set `SPICE_LIB_DIR` to `$(brew --prefix ngspice)/share/ngspice`,
+whose `spinit` loads them. MSYS2's `spinit` is not found either, and names the code models by MSYS2
+paths; CI sets `SPICE_LIB_DIR` and rewrites the paths (`.github/workflows/ci.yml`). Paths are
+written into decks with `/` on Windows, since ngspice reads `\` in commands as an escape. The output is
 checked against KiCad's SPICE export as described in `doc/dev/verifying.md`.
 
 ## 6. Output
