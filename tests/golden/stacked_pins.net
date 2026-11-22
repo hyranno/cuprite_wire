@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (source "tests/kicad_part.rs") (tool "cuprite_wire 0.2.0"))
+  (design (source "tests/kicad_part.rs") (tool "cuprite_wire 0.3.0"))
   (components
     (comp (ref "R1")
       (value "10k")
