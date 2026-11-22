@@ -1,12 +1,5 @@
-//! Co-simulation: a model of a microcontroller regulates the output of a PWM DAC.
-//!
-//! ```text
-//! MCU pwm --[R 1k]--+-- OUT (to MCU adc)
-//!                   |
-//!                 [C 100n]
-//!                   |
-//!                  GND
-//! ```
+//! Co-simulation: a model of a microcontroller regulates the output of a PWM DAC, an RC filter
+//! (the circuit is drawn in `common/pwm_dac.rs`).
 //!
 //! The firmware's control loop is written as a Rust model: every 20 us it reads `OUT` with a
 //! 12-bit ADC and corrects the duty of a 100 kHz PWM (integral control) so that `OUT` reaches 1 V.

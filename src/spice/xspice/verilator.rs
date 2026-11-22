@@ -3,6 +3,7 @@
 //! it is compiled with ngspice's `verilator_shim.cpp` into a shared library.
 
 use std::{
+    ffi::OsString,
     fmt, fs, io,
     path::{Path, PathBuf},
     process::Command,
@@ -54,15 +55,19 @@ pub struct Verilator {
 
 impl Verilator {
     /// The Verilog sources of the design (the top module is found by Verilator, or given with
-    /// `--top-module` in [`Verilator::arg`]). The cache is in `cuprite_wire-verilator` in the
-    /// system temporary directory.
+    /// `--top-module` in [`Verilator::arg`]). The cache is in `cuprite_wire/verilator` in the
+    /// user's cache directory: `$XDG_CACHE_HOME`, else `$HOME/.cache` (`%LOCALAPPDATA%` on
+    /// Windows), else the system temporary directory.
     pub fn new<P: Into<PathBuf>>(sources: impl IntoIterator<Item = P>) -> Self {
         Verilator {
             sources: sources.into_iter().map(Into::into).collect(),
             args: Vec::new(),
             program: "verilator".into(),
             shim_dir: DEFAULT_SHIM_DIR.into(),
-            cache_dir: std::env::temp_dir().join(format!("{}-verilator", env!("CARGO_PKG_NAME"))),
+            cache_dir: cache_home(|name| std::env::var_os(name))
+                .unwrap_or_else(std::env::temp_dir)
+                .join(env!("CARGO_PKG_NAME"))
+                .join("verilator"),
         }
     }
 
@@ -84,7 +89,9 @@ impl Verilator {
         self
     }
 
-    /// The directory the builds are cached in.
+    /// The directory the builds are cached in. The libraries built there are loaded into the
+    /// process, so on Unix it must belong to the user and not be writable by others; it is
+    /// created with mode `0700`.
     pub fn cache_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.cache_dir = dir.into();
         self
@@ -98,13 +105,14 @@ impl Verilator {
     /// # Errors
     /// [`VerilatorError::Command`] if a step of the build fails, [`VerilatorError::Ports`] if the
     /// ports of the top module cannot be used, and [`VerilatorError::Io`] if a file operation
-    /// fails or a program cannot be run.
+    /// fails, a program cannot be run, or the cache directory belongs to another user or is
+    /// writable by others.
     pub fn build(&self) -> Result<VerilatedModel, VerilatorError> {
         let this = self.absolute()?;
+        create_private_dir(&this.cache_dir)?;
         let dir = this.cache_dir.join(format!("{:016x}", this.key()?));
         let library = dir.join("libmodel.so");
         if !library.exists() || !inputs_unchanged(&dir) {
-            fs::create_dir_all(&this.cache_dir)?;
             let staging = TempDir::new_in(&this.cache_dir, "build")?;
             match this.build_in(&staging) {
                 Ok(()) => {}
@@ -268,6 +276,53 @@ impl Verilator {
             })
         }
     }
+}
+
+/// The user's cache directory from the environment variables (`var`): `$XDG_CACHE_HOME`, else
+/// `$HOME/.cache` (`%LOCALAPPDATA%` on Windows). Relative paths are ignored, as the XDG Base
+/// Directory Specification says.
+fn cache_home(var: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+    let absolute = |name| var(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    if cfg!(windows) {
+        absolute("LOCALAPPDATA")
+    } else {
+        absolute("XDG_CACHE_HOME").or_else(|| absolute("HOME").map(|home| home.join(".cache")))
+    }
+}
+
+/// Creates the cache directory `dir` (mode `0700` on Unix) if it does not exist, and checks that
+/// other users cannot replace the libraries in it: on Unix, it must not be writable by the group
+/// or others, and (on Linux) must belong to the user.
+fn create_private_dir(dir: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+        builder.mode(0o700);
+        builder.create(dir)?;
+        let metadata = fs::metadata(dir)?;
+        // `/proc/self` belongs to the effective user of the process.
+        let user = fs::metadata("/proc/self").map(|m| m.uid()).ok();
+        let problem = if user.is_some_and(|uid| uid != metadata.uid()) {
+            "belongs to another user"
+        } else if metadata.mode() & 0o022 != 0 {
+            "is writable by the group or others"
+        } else {
+            return Ok(());
+        };
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "the cache directory {} {problem}, who could replace the libraries loaded from \
+                it; set `cache_dir` to a directory of your own",
+                dir.display()
+            ),
+        ))
+    }
+    #[cfg(not(unix))]
+    builder.create(dir)
 }
 
 /// Moves the build in `staging` to `dir`, replacing an outdated build there. Another build of
@@ -561,6 +616,58 @@ mod tests {
         assert!(error("VL_IN8(&GND,0,0);").contains("\"GND\""));
         assert!(error("VL_IN8(&ref,0,0);").contains("reserved"));
         assert!(error("VL_IN8(&q_0,0,0);\nVL_OUT8(&q,1,0);").contains("already has a pin \"q_0\""));
+    }
+
+    #[test]
+    fn test_cache_home() {
+        let home = |vars: &[(&str, &str)]| {
+            let vars: Vec<(String, OsString)> = vars
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.into()))
+                .collect();
+            cache_home(|name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
+        };
+        if cfg!(windows) {
+            assert_eq!(home(&[("LOCALAPPDATA", r"C:\x")]), Some(r"C:\x".into()));
+            assert_eq!(home(&[("HOME", r"C:\h")]), None);
+        } else {
+            assert_eq!(
+                home(&[("XDG_CACHE_HOME", "/c"), ("HOME", "/h")]),
+                Some("/c".into())
+            );
+            assert_eq!(
+                home(&[("XDG_CACHE_HOME", "c"), ("HOME", "/h")]),
+                Some("/h/.cache".into())
+            );
+            assert_eq!(home(&[("HOME", "")]), None);
+            assert_eq!(home(&[]), None);
+        }
+    }
+
+    /// The cache directory is created private, and one that others can write to is rejected.
+    #[test]
+    #[cfg(unix)]
+    fn test_create_private_dir() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new("verilator-private").unwrap();
+        let dir = temp.join("a/cache");
+        create_private_dir(&dir).unwrap();
+        assert_eq!(
+            fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        create_private_dir(&dir).unwrap();
+
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+        let error = create_private_dir(&dir).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            error
+                .to_string()
+                .contains("writable by the group or others"),
+            "{error}"
+        );
     }
 
     #[test]

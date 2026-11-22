@@ -9,9 +9,6 @@ use std::{
 use crate::spice::{SpiceDeck, temp_dir::TempDir};
 
 /// The ngspice program, run in batch mode (`ngspice -b deck.cir`).
-///
-/// glibc `tmpfile()`, which the CLI copies its input with, ignores `$TMPDIR`; where `/tmp` is
-/// read-only (e.g. the Claude Code sandbox), the devcontainer's `ngspice` wrapper redirects it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Ngspice {

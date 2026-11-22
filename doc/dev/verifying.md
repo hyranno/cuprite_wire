@@ -14,6 +14,9 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
 - **Simulations**: `src/spice/tests.rs` checks analyses against hand-calculated results
   (RC corner frequency and time constant, a divider with an ammeter, an amplifier with a
   subcircuit model). They need `ngspice` (`doc/spice_netlist_usage.md` section 5).
+  The CLI copies its input with glibc `tmpfile()`, which always writes to `/tmp` and ignores
+  `$TMPDIR`; the devcontainer's `ngspice` wrapper (`.devcontainer/tmpfile_shim.c`) redirects it
+  to `$TMPDIR`, so the tests also run where `/tmp` is read-only, such as the Claude Code sandbox.
 - **KiCad libraries**: `cargo test --features kicad-libraries --test kicad_libraries` generates
   parts from the installed KiCad libraries, compares the netlists of a circuit using them with
   `tests/golden/kicad_libraries.*`, and simulates it with KiCad's models.

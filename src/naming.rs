@@ -181,6 +181,13 @@ pub(crate) fn case_insensitive_duplicates<'a>(
 }
 
 /// A name given to a net.
+///
+/// In the net name, `/` in the label is escaped as `{slash}` as KiCad does, since `/` separates
+/// the sheet path (`NetLabel::Global("A/B")` names the net `A{slash}B`). An empty label or one
+/// containing `{` is reported as [`CircuitErrorKind::InvalidName`], so that the escaped names
+/// stay distinct.
+///
+/// [`CircuitErrorKind::InvalidName`]: crate::error::CircuitErrorKind::InvalidName
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum NetLabel {
     /// Connects every node with the same name anywhere in the circuit (like a KiCad power symbol

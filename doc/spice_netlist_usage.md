@@ -196,10 +196,7 @@ without such models run in the default mode. See `doc/spice_part_macro.md` secti
 modes change.
 
 `run()` runs `ngspice -b deck.cir` (`Ngspice::default()`, the program from `PATH`); another
-program can be given with `Ngspice { program }.run(&deck)`.
-The CLI copies its input with glibc `tmpfile()`, which always writes to `/tmp`; the devcontainer's
-`ngspice` wrapper (`.devcontainer/tmpfile_shim.c`) redirects it to `$TMPDIR`, so it also runs
-where `/tmp` is read-only, such as the Claude Code sandbox.
+program can be given with `Ngspice::new(program).run(&deck)`.
 
 **Results without errors can still be wrong.** For a floating node or a node without a DC path to
 ground, ngspice falls back to gmin and source stepping and then to a transient operating point, and
