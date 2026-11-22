@@ -13,7 +13,8 @@ break the API).
 ### Added
 
 - `CircuitBuilder::erc_allow` (`ErcMark::Allow`): leaves the violations of one ERC rule on one
-  net out of the report, like excluding a KiCad ERC marker.
+  net out of the report, like excluding a KiCad ERC marker. It also works on a net without part
+  pins (`NoConnectDangling`, `VirtualPinDangling`, `LabelOnlyNet`).
 - `ErcRule::PinToPin`: its severity caps those of the pin map (`Warning` reports pin conflicts as
   warnings at most, `Ignore` turns them off).
 - The ERC rules of KiCad 10 `ErcRule::LabelSinglePin` (a labeled net with only one pin) and
@@ -35,6 +36,8 @@ break the API).
 
 ### Changed
 
+- `Netlist::pinless_marks` is replaced by `Netlist::pinless_nets`: each net without part pins
+  (`PinlessNet`) with its label names and ERC marks, so that `erc_allow` applies per net.
 - `#[non_exhaustive]`, so that later versions can add fields and variants without breaking the
   API: `ErcMark`, the types the library builds for the user to read (`Netlist`, `Component`, `Net`,
   `NetNode`, `ErcReport`, `ErcViolation`, `NodeMark`, `ErcPin`, `Diagnostic`, `Note`, `NodeLabel`,

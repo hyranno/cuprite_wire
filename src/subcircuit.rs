@@ -109,18 +109,23 @@ pub trait SubcircuitGenerator: Debug + Clone {
     }
 }
 
+/// The nodes of `interface` in order.
+pub(crate) fn interface_nodes(interface: &impl Interface) -> Vec<NodeIndex> {
+    interface.values().into_iter().copied().collect()
+}
+
 /// Creates a circuit with the interface nodes of `generator`, traced to `location`, and
-/// constructs the subcircuit in it.
+/// constructs the subcircuit in it. Returns it with its interface nodes in order.
 pub(crate) fn construct<G: SubcircuitGenerator>(
     generator: &G,
     options: &G::Options,
     location: Loc,
-) -> (CircuitBuilder<G::Options>, G::Interface) {
+) -> (CircuitBuilder<G::Options>, Vec<NodeIndex>) {
     let mut circuit = CircuitBuilder::new();
     let interface = G::Interface::from_fn(|_| circuit.add_node_at(location));
-    let nodes = interface.values().into_iter().copied().collect::<Vec<_>>();
-    generator.construct_subcircuit(options, &mut circuit, G::Interface::from_fn(|i| nodes[i]));
-    (circuit, interface)
+    let nodes = interface_nodes(&interface);
+    generator.construct_subcircuit(options, &mut circuit, interface);
+    (circuit, nodes)
 }
 
 pub(crate) trait ErasedSubcircuitGenerator<B>: Debug + DynClone {
@@ -165,7 +170,6 @@ where
     fn generate(&self, options: &B, location: Loc) -> (ExpandedCircuit, Vec<NodeIndex>) {
         let options = (self.options_for_generator)(options);
         let (circuit, interface) = construct(&self.generator, &options, location);
-        let interface = interface.values().into_iter().copied().collect();
         (circuit.expand(&options), interface)
     }
 }

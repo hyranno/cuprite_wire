@@ -297,14 +297,19 @@ impl CircuitErrors {
 
 impl fmt::Display for CircuitErrors {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for (i, error) in self.0.iter().enumerate() {
-            if i > 0 {
-                writeln!(f)?;
-            }
-            write!(f, "{error}")?;
-        }
-        Ok(())
+        write_lines(f, &self.0)
     }
+}
+
+/// Writes `items` one per line, without a newline after the last one.
+pub(crate) fn write_lines(f: &mut fmt::Formatter<'_>, items: &[impl fmt::Display]) -> fmt::Result {
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            writeln!(f)?;
+        }
+        write!(f, "{item}")?;
+    }
+    Ok(())
 }
 
 impl std::error::Error for CircuitErrors {}

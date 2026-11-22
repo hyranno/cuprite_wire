@@ -13,15 +13,20 @@ use crate::parts::PinType;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NetPin {
     pub pin_type: PinType,
-    /// Pins of a part with the same key are connected inside the part (like KiCad's stacked pins):
-    /// a conflict between them is not reported, and they count as one pin. `None` for virtual pins.
-    pub stack: Option<(usize, usize)>,
+    pub stack: Stack,
 }
 
-impl NetPin {
-    fn is_virtual(&self) -> bool {
-        self.stack.is_none()
-    }
+/// Where a pin of a net comes from, and which pins it is connected to inside its part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Stack {
+    /// A pin of a part in an internal connection group. Pins of the same type in the same group
+    /// are stacked (like KiCad's stacked pins): a conflict between them is not reported, and they
+    /// count as one pin.
+    Group { component: usize, group: usize },
+    /// A pin of a part in no internal connection group.
+    Alone,
+    /// A virtual pin ([`ErcMark::VirtualPin`](super::ErcMark::VirtualPin)).
+    Virtual,
 }
 
 /// A problem found on one net. Pins are indices into the pins given to [`check_net`].
@@ -89,7 +94,7 @@ fn report_weight(pin_type: PinType) -> u32 {
 }
 
 fn is_stacked(a: &NetPin, b: &NetPin) -> bool {
-    a.stack.is_some() && a.stack == b.stack && a.pin_type == b.pin_type
+    matches!(a.stack, Stack::Group { .. }) && a.stack == b.stack && a.pin_type == b.pin_type
 }
 
 /// Checks one net. `pins` are its part pins followed by its virtual pins. Findings are in a
@@ -129,13 +134,17 @@ pub(crate) fn check_net(pins: &[NetPin], flags: NetFlags, pin_map: &PinMap) -> V
     // Pins of parts, counting connected pins of one part once.
     let mut seen = HashSet::new();
     let unique: Vec<usize> = (0..pins.len())
-        .filter(|&i| !pins[i].is_virtual() && seen.insert((pins[i].stack, pins[i].pin_type)))
+        .filter(|&i| match pins[i].stack {
+            Stack::Group { .. } => seen.insert((pins[i].stack, pins[i].pin_type)),
+            Stack::Alone => true,
+            Stack::Virtual => false,
+        })
         .collect();
     if no_connect {
         if unique.len() > 1 {
             findings.push(NetFinding::NoConnectConnected { pins: unique });
         }
-    } else if unique.len() == 1 && !pins.iter().any(NetPin::is_virtual) {
+    } else if unique.len() == 1 && !pins.iter().any(|pin| pin.stack == Stack::Virtual) {
         // Like KiCad, a label counts as a connection of the pin, and is reported instead.
         let pin = unique[0];
         if labeled {
@@ -197,10 +206,9 @@ mod tests {
     fn pins(types: &[PinType]) -> Vec<NetPin> {
         types
             .iter()
-            .enumerate()
-            .map(|(i, &pin_type)| NetPin {
+            .map(|&pin_type| NetPin {
                 pin_type,
-                stack: Some((i, 0)),
+                stack: Stack::Alone,
             })
             .collect()
     }
@@ -208,7 +216,7 @@ mod tests {
     fn virtual_pin(pin_type: PinType) -> NetPin {
         NetPin {
             pin_type,
-            stack: None,
+            stack: Stack::Virtual,
         }
     }
 
@@ -307,15 +315,24 @@ mod tests {
         let stacked = [
             NetPin {
                 pin_type: Output,
-                stack: Some((0, 0)),
+                stack: Stack::Group {
+                    component: 0,
+                    group: 0,
+                },
             },
             NetPin {
                 pin_type: Output,
-                stack: Some((0, 0)),
+                stack: Stack::Group {
+                    component: 0,
+                    group: 0,
+                },
             },
             NetPin {
                 pin_type: Input,
-                stack: Some((1, 0)),
+                stack: Stack::Group {
+                    component: 1,
+                    group: 0,
+                },
             },
         ];
         assert_eq!(check(&stacked), vec![]);
@@ -323,11 +340,17 @@ mod tests {
         let separate = [
             NetPin {
                 pin_type: Output,
-                stack: Some((0, 0)),
+                stack: Stack::Group {
+                    component: 0,
+                    group: 0,
+                },
             },
             NetPin {
                 pin_type: Output,
-                stack: Some((0, 1)),
+                stack: Stack::Group {
+                    component: 0,
+                    group: 1,
+                },
             },
         ];
         assert_eq!(
@@ -417,7 +440,10 @@ mod tests {
         }
         let stacked = [NetPin {
             pin_type: Passive,
-            stack: Some((0, 0)),
+            stack: Stack::Group {
+                component: 0,
+                group: 0,
+            },
         }; 2];
         assert_eq!(
             check_with(&stacked, false, true),

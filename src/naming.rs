@@ -31,15 +31,14 @@ pub(crate) fn unescape_name(name: &str) -> String {
 pub struct HierPath(pub Vec<String>);
 
 impl HierPath {
+    /// The path inside the subcircuit instance `name`.
     pub(crate) fn prepended(&self, name: &str) -> Self {
         let mut names = Vec::with_capacity(self.0.len() + 1);
         names.push(name.to_string());
         names.extend_from_slice(&self.0);
         HierPath(names)
     }
-}
 
-impl HierPath {
     /// UUIDs of the subcircuit instances on the path, from the root.
     /// Each is derived from the instance names up to it, so it does not change between builds.
     pub fn uuids(&self) -> Vec<Uuid> {

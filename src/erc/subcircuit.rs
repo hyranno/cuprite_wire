@@ -26,14 +26,9 @@ pub fn check_subcircuit<G: SubcircuitGenerator>(
 ) -> Result<ErcReport, CircuitErrors> {
     let (mut circuit, interface) = construct(generator, options, Location::caller());
     let names = <G::Interface as Interface>::names();
-    for ((node, name), pin_type) in interface
-        .values()
-        .into_iter()
-        .zip(names)
-        .zip(ports.values())
-    {
+    for ((node, name), pin_type) in interface.into_iter().zip(names).zip(ports.values()) {
         if let Some(pin_type) = pin_type {
-            circuit.virtual_pin(*node, *pin_type, &format!("port {name}"));
+            circuit.virtual_pin(node, *pin_type, &format!("port {name}"));
         }
     }
     Ok(circuit.build(options).to_netlist()?.erc(settings))
