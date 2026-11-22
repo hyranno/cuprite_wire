@@ -12,6 +12,7 @@ use crate::parts::PartPins;
 
 /// How a part is simulated.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SpicePartInfo {
     /// The part is written as one or more SPICE elements.
     Elements {
@@ -100,6 +101,7 @@ impl SpicePartInfo {
 
 /// One SPICE element line: `<device><ref><suffix> <nodes...> <args>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SpiceElement {
     /// Appended to the element name. Empty for a part with a single element,
     /// `A`, `B`, ... for the units of a multi-unit part.
@@ -220,6 +222,7 @@ pub fn spice_value(device: char, value: &str) -> Result<String, String> {
 
 /// A model definition required by an element.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum ModelSource {
     /// A model library written as `.include "<path>"`. The path must be absolute
     /// (e.g. `concat!(env!("CARGO_MANIFEST_DIR"), "/models/x.lib")`), since ngspice resolves

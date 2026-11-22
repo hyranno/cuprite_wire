@@ -28,12 +28,20 @@ break the API).
   e.g. `Diode:BAT54SDW`): `kicad_part!` makes each a pin (IDs `6`, `6#2`, ...) connected inside
   the part, and the KiCad netlist writes the pad once, with the first pin as KiCad does.
   A part may have several pins on one pad if they are connected inside the part.
+- `Ngspice::new` and `SharedNgspice::new`, to give the program or the library (they can no
+  longer be built with a struct literal).
 - `PartPins` (`PartPins::of(&part)`): the pin IDs of a part and its internal connection groups,
   with overlapping groups merged. `Component::pins` holds those of each component.
 
 ### Changed
 
-- `ErcMark` is `#[non_exhaustive]`.
+- `#[non_exhaustive]`, so that later versions can add fields and variants without breaking the
+  API: `ErcMark`, the types the library builds for the user to read (`Netlist`, `Component`, `Net`,
+  `NetNode`, `ErcReport`, `ErcViolation`, `NodeMark`, `ErcPin`, `Diagnostic`, `Note`, `NodeLabel`,
+  `CosimPin`, `Port`), the enums `Waveform`, `ModelSource` and `SpicePartInfo`, and the types with
+  constructors (`SpiceElement`, `IndependentSource`, `InputCharacteristics`,
+  `OutputCharacteristics`, `Ngspice`, `SharedNgspice`), which can no longer be built with a struct
+  literal. Their fields stay public.
 - ERC follows KiCad 10: the only pin of a labeled net is reported as `LabelSinglePin` (a warning)
   instead of `PinNotConnected` (an error).
 - `Net` has a new public field (`labeled`), and `Component` too (`pins`).

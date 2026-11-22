@@ -169,6 +169,7 @@ impl NetLabel {
 
 /// A label attached to a node, with the subcircuit instance it was attached in.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NodeLabel {
     /// The label.
     pub label: NetLabel,

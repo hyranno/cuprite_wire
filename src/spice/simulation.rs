@@ -14,6 +14,7 @@ use crate::spice::SpiceDeck;
 /// glibc `tmpfile()`, which the CLI copies its input with, ignores `$TMPDIR`; where `/tmp` is
 /// read-only (e.g. the Claude Code sandbox), the devcontainer's `ngspice` wrapper redirects it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Ngspice {
     /// The ngspice executable (a name looked up in `PATH`, or a path).
     pub program: PathBuf,
@@ -34,6 +35,13 @@ impl Default for Ngspice {
 }
 
 impl Ngspice {
+    /// Runs the ngspice executable `program` (a name looked up in `PATH`, or a path).
+    pub fn new(program: impl Into<PathBuf>) -> Self {
+        Ngspice {
+            program: program.into(),
+        }
+    }
+
     /// Writes the deck into a new temporary directory and runs it there, so that relative
     /// `wrdata` paths land in that directory.
     ///

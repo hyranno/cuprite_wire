@@ -21,6 +21,7 @@ use crate::{
 /// parts, like the pages of a KiCad schematic) and sorted by reference in each, and nets are sorted
 /// by name (both in natural order).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Netlist {
     /// The components (part instances).
     pub components: Vec<Component>,
@@ -34,6 +35,7 @@ pub struct Netlist {
 
 /// A part instance in a [`Netlist`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Component {
     /// The reference designator (e.g. `R1`), unique in the netlist.
     pub ref_name: String,
@@ -74,6 +76,7 @@ impl Component {
 
 /// A net: a group of connected nodes with at least one part pin.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Net {
     /// The net name, unique in the netlist: given by a label (`NAME` for a global one, `/path/NAME`
     /// for a local one), or, for nets without labels, after one of its pins like KiCad
@@ -91,6 +94,7 @@ pub struct Net {
 
 /// A part pin on a [`Net`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NetNode {
     /// Index into [`Netlist::components`].
     pub component: usize,

@@ -6,6 +6,7 @@ use crate::trace::{Loc, Trace};
 
 /// An additional location related to a diagnostic (e.g. the other one of two duplicates).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Note {
     /// What the location is (e.g. "previously used here").
     pub message: String,
@@ -15,6 +16,7 @@ pub struct Note {
 
 /// An error or a warning with the trace of its cause.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Diagnostic<K> {
     /// What went wrong.
     pub kind: K,

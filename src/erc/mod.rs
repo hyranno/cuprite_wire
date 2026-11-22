@@ -53,6 +53,7 @@ pub enum ErcMark {
 
 /// A mark with the location where it was attached.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NodeMark {
     /// The mark.
     pub mark: ErcMark,
@@ -211,6 +212,7 @@ impl ErcSettings {
 
 /// A pin in an ERC message.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ErcPin {
     /// A pin of a part.
     Part {
@@ -380,6 +382,7 @@ impl fmt::Display for ErcViolationKind {
 
 /// A violation found by ERC.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ErcViolation {
     /// [`Severity::Warning`] or [`Severity::Error`]; ignored violations are not reported.
     pub severity: Severity,
@@ -406,6 +409,7 @@ impl fmt::Display for ErcViolation {
 
 /// The violations found by ERC, without the ignored ones.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ErcReport {
     /// The reported violations, errors and warnings alike.
     pub violations: Vec<ErcViolation>,

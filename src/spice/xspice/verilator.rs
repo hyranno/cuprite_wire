@@ -371,6 +371,7 @@ fn inputs_unchanged(dir: &Path) -> bool {
 
 /// A port of the top module.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Port {
     /// Name of the port in the top module.
     pub name: String,
