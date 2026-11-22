@@ -168,8 +168,9 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
   (`file.model_selector(name)` lists them with their descriptions). `Corner::Typ` / `Min` / `Max`
   select the column of the values (a value that is `NA` falls back to typical; in a table, a column
   takes the rows that have values, and the typical column if it has none). The supported model
-  types are `Input`, `Output`, `I/O`, `3-state`, the open drain, sink and source types, and
-  `Terminator`.
+  types are `Input`, `Output`, `I/O`, `3-state`, the open drain, sink and source types, their ECL
+  versions (`Input_ECL`, `Output_ECL`, ...; `[Pulldown]` is relative to the supply, as the
+  specification defines), `Terminator`, and `Series` (see below).
 - The sequence is the level of the pin (the pad), not of the logic inside the device: `Polarity`
   (`Inverting`) and `Enable` (`Active-Low`) of the model are not applied.
 - `IbisDriver::new(buffer, sequence)` (pins `out`, `gnd`; `XDRV1`) plays a `DigitalSequence`. The
@@ -191,8 +192,39 @@ let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#)
 - Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
   model, `cuprite_ibis_<hash>` for the driver); the I-V tables are XSPICE `pwl` code models, which
   the usual builds of ngspice load. Beyond the voltages of a table, its end segments are extended.
-- Differential, ECL and series models are not used; neither are `[Package Model]`,
-  `[Receiver Thresholds]` and `[Submodel]`.
+- Not used: `Series_switch` models, `[Series Current]` / `[Series MOSFET]`, the `*_diff` model
+  types (which need `[External Model]`), `[Package Model]`, `[Receiver Thresholds]` and
+  `[Submodel]`.
+
+Differential pairs (`[Diff Pin]`):
+
+```rust
+let tx = IbisDiffBuffer::of_pin(&ibs, "PHY", "A5", Corner::Typ)?; // either pin of the pair
+let rx = IbisDiffBuffer::of_pin(&ibs, "FPGA", "B7", Corner::Typ)?;
+let driver = bench.instantiate_part(IbisDiffDriver::new(tx, seq));
+let receiver = bench.instantiate_part(IbisDiffReceiver::new(rx.clone()));
+// ... connect `p` to `p` and `n` to `n` (through a differential line), run a transient analysis ...
+let vdiff = rx.vdiff().unwrap(); // high above +vdiff, low below -vdiff
+```
+
+- `IbisDiffBuffer::of_pin(&file, component, pin, corner)` takes the row of `[Diff Pin]` with the
+  pin: the buffers of its non-inverting and inverting pins (`p()`, `n()`, each with its own model
+  and parasitics, as `IbisBuffer::of_pin`), `vdiff()` and `tdelay()` at the corner (0 when `NA`).
+  `of_pin_model` chooses the model of a `[Model Selector]` for both pins;
+  `IbisDiffBuffer::new(p, n, vdiff, tdelay)` pairs any two buffers.
+- `IbisDiffDriver::new(buffer, sequence)` (pins `p`, `n`, `gnd`; `XDRV1`) plays the sequence on
+  `p` and its complement on `n`, `tdelay` later (`HiZ` releases both). A pin whose model cannot
+  drive high (open drain, as in TMDS) or low (open source) is released instead.
+- `IbisDiffReceiver::new(buffer)` (pins `p`, `n`, `gnd`; `XRX1`) puts the receiver of each buffer
+  on its pin. `cuprite_wire` does not decode the difference: compare `v(p) - v(n)` with
+  `vdiff()`.
+- A `Series` model that `[Series Pin Mapping]` puts between the two pins of the pair, such as an
+  on-die 100 ohm termination, is part of both the driver and the receiver (`termination()`;
+  `with_termination` adds one to a pair made with `new`). It connects the pins outside their
+  packages. `IbisSeries::of_pins(&file, component, pin1, pin2, corner)` / `IbisSeries::new(&model,
+  corner)` (pins `a`, `b`; `XSER1`) is such a model as a part of its own: `[R Series]`,
+  `[L Series]` with `[Rl Series]`, and `[C Series]` with `[Lc Series]` and `[Rc Series]`, in
+  parallel.
 
 Which to use:
 

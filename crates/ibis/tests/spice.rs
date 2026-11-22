@@ -8,7 +8,7 @@ use std::{
 
 use cuprite_wire_ibis::{
     Corner, IbisFile, parse,
-    spice::{Drive, Parasitics, Subcircuit, Weights, subcircuit},
+    spice::{Drive, Parasitics, Subcircuit, Weights, series_subcircuit, subcircuit},
 };
 
 fn fixture() -> IbisFile {
@@ -171,6 +171,107 @@ print high
         dut.text
     ));
     assert_close(value(&values, "high"), 3.3 * 50.0 / 132.5, 1e-4);
+}
+
+#[test]
+fn test_ecl_driver_dc() {
+    // The tables of an ECL model are relative to the supply (5 V), [Pulldown] included: the
+    // pullup is 4.1 V behind 10 ohms, the pulldown 3.3 V behind 10 ohms.
+    let ibs = parse(
+        "\
+[IBIS Ver] 3.2
+[Model] ecl
+Model_type Output_ECL
+[Voltage Range] 5.0 NA NA
+[Pulldown]
+0 0.17 NA NA
+5 -0.33 NA NA
+[Pullup]
+0 0.09 NA NA
+5 -0.41 NA NA
+[Ramp]
+dV/dt_r 0.5/0.3n NA NA
+dV/dt_f 0.5/0.3n NA NA
+[END]
+",
+    )
+    .unwrap();
+    let dut = subcircuit(
+        "dut",
+        ibs.model("ecl").unwrap(),
+        &Parasitics::NONE,
+        Corner::Typ,
+    )
+    .unwrap();
+    assert_eq!(dut.ports, ["pin", "ref", "ku", "kd"]);
+    // Into 50 ohms to 3 V (the usual termination to the supply minus 2 V).
+    let values = run(&format!(
+        "ecl driver
+{}X1 pin 0 ku kd dut
+Vku ku 0 1
+Vkd kd 0 0
+Rload pin load 50
+Vload load 0 3
+.control
+op
+let high = v(pin)
+print high
+alter Vku 0
+alter Vkd 1
+op
+let low = v(pin)
+print low
+.endc
+.end
+",
+        dut.text
+    ));
+    assert_close(value(&values, "high"), (4.1 * 5.0 + 3.0) / 6.0, 1e-4);
+    assert_close(value(&values, "low"), (3.3 * 5.0 + 3.0) / 6.0, 1e-4);
+}
+
+#[test]
+fn test_series() {
+    let ibs = parse(
+        "\
+[IBIS Ver] 3.2
+[Model] rc
+Model_type Series
+[R Series] 100 90 110
+[C Series] 1p NA NA
+[Model] rl
+Model_type Series
+[R Series] 100 NA NA
+[L Series] 1n NA NA
+[Rl Series] 50 NA NA
+[END]
+",
+    )
+    .unwrap();
+    let series = |name, corner| series_subcircuit(name, ibs.model(name).unwrap(), corner).unwrap();
+    let rc = series("rc", Corner::Min);
+    assert_eq!(rc.ports, ["pin1", "pin2"]);
+    assert!(!rc.is_driver());
+    let rl = series("rl", Corner::Typ);
+    // At DC the capacitor is open and the inductor a short circuit.
+    let values = run(&format!(
+        "series
+{}{}V1 a 0 1
+X1 a 0 rc
+V2 b 0 1
+X2 b 0 rl
+.control
+op
+let irc = -i(V1)
+let irl = -i(V2)
+print irc irl
+.endc
+.end
+",
+        rc.text, rl.text
+    ));
+    assert_close(value(&values, "irc"), 1.0 / 90.0, 1e-7);
+    assert_close(value(&values, "irl"), 1.0 / 100.0 + 1.0 / 50.0, 1e-7);
 }
 
 #[test]
@@ -547,6 +648,23 @@ fn test_errors() {
     assert_eq!(
         error(&format!("Model_type Input\n[POWER Clamp]{table}")),
         "model `m`: [POWER Clamp] needs its reference voltage or [Voltage Range]"
+    );
+    let series_error = |body: &str| {
+        series_subcircuit("x", &model(body), Corner::Typ)
+            .unwrap_err()
+            .to_string()
+    };
+    assert_eq!(
+        series_error("Model_type Input"),
+        "model `m`: a series subcircuit needs a `Series` model, not `Input`"
+    );
+    assert_eq!(
+        series_error("Model_type Series"),
+        "model `m`: a `Series` model needs [R Series], [L Series] or [C Series]"
+    );
+    assert_eq!(
+        series_error("Model_type Series\n[R Series] 1 NA NA\n[Series Current]\n0 0 NA NA"),
+        "model `m`: [Series Current] and [Series MOSFET] are not supported"
     );
     // An open drain model needs no [Pullup].
     let ramp = "[Ramp]\ndV/dt_r 1/1n NA NA\ndV/dt_f 1/1n NA NA";

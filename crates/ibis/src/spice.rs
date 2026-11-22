@@ -130,7 +130,8 @@ impl Parasitics {
 pub struct Subcircuit {
     /// The name of the subcircuit.
     pub name: String,
-    /// The ports, in order: [`PIN`] and [`REF`], then [`KU`] and [`KD`] for a driver.
+    /// The ports, in order: [`PIN`] and [`REF`], then [`KU`] and [`KD`] for a driver; [`PIN1`]
+    /// and [`PIN2`] for a series model.
     pub ports: Vec<&'static str>,
     /// The edges of a driver; `None` for a receiver.
     pub edges: Option<Edges>,
@@ -184,8 +185,15 @@ impl Kind {
             })
         };
         match model_type {
-            ModelType::Input | ModelType::Terminator => kind(false, false, false),
-            ModelType::Output | ModelType::Io | ModelType::ThreeState => kind(true, true, true),
+            ModelType::Input | ModelType::InputEcl | ModelType::Terminator => {
+                kind(false, false, false)
+            }
+            ModelType::Output
+            | ModelType::Io
+            | ModelType::ThreeState
+            | ModelType::OutputEcl
+            | ModelType::IoEcl
+            | ModelType::ThreeStateEcl => kind(true, true, true),
             ModelType::OpenDrain
             | ModelType::IoOpenDrain
             | ModelType::OpenSink
@@ -199,17 +207,20 @@ impl Kind {
 /// Writes the model as a subcircuit named `name`, with the package `parasitics` and the values of
 /// the `corner`.
 ///
-/// A model of type `Input` or `Terminator` becomes a receiver with the ports `pin ref`: the
-/// package, `C_comp` and the clamps, and for a terminator `[Rgnd]` to `[GND Clamp Reference]`,
-/// `[Rpower]` to `[POWER Clamp Reference]` (or else `[Voltage Range]`), and `[Rac]` in series
-/// with `[Cac]` to `[GND Clamp Reference]`. The types that drive (`Output`, `I/O`, `3-state` and the open drain, sink and
-/// source types) become drivers with the ports `pin ref ku kd`, which add `[Pullup]` and
-/// `[Pulldown]`. An `I/O` model with `ku` and `kd` at 0 is its receiver.
+/// A model of type `Input`, `Input_ECL` or `Terminator` becomes a receiver with the ports
+/// `pin ref`: the package, `C_comp` and the clamps, and for a terminator `[Rgnd]` to
+/// `[GND Clamp Reference]`, `[Rpower]` to `[POWER Clamp Reference]` (or else `[Voltage Range]`),
+/// and `[Rac]` in series with `[Cac]` to `[GND Clamp Reference]`. The types that drive (`Output`,
+/// `I/O`, `3-state`, the open drain, sink and source types, and their ECL versions) become drivers
+/// with the ports `pin ref ku kd`, which add `[Pullup]` and `[Pulldown]`. An `I/O` model with `ku`
+/// and `kd` at 0 is its receiver.
 ///
 /// The voltage of `[Pullup]` and `[POWER Clamp]` is `[Pullup Reference]` and
 /// `[POWER Clamp Reference]`, or else `[Voltage Range]`; that of `[Pulldown]` and `[GND Clamp]` is
-/// `[Pulldown Reference]` and `[GND Clamp Reference]`, or else 0. Beyond the voltages of a table,
-/// `pwl` extrapolates its end segments, as in KIBIS.
+/// `[Pulldown Reference]` and `[GND Clamp Reference]`, or else 0. In ECL models, `[Pulldown]` is
+/// relative to the supply like `[Pullup]` (`[Pulldown Reference]`, or else `[Voltage Range]`,
+/// minus the voltage of the die), as the IBIS specification defines. Beyond the voltages of a
+/// table, `pwl` extrapolates its end segments, as in KIBIS.
 ///
 /// The edges of a driver come from its waveforms, as the IBIS specification describes: at each
 /// time of a waveform, the weights are those with which the tables, the clamps and `C_comp` drive
@@ -223,11 +234,11 @@ impl Kind {
 /// ([`Edges::from_ramp`]).
 ///
 /// # Errors
-/// If the model type is not one of the above (ECL, differential and series models),
-/// a driver lacks the I-V table its type needs or an edge lacks both waveforms and `[Ramp]`, a
-/// table has fewer than two rows or
-/// repeats a voltage, a table or a termination lacks its reference voltage, or a terminator has
-/// only one of `[Rac]` and `[Cac]`.
+/// If the model type is not one of the above (the `*_diff`, `Series` and `Series_switch` types;
+/// [`series_subcircuit`] writes `Series` models), a driver lacks the I-V table its type needs or
+/// an edge lacks both waveforms and `[Ramp]`, a table has fewer than two rows or repeats a
+/// voltage, a table or a termination lacks its reference voltage, or a terminator has only one of
+/// `[Rac]` and `[Cac]`.
 pub fn subcircuit(
     name: &str,
     model: &Model,
@@ -265,6 +276,10 @@ pub fn subcircuit(
     let reference = |value: Option<TypMinMax<f64>>, default: Option<f64>| {
         value.map(|v| v.get(corner)).or(default)
     };
+    let ecl = matches!(
+        model.model_type,
+        ModelType::OutputEcl | ModelType::IoEcl | ModelType::ThreeStateEcl
+    );
     let tables = [
         (
             "GC",
@@ -286,8 +301,11 @@ pub fn subcircuit(
             "PD",
             "[Pulldown]",
             &model.pulldown,
-            reference(model.pulldown_reference, Some(0.0)),
-            false,
+            reference(
+                model.pulldown_reference,
+                if ecl { supply } else { Some(0.0) },
+            ),
+            ecl,
             Some(KD),
         ),
         (
@@ -496,6 +514,99 @@ pub fn subcircuit(
         ports,
         edges,
         notes,
+        text,
+    })
+}
+
+/// The first port of a series subcircuit ([`series_subcircuit`]).
+pub const PIN1: &str = "pin1";
+/// The second port of a series subcircuit.
+pub const PIN2: &str = "pin2";
+
+/// Writes a `Series` model as a subcircuit named `name` with the ports [`PIN1`] and [`PIN2`], with
+/// the values of the `corner`: its passive elements in parallel between the ports
+/// ([`SeriesElements`](crate::SeriesElements)). The packages of the two pins are not part of it.
+///
+/// # Errors
+/// If the model is not of type `Series`, has `[Series Current]` or `[Series MOSFET]`, or has none
+/// of `[R Series]`, `[L Series]` and `[C Series]`.
+pub fn series_subcircuit(
+    name: &str,
+    model: &Model,
+    corner: Corner,
+) -> Result<Subcircuit, SubcircuitError> {
+    let error = |message: &str| SubcircuitError {
+        model: model.name.clone(),
+        message: message.to_string(),
+    };
+    if model.model_type != ModelType::Series {
+        return Err(error(&format!(
+            "a series subcircuit needs a `Series` model, not `{}`",
+            model.model_type
+        )));
+    }
+    let series = &model.series;
+    if series.nonlinear {
+        return Err(error(
+            "[Series Current] and [Series MOSFET] are not supported",
+        ));
+    }
+    let value = |v: Option<TypMinMax<f64>>| v.map(|v| v.get(corner));
+    let mut text = format!(
+        "* IBIS model {} ({}), corner {corner:?}\n.subckt {name} {PIN1} {PIN2}\n",
+        model.name, model.model_type
+    );
+    let mut empty = true;
+    if let Some(r) = value(series.r) {
+        text.push_str(&format!("RS {PIN1} {PIN2} {}\n", num(r)));
+        empty = false;
+    }
+    // A branch of an element in series with optional others, from PIN1 to PIN2.
+    let mut branch = |id: &str, elements: [(char, Option<f64>); 3]| {
+        let elements: Vec<_> = elements
+            .into_iter()
+            .filter_map(|(kind, v)| v.map(|v| (kind, v)))
+            .collect();
+        for (i, (kind, v)) in elements.iter().enumerate() {
+            let from = if i == 0 {
+                PIN1.to_string()
+            } else {
+                format!("{}{i}", id.to_ascii_lowercase())
+            };
+            let to = if i + 1 == elements.len() {
+                PIN2.to_string()
+            } else {
+                format!("{}{}", id.to_ascii_lowercase(), i + 1)
+            };
+            text.push_str(&format!("{kind}{id}{i} {from} {to} {}\n", num(*v)));
+        }
+    };
+    if let Some(l) = value(series.l) {
+        branch("L", [('L', Some(l)), ('R', value(series.rl)), ('R', None)]);
+        empty = false;
+    }
+    if let Some(c) = value(series.c) {
+        branch(
+            "C",
+            [
+                ('C', Some(c)),
+                ('L', value(series.lc)),
+                ('R', value(series.rc)),
+            ],
+        );
+        empty = false;
+    }
+    if empty {
+        return Err(error(
+            "a `Series` model needs [R Series], [L Series] or [C Series]",
+        ));
+    }
+    text.push_str(&format!(".ends {name}\n"));
+    Ok(Subcircuit {
+        name: name.to_string(),
+        ports: vec![PIN1, PIN2],
+        edges: None,
+        notes: Vec::new(),
         text,
     })
 }
