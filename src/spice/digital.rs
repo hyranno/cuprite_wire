@@ -19,9 +19,11 @@
 mod characteristics;
 mod sequence;
 
+#[cfg(feature = "shared-ngspice")]
 pub(crate) use characteristics::StageSource;
 pub use characteristics::{InputCharacteristics, OutputCharacteristics, Pull};
 pub use sequence::DigitalSequence;
+#[cfg(feature = "shared-ngspice")]
 pub(crate) use sequence::Pwl;
 
 use crate::{
