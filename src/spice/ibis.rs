@@ -59,8 +59,8 @@ pub enum IbisBufferError {
         /// The pin.
         pin: String,
     },
-    /// The pin is a supply, ground or unconnected pin, or names a `[Model Selector]` (whose
-    /// models are not read) or a model the file does not have.
+    /// The pin is a supply, ground or unconnected pin, names a model the file does not have, or
+    /// the model asked for is not one of its `[Model Selector]`.
     NoModel {
         /// The pin.
         pin: String,
@@ -132,16 +132,15 @@ impl IbisBuffer {
         let hash = fnv1a(subcircuit("", model, parasitics, corner)?.text.as_bytes());
         let name = format!("cuprite_ibis_model_{hash:016x}");
         let subckt = subcircuit(&name, model, parasitics, corner)?;
-        let input = match (model.vinl, model.vinh) {
-            (Some(vinl), Some(vinh)) => Some(InputCharacteristics {
-                threshold_low: vinl,
-                threshold_high: vinh,
+        let input = model
+            .thresholds(corner)
+            .map(|(low, high)| InputCharacteristics {
+                threshold_low: low,
+                threshold_high: high,
                 capacitance: model.c_comp.map_or(0.0, |c| c.get(corner)),
                 pull: None,
                 leakage: 0.0,
-            }),
-            _ => None,
-        };
+            });
         Ok(IbisBuffer {
             model_name: model.name.clone(),
             model_type: model.model_type,
@@ -155,15 +154,43 @@ impl IbisBuffer {
     }
 
     /// The buffer of the pin `pin` of the component `component` of `file`: its model, behind
-    /// the parasitics of the pin ([`Parasitics::of_pin`]).
+    /// the parasitics of the pin ([`Parasitics::of_pin`]). For a pin naming a `[Model Selector]`,
+    /// the default model of the selector (the first one); [`IbisBuffer::of_pin_model`] chooses
+    /// another.
     ///
     /// # Errors
     /// If the file has no such component or pin, the pin has no model of the file (a supply or
-    /// `NC` pin, a `[Model Selector]`), or [`IbisBuffer::new`] fails.
+    /// `NC` pin), or [`IbisBuffer::new`] fails.
     pub fn of_pin(
         file: &IbisFile,
         component: &str,
         pin: &str,
+        corner: Corner,
+    ) -> Result<Self, IbisBufferError> {
+        Self::pin_buffer(file, component, pin, None, corner)
+    }
+
+    /// The buffer of the pin `pin` of the component `component` of `file`, as
+    /// [`IbisBuffer::of_pin`] with the model `model` of the `[Model Selector]` of the pin.
+    ///
+    /// # Errors
+    /// As [`IbisBuffer::of_pin`], and if `model` is not one of the models of the selector (or,
+    /// for a pin naming a model, not that model).
+    pub fn of_pin_model(
+        file: &IbisFile,
+        component: &str,
+        pin: &str,
+        model: &str,
+        corner: Corner,
+    ) -> Result<Self, IbisBufferError> {
+        Self::pin_buffer(file, component, pin, Some(model), corner)
+    }
+
+    fn pin_buffer(
+        file: &IbisFile,
+        component: &str,
+        pin: &str,
+        choice: Option<&str>,
         corner: Corner,
     ) -> Result<Self, IbisBufferError> {
         let c = file
@@ -181,15 +208,9 @@ impl IbisBuffer {
             PinModel::Power => return Err(no_model("it is a POWER pin".into())),
             PinModel::Gnd => return Err(no_model("it is a GND pin".into())),
             PinModel::Nc => return Err(no_model("it is an NC pin".into())),
-            PinModel::Named(name) => file.model(name).ok_or_else(|| {
-                if file.model_selectors.iter().any(|s| s == name) {
-                    no_model(format!(
-                        "`{name}` is a [Model Selector]; choose one of its models with IbisBuffer::new"
-                    ))
-                } else {
-                    no_model(format!("the file has no [Model] `{name}`"))
-                }
-            })?,
+            PinModel::Named(name) => file
+                .pin_model(name, choice)
+                .map_err(|e| no_model(e.to_string()))?,
         };
         Ok(Self::new(model, &Parasitics::of_pin(c, p, corner), corner)?)
     }
@@ -209,7 +230,7 @@ impl IbisBuffer {
         self.corner
     }
 
-    /// Whether the model drives its pin (all the supported types but `Input`).
+    /// Whether the model drives its pin (all the supported types but `Input` and `Terminator`).
     pub fn is_driver(&self) -> bool {
         self.edges.is_some()
     }
@@ -227,8 +248,9 @@ impl IbisBuffer {
     }
 
     /// The input thresholds of the model, to read levels from the voltage of the pin
-    /// ([`InputCharacteristics::decode`]): `Vinl` and `Vinh`, with `C_comp` as the capacitance
-    /// and no pull or leakage. `None` if the model lacks `Vinl` or `Vinh`.
+    /// ([`InputCharacteristics::decode`]): `Vinl` and `Vinh` (of `[Model Spec]` at the corner if
+    /// given, [`Model::thresholds`]), with `C_comp` as the capacitance and no pull or leakage.
+    /// `None` if the model lacks `Vinl` or `Vinh`.
     pub fn input(&self) -> Option<&InputCharacteristics> {
         self.input.as_ref()
     }
@@ -357,7 +379,8 @@ impl Part for IbisDriver {
     }
 }
 
-/// An IBIS input buffer, with pins `in` and `gnd`: the package, `C_comp` and the clamps.
+/// An IBIS input buffer, with pins `in` and `gnd`: the package, `C_comp` and the clamps (and the
+/// resistors of a `Terminator` model).
 ///
 /// A buffer that drives (an I/O model) is the receiver with its driver off. The levels are read
 /// from the voltage of the pin with [`IbisBuffer::input`].

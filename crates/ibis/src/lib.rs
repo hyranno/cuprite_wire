@@ -49,15 +49,19 @@
 //! - the header: `[IBIS Ver]`, `[Comment Char]`, `[File Name]`, `[File Rev]`, `[Date]`,
 //!   `[Source]`, `[Notes]`, `[Disclaimer]`, `[Copyright]`;
 //! - `[Component]` with `[Manufacturer]`, `[Package]` and `[Pin]`;
+//! - `[Model Selector]`;
 //! - `[Model]` with its subparameters (`Model_type`, `Polarity`, `Enable`, `Vinl`, `Vinh`,
-//!   `Vmeas`, `Vref`, `Cref`, `Rref`, `C_comp`), `[Temperature Range]`, `[Voltage Range]`, the
-//!   references (`[Pullup Reference]`, ...), the I-V tables (`[Pullup]`, `[Pulldown]`,
-//!   `[GND Clamp]`, `[POWER Clamp]`), `[Ramp]`, `[Rising Waveform]` and `[Falling Waveform]`.
+//!   `Vmeas`, `Vref`, `Cref`, `Rref`, `C_comp`, or the `C_comp_*` parts), `[Model Spec]`
+//!   (`Vinl` and `Vinh`), `[Temperature Range]`, `[Voltage Range]`, the references
+//!   (`[Pullup Reference]`, ...), the I-V tables (`[Pullup]`, `[Pulldown]`, `[GND Clamp]`,
+//!   `[POWER Clamp]`), the terminations (`[Rgnd]`, `[Rpower]`, `[Rac]`, `[Cac]`), `[Ramp]`,
+//!   `[Rising Waveform]` and `[Falling Waveform]`.
 //!
-//! Other keywords and subparameters (`[Model Selector]`, `[Diff Pin]`,
-//! `[Package Model]`, `[Submodel]`, IBIS-AMI, ...) are skipped without an error and listed in
+//! Other keywords and subparameters (`[Diff Pin]`, `[Package Model]`, `[Submodel]`,
+//! `[Receiver Thresholds]`, IBIS-AMI, ...) are skipped without an error and listed in
 //! [`IbisFile::skipped`]. The parser is lenient about what does not change the meaning: it does
-//! not check line lengths, and keywords may be indented.
+//! not check line lengths, keywords may be indented, and the keywords of text (`[Notes]`, ...)
+//! may repeat.
 //!
 //! # Simulation
 //!
@@ -85,9 +89,9 @@ pub struct IbisFile {
     pub components: Vec<Component>,
     /// The `[Model]`s, in the order of the file.
     pub models: Vec<Model>,
-    /// The names of the `[Model Selector]`s, which pins may name instead of a model. Their
-    /// contents are not read.
-    pub model_selectors: Vec<String>,
+    /// The `[Model Selector]`s, which pins may name instead of a model, in the order of the
+    /// file.
+    pub model_selectors: Vec<ModelSelector>,
     /// The keywords and subparameters that were skipped, in order.
     pub skipped: Vec<Skipped>,
 }
@@ -102,6 +106,109 @@ impl IbisFile {
     pub fn model(&self, name: &str) -> Option<&Model> {
         self.models.iter().find(|m| m.name == name)
     }
+
+    /// The `[Model Selector]` with the name.
+    pub fn model_selector(&self, name: &str) -> Option<&ModelSelector> {
+        self.model_selectors.iter().find(|s| s.name == name)
+    }
+
+    /// The model that a pin naming `name` uses: the `[Model]` of the name, or one of the models of
+    /// the `[Model Selector]` of the name, `choice` or else the first one (its default).
+    ///
+    /// # Errors
+    /// If the file has neither a model nor a selector of the name, or `choice` is neither one of
+    /// the models of the selector nor (for a model) its name.
+    pub fn pin_model(&self, name: &str, choice: Option<&str>) -> Result<&Model, ModelLookupError> {
+        let chosen = if let Some(selector) = self.model_selector(name) {
+            match choice {
+                Some(choice) => {
+                    selector
+                        .option(choice)
+                        .ok_or_else(|| ModelLookupError::NotSelectable {
+                            name: name.to_string(),
+                            choice: choice.to_string(),
+                        })?;
+                    choice
+                }
+                None => selector.default_model(),
+            }
+        } else {
+            if let Some(choice) = choice.filter(|&c| c != name) {
+                return Err(ModelLookupError::NotSelectable {
+                    name: name.to_string(),
+                    choice: choice.to_string(),
+                });
+            }
+            name
+        };
+        // The parser checks that the models of a selector exist.
+        self.model(chosen)
+            .ok_or_else(|| ModelLookupError::NoModel(chosen.to_string()))
+    }
+}
+
+/// The reason [`IbisFile::pin_model`] has no model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ModelLookupError {
+    /// The file has no `[Model]` or `[Model Selector]` of the name.
+    NoModel(String),
+    /// The choice is not one of the models of the selector (or not the model) of the name.
+    NotSelectable {
+        /// The model or selector.
+        name: String,
+        /// The model asked for.
+        choice: String,
+    },
+}
+
+impl fmt::Display for ModelLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ModelLookupError::NoModel(name) => {
+                write!(f, "the file has no [Model] or [Model Selector] `{name}`")
+            }
+            ModelLookupError::NotSelectable { name, choice } => {
+                write!(f, "`{choice}` is not a model of `{name}`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ModelLookupError {}
+
+/// A `[Model Selector]`: a name that pins use in place of a model, standing for one of several
+/// models, such as the drive strengths of a programmable buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelSelector {
+    /// The name after `[Model Selector]`.
+    pub name: String,
+    /// The models to choose from, in the order of the file; there is at least one, and the
+    /// first is the default.
+    pub options: Vec<SelectorOption>,
+}
+
+impl ModelSelector {
+    /// The name of the default model: the first one.
+    pub fn default_model(&self) -> &str {
+        &self.options[0].model
+    }
+
+    /// The option of the model with the name.
+    pub fn option(&self, model: &str) -> Option<&SelectorOption> {
+        self.options.iter().find(|o| o.model == model)
+    }
+}
+
+/// A model of a [`ModelSelector`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SelectorOption {
+    /// The name of the `[Model]`.
+    pub model: String,
+    /// The description of the model, for a user to choose it (empty if the file has none).
+    pub description: String,
 }
 
 /// The keywords describing the file itself.
@@ -217,7 +324,9 @@ pub struct Model {
     pub cref: Option<f64>,
     /// `Rref`: the resistance of the timing test load, in ohms.
     pub rref: Option<f64>,
-    /// `C_comp`: the die capacitance, in farads.
+    /// `C_comp`: the die capacitance, in farads. Without `C_comp`, the sum of `C_comp_pullup`,
+    /// `C_comp_pulldown`, `C_comp_power_clamp` and `C_comp_gnd_clamp` (the parts of the die
+    /// capacitance to each rail, which the model then holds as one capacitance to ground).
     pub c_comp: Option<TypMinMax<f64>>,
     /// `[Temperature Range]`, in degrees Celsius.
     pub temperature_range: Option<TypMinMax<f64>>,
@@ -241,12 +350,45 @@ pub struct Model {
     pub gnd_clamp: Option<IvTable>,
     /// `[POWER Clamp]`.
     pub power_clamp: Option<IvTable>,
+    /// `[Rgnd]`: the resistance of a terminator from the die to `[GND Clamp Reference]`, in
+    /// ohms.
+    pub rgnd: Option<TypMinMax<f64>>,
+    /// `[Rpower]`: the resistance of a terminator from the die to `[POWER Clamp Reference]`, in
+    /// ohms.
+    pub rpower: Option<TypMinMax<f64>>,
+    /// `[Rac]`: the resistance of the AC termination of a terminator (in series with `[Cac]`
+    /// from the die to `[GND Clamp Reference]`), in ohms.
+    pub rac: Option<TypMinMax<f64>>,
+    /// `[Cac]`: the capacitance of the AC termination, in farads.
+    pub cac: Option<TypMinMax<f64>>,
     /// `[Ramp]`.
     pub ramp: Option<Ramp>,
     /// The `[Rising Waveform]`s, in the order of the file.
     pub rising_waveforms: Vec<Waveform>,
     /// The `[Falling Waveform]`s, in the order of the file.
     pub falling_waveforms: Vec<Waveform>,
+    /// `[Model Spec]`: the values of the model that depend on the corner.
+    pub model_spec: ModelSpec,
+}
+
+impl Model {
+    /// The input thresholds (low, high) at the corner: `Vinl` and `Vinh` of `[Model Spec]`, or
+    /// else of the model. `None` if either is missing.
+    pub fn thresholds(&self, corner: Corner) -> Option<(f64, f64)> {
+        let low = self.model_spec.vinl.map(|v| v.get(corner)).or(self.vinl)?;
+        let high = self.model_spec.vinh.map(|v| v.get(corner)).or(self.vinh)?;
+        Some((low, high))
+    }
+}
+
+/// The subparameters of `[Model Spec]` that are read (the others are skipped).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[non_exhaustive]
+pub struct ModelSpec {
+    /// `Vinl` at the corners, in volts.
+    pub vinl: Option<TypMinMax<f64>>,
+    /// `Vinh` at the corners, in volts.
+    pub vinh: Option<TypMinMax<f64>>,
 }
 
 /// `Model_type` of a [`Model`].
@@ -398,11 +540,63 @@ impl<T: Copy> TypMinMax<T> {
     }
 }
 
+/// The values of a row of a table at the three corners, `None` where the row has `NA`.
+///
+/// The columns of a table may sample different points: a row may have `NA` in any column, even
+/// the typical one. [`IvTable::curve`] and [`Waveform::curve`] pick the rows of a corner.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct CornerValues {
+    /// The typical value.
+    pub typ: Option<f64>,
+    /// The minimum value.
+    pub min: Option<f64>,
+    /// The maximum value.
+    pub max: Option<f64>,
+}
+
+impl CornerValues {
+    /// The value of the corner, `None` where it is `NA`.
+    pub fn at(&self, corner: Corner) -> Option<f64> {
+        match corner {
+            Corner::Typ => self.typ,
+            Corner::Min => self.min,
+            Corner::Max => self.max,
+        }
+    }
+}
+
+/// The (x, y) points of a table at the corner: the rows with a value in the column of the corner,
+/// or the typical column if the corner has no values at all.
+fn column(
+    rows: impl Iterator<Item = (f64, CornerValues)> + Clone,
+    corner: Corner,
+) -> Vec<(f64, f64)> {
+    let pick = |corner| -> Vec<_> {
+        rows.clone()
+            .filter_map(|(x, y)| y.at(corner).map(|y| (x, y)))
+            .collect()
+    };
+    let points = pick(corner);
+    if points.is_empty() {
+        pick(Corner::Typ)
+    } else {
+        points
+    }
+}
+
 /// An I-V table (`[Pullup]`, `[Pulldown]`, `[GND Clamp]`, `[POWER Clamp]`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct IvTable {
     /// The rows, in the order of the file.
     pub points: Vec<IvPoint>,
+}
+
+impl IvTable {
+    /// The (voltage, current) points of the corner, in the order of the file: the rows with a
+    /// value for the corner, or the typical values if the column of the corner is all `NA`.
+    pub fn curve(&self, corner: Corner) -> Vec<(f64, f64)> {
+        column(self.points.iter().map(|p| (p.voltage, p.current)), corner)
+    }
 }
 
 /// A row of an [`IvTable`].
@@ -411,7 +605,7 @@ pub struct IvPoint {
     /// In volts.
     pub voltage: f64,
     /// The current into the pin at the voltage, in amperes.
-    pub current: TypMinMax<f64>,
+    pub current: CornerValues,
 }
 
 /// `[Ramp]`: the rise and fall rates of a driver, measured from 20% to 80% of the swing into
@@ -454,13 +648,21 @@ pub struct Waveform {
     pub points: Vec<VtPoint>,
 }
 
+impl Waveform {
+    /// The (time, voltage) points of the corner, in increasing time: the rows with a value for
+    /// the corner, or the typical values if the column of the corner is all `NA`.
+    pub fn curve(&self, corner: Corner) -> Vec<(f64, f64)> {
+        column(self.points.iter().map(|p| (p.time, p.voltage)), corner)
+    }
+}
+
 /// A row of a [`Waveform`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VtPoint {
     /// In seconds.
     pub time: f64,
     /// The voltage of the die at the time, in volts.
-    pub voltage: TypMinMax<f64>,
+    pub voltage: CornerValues,
 }
 
 /// A rate given as a voltage change over a time (`dV/dt`).

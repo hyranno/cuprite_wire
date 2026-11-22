@@ -22,6 +22,9 @@ break the API).
   high-impedance states and the edges of the model. The edges reproduce its `[Rising Waveform]`s
   and `[Falling Waveform]`s (the weights solved from two waveforms into different fixtures, or
   from one with `ku + kd = 1`, as KiCad does), or else are linear from its `[Ramp]`.
+  `[Model Selector]`s are read (`IbisFile::pin_model` takes the default or a chosen model),
+  `[Model Spec]` gives `Vinl`/`Vinh` by corner, and `Terminator` models (`[Rgnd]`, `[Rpower]`,
+  `[Rac]`, `[Cac]`) are written as receivers. Checked against 20 IBIS files of real devices.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes

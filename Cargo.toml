@@ -86,6 +86,10 @@ required-features = ["kicad-libraries"]
 name = "vendor_models"
 required-features = ["vendor-models"]
 
+[[test]]
+name = "vendor_ibis"
+required-features = ["vendor-models", "ibis"]
+
 # Runs the tests of the example's subcircuits with `cargo test` (they need ngspice, like the
 # simulation tests of the library).
 [[example]]
