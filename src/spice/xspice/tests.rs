@@ -302,7 +302,7 @@ fn test_verilator_error() {
         .unwrap_err();
     assert!(
         matches!(&error, VerilatorError::Command { log, dir, .. }
-            if log.contains("broken.v:2") && dir.is_dir()),
+            if log.contains("broken.v:2") && dir.as_ref().is_some_and(|dir| dir.is_dir())),
         "{error}"
     );
 }
