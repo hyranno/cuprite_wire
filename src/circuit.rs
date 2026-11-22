@@ -343,6 +343,9 @@ impl<B> CircuitBuilder<B> {
     /// instance name is automatic (`<base name>#<n>`), or explicit with [`Named`]: the name is
     /// used in hierarchical net names (`/name/LABEL`) and as the key of the deterministic UUIDs of
     /// the parts inside it.
+    ///
+    /// [`SubcircuitGenerator`]: crate::subcircuit::SubcircuitGenerator
+    /// [`SubcircuitGenerator::with_options`]: crate::subcircuit::SubcircuitGenerator::with_options
     #[track_caller]
     pub fn instantiate_subcircuit<S: IntoSubcircuit<B>>(&mut self, subcircuit: S) -> S::Interface {
         let location = Location::caller();
