@@ -106,6 +106,17 @@ break the API).
   `\x41` and octal `\101`; a backslash before another character is kept), and a pin in several
   units with the same name and type belongs to the lowest of them rather than the first in the
   file.
+- Co-simulation: a transient analysis with a `tstart` called the models first at that time, as the
+  first point (`is_first_point()`), and `option interp` called them many times at the same time;
+  both are now `SimulationError::Cosimulation`.
+- `SharedNgspice`: `set` and `option` commands of a run carried over to the next runs in the
+  process; the library is now loaded for each run and unloaded after it. The commands of the
+  background thread (`bg_run`, ...), which made the run end while the analysis went on, are a
+  `SimulationError::SharedLibrary`.
+- `cuprite_wire_embedded_hal`: a PWM duty set by the firmware at the time a period starts took
+  effect in that period instead of the next (`Firmware` now updates the PWM channels before the
+  step; `Pwm::update` documents the order). An output pin that has not been set is neither
+  `is_set_high` nor `is_set_low`, since a bidirectional pin starts in `HiZ`.
 
 ## [0.2.0] - 2026-11-21
 

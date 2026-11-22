@@ -124,8 +124,8 @@ mod sealed {
 ///
 /// The methods panic for a pin the device does not have, the input methods for a pin without
 /// [`InputCharacteristics`] and the output methods for a pin without [`OutputCharacteristics`].
-/// After a panic in a model, the run goes on without calling the models, and `run_with` resumes the
-/// panic when it ends.
+/// After a panic in a model, the analysis runs to its end without calling the models, with the
+/// outputs of all devices released (high impedance), and `run_with` resumes the panic when it ends.
 ///
 /// [`InputCharacteristics`]: crate::spice::digital::InputCharacteristics
 /// [`OutputCharacteristics`]: crate::spice::digital::OutputCharacteristics

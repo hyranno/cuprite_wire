@@ -278,7 +278,12 @@ Verified with libngspice 44.2 (`libngspice0`, `ngSpice_Init` and `ngSpice_Comman
 - A syntax error in an expression prints `Error: ngspice.dll cannot recover and awaits to be reset or
   detached`, calls `ControlledExit` (status 1) and makes `ngSpice_Command` return 1. Unloading the
   library (`dlclose`) and loading it again prints the banner again and runs the next deck normally.
-- `remcirc` and `destroy all` free the circuit and the plots after a run.
+- `remcirc` and `destroy all` free the circuit and the plots after a run, but the front-end
+  variables stay: `option interp` in one run made the next run send interpolated points. The
+  library is therefore loaded for each run and unloaded after it.
+- With a `tstart` in `tran`, `SendData` starts at the first point after `tstart`; with
+  `option interp`, it sends the interpolated points, the same time many times (and the breakpoints
+  asked for print `breakpoint in the past`). Co-simulation rejects both.
 
 ### 6.2 Node `gnd` and XSPICE bridges
 

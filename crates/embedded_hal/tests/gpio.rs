@@ -4,6 +4,7 @@ use cuprite_wire::{
     circuit::CircuitBuilder,
     naming::NetLabel,
     spice::{
+        SpiceDeck,
         cosim::{CosimDevice, DeviceModels},
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
@@ -12,7 +13,10 @@ use cuprite_wire::{
     },
 };
 use cuprite_wire_embedded_hal::{Board, Firmware};
-use embedded_hal::digital::{InputPin, OutputPin, StatefulOutputPin};
+use embedded_hal::{
+    digital::{InputPin, OutputPin, StatefulOutputPin},
+    pwm::SetDutyCycle,
+};
 
 /// Copies an input to an output at each step, counting the steps.
 struct Mirror<I, O> {
@@ -100,23 +104,7 @@ fn test_two_transient_analyses() {
         }
         task.steps += 1;
     }
-    let mut bench = CircuitBuilder::new();
-    let mcu = bench
-        .instantiate_part(CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3)));
-    let load = bench.instantiate_part(DigitalLoad::new(InputCharacteristics::cmos(3.3)));
-    bench.connect(mcu["out"], load[DigitalLoad::IN]);
-    bench.label(mcu["out"], NetLabel::local("OUT"));
-    for gnd in [mcu[CosimDevice::GND], load[DigitalLoad::GND]] {
-        bench.label(gnd, NetLabel::global("GND"));
-    }
-    let deck = bench
-        .build(&())
-        .to_netlist()
-        .unwrap()
-        .to_spice()
-        .unwrap()
-        .deck()
-        .control(["tran 10n 2u", "tran 10n 2u", r#"wrdata out.txt v("/OUT")"#]);
+    let deck = output_deck(&["tran 10n 2u", "tran 10n 2u"]);
     let board = Board::new();
     let once = Once {
         output: board.output_pin("out"),
@@ -129,18 +117,71 @@ fn test_two_transient_analyses() {
     // Steps at 0, 1 and 2 us in each analysis.
     assert_eq!(firmware.task().steps, 6);
     let table = sim.table("out.txt").unwrap();
-    let out = table.interpolate(r#"v("/OUT")"#, 1e-6).unwrap();
+    let out = table.interpolate(OUT, 1e-6).unwrap();
     assert!((out - 3.3).abs() < 1e-3, "{out}");
 }
 
-/// The pins keep their values outside the steps, and outputs start `Low`.
+const OUT: &str = r#"v("/OUT")"#;
+
+/// A device with the output `out` on the net `/OUT`, loaded by an input; the deck runs `analyses`
+/// and writes the voltage of `/OUT` to `out.txt`.
+fn output_deck(analyses: &[&str]) -> SpiceDeck {
+    let mut bench = CircuitBuilder::new();
+    let mcu = bench
+        .instantiate_part(CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3)));
+    let load = bench.instantiate_part(DigitalLoad::new(InputCharacteristics::cmos(3.3)));
+    bench.connect(mcu["out"], load[DigitalLoad::IN]);
+    bench.label(mcu["out"], NetLabel::local("OUT"));
+    for gnd in [mcu[CosimDevice::GND], load[DigitalLoad::GND]] {
+        bench.label(gnd, NetLabel::global("GND"));
+    }
+    bench
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control(analyses.iter().copied())
+        .control([format!("wrdata out.txt {OUT}")])
+}
+
+/// A duty set by a step at the time a PWM period starts takes effect at the next period, as with
+/// the buffered compare register of a timer whose interrupt is at the start of the period.
+#[test]
+fn test_pwm_duty_at_period_start() {
+    let deck = output_deck(&["tran 10n 3u"]);
+    let board = Board::new();
+    let mut firmware = Firmware::new(&board, 1e-6, board.pwm("out", 1e-6, 4), |pwm| {
+        pwm.set_duty_cycle(2).unwrap();
+    });
+    let sim = deck
+        .run_with(DeviceModels::new().with("mcu", &mut firmware))
+        .unwrap();
+    let table = sim.table("out.txt").unwrap();
+    let at = |t| table.interpolate(OUT, t).unwrap();
+    // The first period has the duty of 0 the channel starts with.
+    assert!(at(0.25e-6) < 0.1, "{}", at(0.25e-6));
+    assert!(at(0.75e-6) < 0.1, "{}", at(0.75e-6));
+    for period in [1e-6, 2e-6] {
+        let (high, low) = (at(period + 0.25e-6), at(period + 0.75e-6));
+        assert!(high > 3.2 && low < 0.1, "{period}: {high} {low}");
+    }
+}
+
+/// The pins keep their values outside the steps, and outputs are neither set high nor low until
+/// they are set (a bidirectional pin starts in `HiZ`).
 #[test]
 fn test_pins_outside_a_run() {
     let board = Board::new();
     let mut input = board.input_pin("in");
     let mut output = board.output_pin("out");
     assert!(input.is_low().unwrap());
-    assert!(output.is_set_low().unwrap());
+    assert!(!output.is_set_low().unwrap());
+    assert!(!output.is_set_high().unwrap());
     output.set_high().unwrap();
     assert!(output.is_set_high().unwrap());
+    assert!(!output.is_set_low().unwrap());
+    output.set_low().unwrap();
+    assert!(output.is_set_low().unwrap());
 }
