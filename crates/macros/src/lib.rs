@@ -46,7 +46,7 @@ use quote::{format_ident, quote};
 /// |---|---|---|
 /// | `symbol` | `"Library:Name"` | |
 /// | `footprint` | `"Library:Name"` or `none` | the symbol's `Footprint` property |
-/// | `value` | `"text"` or `param` (a constructor argument) | the symbol's `Value` |
+/// | `value` | `"text"` or `param` (a constructor argument) | the symbol's `Value`; text variables such as `${SIM.PARAMS}` are expanded from the fields |
 /// | `ref_base` | reference prefix | the symbol's `Reference` |
 /// | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin number | the pin numbers |
 /// | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs | stacked pins |

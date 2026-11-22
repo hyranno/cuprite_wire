@@ -64,6 +64,8 @@ break the API).
 
 ### Fixed
 
+- `kicad_part!` expands the text variables of the value from the part's fields as KiCad does, e.g.
+  `${SIM.PARAMS}`, the value of `Simulation_SPICE:OPAMP`, which was written as is.
 - ERC treated internal connection groups sharing a pin (e.g. `["4", "5"]` and `["4", "ep"]`) as
   separate stacks, so pins of the same type in them could be reported as conflicting.
 

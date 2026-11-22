@@ -56,7 +56,7 @@
       (sheetpath (names "/") (tstamps "/"))
       (tstamps "54a444f8-cfb3-5cea-b2ae-5af9ceb49db6"))
     (comp (ref "U1")
-      (value "OPAMP")
+      (value "~")
       (footprint "Package_TO_SOT_SMD:SOT-23-5")
       (libsource (lib "Simulation_SPICE") (part "OPAMP"))
       (sheetpath (names "/") (tstamps "/"))

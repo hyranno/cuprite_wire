@@ -10,6 +10,7 @@ use crate::{
     resolve::Resolver,
     sim::{self, ModelMode, SimInput, SpiceDef, Value},
     symbol::{ElectricalType, Symbol},
+    text_var,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -176,11 +177,23 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             .to_string(),
     };
     check_ref_base(&ref_base)?;
-    let value = match &common.value {
-        Some(value) => value.clone(),
-        None => sim::Value::Fixed(symbol.property("Value").unwrap_or_default().to_string()),
-    };
     let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
+    // The value with its text variables expanded from the fields (`fields` of the part).
+    let value_with = |fields: &[(String, String)]| match &common.value {
+        Some(sim::Value::Param) => Ok(sim::Value::Param),
+        Some(sim::Value::Fixed(value)) => {
+            expand_value(value, fields, &symbol, footprint.as_ref(), &options.sim)
+                .map_err(at(Value))
+        }
+        None => expand_value(
+            symbol.property("Value").unwrap_or_default(),
+            fields,
+            &symbol,
+            footprint.as_ref(),
+            &options.sim,
+        )
+        .map_err(at(Symbol)),
+    };
 
     // Pins: a pin per pad of the symbol pins, then extra pads; IDs default to the pad numbers
     // (see `default_pin_ids` for duplicate pins).
@@ -257,7 +270,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             let input = SimInput {
                 symbol: &symbol,
                 ref_prefix: &ref_base,
-                value: &value,
+                value: &value_with(&fields)?,
                 builtin_model_name: &format!("__{}", common.type_name),
                 model_mode: common.sim_model,
             };
@@ -295,6 +308,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         }
     };
 
+    let value = value_with(&fields)?;
     let non_empty = |name: &str| {
         symbol
             .property(name)
@@ -317,6 +331,33 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         internal_connections,
         spice,
     })
+}
+
+/// Expands the text variables of a value (e.g. `${SIM.PARAMS}`) as KiCad does from the fields of
+/// the symbol in the schematic: `fields` of the part, the footprint, and the symbol's properties,
+/// whose `Sim.*` fields are replaced by the `sim` block. (`Reference` is assigned when the circuit is
+/// built, so `${REFERENCE}` is left as it is.)
+fn expand_value(
+    value: &str,
+    fields: &[(String, String)],
+    symbol: &Symbol,
+    footprint: Option<&LibId>,
+    sim: &[ModelBinding],
+) -> Result<sim::Value, Error> {
+    let footprint = footprint.map(LibId::to_string).unwrap_or_default();
+    let properties = symbol.properties.iter().filter(|(name, _)| {
+        !(name == "Reference"
+            || name == "Value"
+            || name == "Footprint"
+            || name.starts_with("ki_")
+            || (!sim.is_empty() && name.starts_with("Sim.")))
+    });
+    let all = fields
+        .iter()
+        .chain(properties)
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .chain([("Footprint", footprint.as_str())]);
+    text_var::expand_field(value, all).map(sim::Value::Fixed)
 }
 
 /// Pin IDs by pad number (of the first pin of duplicate pins), and pads by symbol pin number.
@@ -985,6 +1026,29 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn test_value_text_variables() {
+        let value = |opts: &PartOptions| load_part(opts, &mut resolver()).unwrap().value;
+        let mut opts = options("test:SIM_AMP", "test:SOT-23-6");
+        opts.fields = vec![("MPN".into(), "X1".into())];
+        opts.common.value = Some(Value::Fixed(
+            "${SIM.PARAMS} ${footprint} ${MPN} ${SIM.TYPE}${REFERENCE}".into(),
+        ));
+        assert_eq!(
+            value(&opts),
+            Value::Fixed("GAIN=100 test:SOT-23-6 X1 ${REFERENCE}".into())
+        );
+        // The `sim` block replaces the symbol's `Sim.*` fields.
+        let mut opts = options("test:VSUP", "test:SOT-23-6");
+        opts.sim = vec![vsup_binding()];
+        opts.common.value = Some(Value::Fixed("${SIM.NAME}${SIM.PARAMS}".into()));
+        assert_eq!(value(&opts), Value::Fixed("VSUP01".into()));
+        let mut opts = options("test:SIM_AMP", "test:SOT-23-6");
+        opts.common.value = Some(Value::Fixed("${SIM.PARAMS".into()));
+        let error = load_part(&opts, &mut resolver()).unwrap_err();
+        assert_eq!(error.key, OptionKey::Value);
     }
 
     #[test]

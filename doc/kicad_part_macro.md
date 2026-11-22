@@ -53,7 +53,15 @@ Only `symbol` is required. Options are separated by commas.
 
 A library nickname is the file name: `Library:Name` is the symbol `Name` in
 `<symbol dir>/Library.kicad_sym`, and the footprint `<footprint dir>/Library.pretty/Name.kicad_mod`.
-Library tables (`sym-lib-table`, `fp-lib-table`) are not read. The `libsource` and `footprint`
+Library tables (`sym-lib-table`, `fp-lib-table`) are not read.
+
+Text variables in a fixed value are expanded at compile time as KiCad does: `${NAME}` is the field
+`NAME` of the part, ignoring case (the symbol's properties such as `Sim.Params` or `Description`,
+the footprint, the `sim` block's `Sim.*` fields and `fields`), and `${SIM.PARAMS}`, `${SIM.NAME}`
+and the other simulation fields are empty when the part does not have them. For example, the
+value of `Simulation_SPICE:OPAMP` is `${SIM.PARAMS}`, which is empty, written `~` to the netlist.
+Variables KiCad resolves from the schematic (`${REFERENCE}`, `${UNIT}`, sheet and project
+variables) and unknown ones are left as they are. The `libsource` and `footprint`
 written to the netlist are these `Library:Name` identifiers, so pcbnew needs a footprint library
 with the same nickname.
 
