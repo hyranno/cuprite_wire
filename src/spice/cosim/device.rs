@@ -13,6 +13,7 @@ use crate::{
 
 /// A pin of a [`CosimDevice`]: an output, an input, or both (a bidirectional GPIO).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CosimPin {
     /// The pin name: a port of the subcircuit, unique (case-insensitively) among the pins of the device.
     pub name: String,

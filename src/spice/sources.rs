@@ -42,6 +42,7 @@ pub enum SourceKind {
 
 /// A time-dependent waveform for transient analysis.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Waveform {
     /// `SIN(offset amplitude frequency delay damping phase)`; phase in degrees.
     Sin {
@@ -167,6 +168,7 @@ impl Waveform {
 /// A voltage source drives `p` to `dc` volts above `n`. A current source drives `dc` amperes
 /// from `p` through the source to `n` (so into the circuit at `n`), as in SPICE.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct IndependentSource {
     /// Whether the source drives a voltage or a current.
     pub kind: SourceKind,

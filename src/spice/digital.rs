@@ -366,6 +366,7 @@ impl Pwl {
 /// other in `rise_time` / `fall_time` (0-100 %, which is 1.25 times the 10-90 % time of a datasheet).
 /// Changes to and from `HiZ` switch the resistance to [`HIZ_RESISTANCE`] and back.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct OutputCharacteristics {
     /// The voltage of `Low` (`V_OL`), relative to the `gnd` pin.
     pub low: f64,
@@ -487,6 +488,7 @@ impl Pull {
 
 /// The electrical characteristics of an input pin.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct InputCharacteristics {
     /// The highest voltage read as `Low` (`V_IL`).
     pub threshold_low: f64,

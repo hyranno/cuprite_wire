@@ -52,6 +52,7 @@ const DEFAULT_LIBRARY: &str = if cfg!(windows) {
 /// read. A deck without a control block is run with `run` after it is read, as the CLI runs the
 /// analyses of its dot directives.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SharedNgspice {
     /// The library file: a path, or a file name the dynamic loader searches for.
     pub library: PathBuf,
@@ -67,6 +68,13 @@ impl Default for SharedNgspice {
 }
 
 impl SharedNgspice {
+    /// Uses the library `library` (a path, or a file name the dynamic loader searches for).
+    pub fn new(library: impl Into<PathBuf>) -> Self {
+        SharedNgspice {
+            library: library.into(),
+        }
+    }
+
     /// Runs the deck in a new temporary directory.
     ///
     /// After an error ngspice cannot recover from, the library is unloaded and loaded again for
