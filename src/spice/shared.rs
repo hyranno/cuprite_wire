@@ -24,7 +24,9 @@ use libloading::Library;
 
 use crate::spice::{
     SpiceDeck,
-    simulation::{Simulation, SimulationError, Simulator, finish_run, prepare_run_dir},
+    simulation::{
+        Simulation, SimulationError, Simulator, finish_run, ngbehavior_command, prepare_run_dir,
+    },
     spice_path,
 };
 
@@ -51,6 +53,11 @@ const DEFAULT_LIBRARY: &str = if cfg!(windows) {
 /// `wrs2p` needs a file. The compatibility mode is set with `set ngbehavior=...` before the deck is
 /// read. A deck without a control block is run with `run` after it is read, as the CLI runs the
 /// analyses of its dot directives.
+///
+/// Unlike the CLI, the library is affected by the user's `.spiceinit`: when loaded, it reads the
+/// one in the working directory of the process, or else the one in the home directory.
+/// ngspice offers no way to prevent this on Linux and macOS (`ngSpice_nospiceinit` works only in
+/// the Windows build).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SharedNgspice {
@@ -122,10 +129,7 @@ impl SharedNgspice {
         let loaded = library.as_ref().expect("the library is loaded");
         lock(&OUTPUT).clear();
         EXITED.store(false, Ordering::SeqCst);
-        let mode = match deck.netlist().ngbehavior() {
-            Some(mode) => format!("set ngbehavior={mode}"),
-            None => "unset ngbehavior".into(),
-        };
+        let mode = ngbehavior_command(deck);
         let source = format!("source {}", spice_path(&deck_path));
         // Without a control block the CLI runs the analyses of the dot directives; `source` only
         // loads the circuit.
