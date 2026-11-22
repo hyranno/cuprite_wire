@@ -1117,7 +1117,14 @@ suggested from the names (not applied; check them against the datasheet):
             ..Default::default()
         };
         let pins = &symbol_pins()[..3];
-        let dir = fixture_resolver().manifest_dir.join("models/xspice");
+        // With the separators of the platform, as the resolved paths (the manifest directory
+        // ends with `/tests/fixtures`, also on Windows).
+        let dir: PathBuf = fixture_resolver()
+            .manifest_dir
+            .join("models")
+            .join("xspice")
+            .components()
+            .collect();
         let state_file = dir.join("counter2.in");
 
         // Inlined, the relative paths are made absolute, relative to the file of the definition.
@@ -1129,7 +1136,7 @@ suggested from the names (not applied; check them against the datasheet):
             mode: ModelMode::Inline,
         };
         // `..` is kept, as for includes (`states` may be a link).
-        let ext_state_file = dir.join("states/../counter2.in");
+        let ext_state_file = dir.join("states").join("..").join("counter2.in");
         for (name, path) in [("counter2", &state_file), ("counter2_ext", &ext_state_file)] {
             let elements = bind(&[counter(name)], &options, &mut resolver).unwrap();
             let texts: Vec<&str> = elements.elements[0]
