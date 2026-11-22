@@ -51,7 +51,7 @@ mod firmware {
         pub fn step(&mut self) {
             self.last = self.adc.read();
             let error = i32::from(TARGET) - i32::from(self.last);
-            self.integral = (self.integral + error * 40).clamp(0, 65535);
+            self.integral = (self.integral + error * 20).clamp(0, 65535);
             let max = u32::from(self.pwm.max_duty_cycle());
             let duty = (self.integral as u32 * max / 65535) as u16;
             self.pwm.set_duty_cycle(duty).unwrap();

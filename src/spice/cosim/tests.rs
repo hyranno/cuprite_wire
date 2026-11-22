@@ -473,3 +473,77 @@ fn test_pin_not_saved() {
         other => panic!("{other:?}"),
     }
 }
+
+/// A model recording the times it is called at.
+#[derive(Default)]
+struct Recorder {
+    times: Vec<f64>,
+}
+
+impl DeviceModel for Recorder {
+    fn step(&mut self, io: &mut DeviceIo<'_>) {
+        self.times.push(io.time());
+    }
+}
+
+/// The error of a run of `line_deck` whose analysis is `analysis`, and the times the model was
+/// called at.
+fn analysis_error(analysis: &[&str]) -> (SimulationError, Vec<f64>) {
+    let device = CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3));
+    let load = DigitalLoad::new(InputCharacteristics::cmos(3.3));
+    let mut circuit = CircuitBuilder::new();
+    let device = circuit.instantiate_part(device);
+    let load = circuit.instantiate_part(load);
+    circuit.connect(device["out"], load[DigitalLoad::IN]);
+    circuit.label(device[CosimDevice::GND], NetLabel::global("GND"));
+    circuit.label(load[DigitalLoad::GND], NetLabel::global("GND"));
+    let deck = deck_of(&circuit).control(analysis.iter().copied());
+    let mut recorder = Recorder::default();
+    let error = deck
+        .run_with(DeviceModels::new().with("mcu", &mut recorder))
+        .unwrap_err();
+    (error, recorder.times)
+}
+
+/// With a `tstart`, the first point ngspice gives is not at time 0: an error, without calling the
+/// models at the first point it gives (`is_first_point()` would be true there).
+#[test]
+fn test_tstart_rejected() {
+    let (error, times) = analysis_error(&["tran 10n 1u 0.5u"]);
+    let SimulationError::Cosimulation(reason) = &error else {
+        panic!("{error:?}");
+    };
+    assert!(reason.contains("tstart"), "{reason}");
+    assert!(times.is_empty(), "{times:?}");
+}
+
+/// With `option interp`, ngspice gives the interpolated points, the same one many times: an error
+/// at the first point that does not advance. The option does not carry over to the next run.
+#[test]
+fn test_interp_rejected() {
+    let (error, times) = analysis_error(&["option interp", "tran 100n 1u"]);
+    let SimulationError::Cosimulation(reason) = &error else {
+        panic!("{error:?}");
+    };
+    assert!(reason.contains("interp"), "{reason}");
+    assert!(times.windows(2).all(|w| w[0] < w[1]), "{times:?}");
+    let device = CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3));
+    let load = DigitalLoad::new(InputCharacteristics::cmos(3.3));
+    let deck = line_deck(device, "out", load, 1e-6);
+    let mut recorder = Recorder::default();
+    deck.run_with(DeviceModels::new().with("mcu", &mut recorder))
+        .unwrap();
+    assert!(recorder.times.len() > 10, "{:?}", recorder.times);
+}
+
+/// `bg_run` would end the run, and remove the circuit, while the analysis goes on in the
+/// background thread.
+#[test]
+fn test_background_run_rejected() {
+    let (error, times) = analysis_error(&["Bg_Run tran 10n 1u"]);
+    let SimulationError::SharedLibrary(reason) = &error else {
+        panic!("{error:?}");
+    };
+    assert!(reason.contains("\"Bg_Run\""), "{reason}");
+    assert!(times.is_empty(), "{times:?}");
+}

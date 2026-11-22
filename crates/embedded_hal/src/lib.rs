@@ -73,12 +73,10 @@ struct State {
 #[derive(Debug)]
 struct Output {
     pin: String,
-    /// The level set last.
-    level: Level,
+    /// The level set last; `None` until it is set.
+    level: Option<Level>,
     /// Whether it was set during the step.
     changed: bool,
-    /// Whether it has ever been set.
-    driven: bool,
 }
 
 /// The pins of a [`CosimDevice`](cuprite_wire::spice::cosim::CosimDevice) as `embedded-hal`
@@ -106,14 +104,14 @@ impl Board {
     }
 
     /// A digital output (`OutputPin`, `StatefulOutputPin`) on a pin with output characteristics.
-    /// It drives `Low` until it is set.
+    /// Until it is set, the pin stays as the device starts it (`Low` for an output, `HiZ` for a
+    /// bidirectional pin), and neither `is_set_high` nor `is_set_low` is true.
     pub fn output_pin(&self, pin: &str) -> OutputPinHandle {
         let mut state = self.state.borrow_mut();
         state.outputs.push(Output {
             pin: pin.to_string(),
-            level: Level::Low,
+            level: None,
             changed: false,
-            driven: false,
         });
         OutputPinHandle {
             state: self.state.clone(),
@@ -122,7 +120,8 @@ impl Board {
     }
 
     /// A PWM channel (`SetDutyCycle`) on an output pin, with `period` seconds and duty steps of
-    /// `1 / max_duty`. A new duty takes effect at the next period.
+    /// `1 / max_duty`. A new duty takes effect at the next period, also when it is set by a step
+    /// at the time a period starts.
     ///
     /// # Panics
     /// If `period` is not positive or `max_duty` is 0.
@@ -173,20 +172,23 @@ impl Board {
     /// `HiZ`): drives the outputs that have been set to their levels again.
     fn restart(&self) {
         for output in &mut self.state.borrow_mut().outputs {
-            output.changed |= output.driven;
+            output.changed |= output.level.is_some();
         }
     }
 
-    /// Drives the outputs set during the step, and the PWM channels.
-    fn apply(&self, io: &mut DeviceIo<'_>) {
-        let mut state = self.state.borrow_mut();
-        for output in &mut state.outputs {
-            if std::mem::take(&mut output.changed) {
-                io.set(&output.pin, output.level);
-            }
-        }
-        for pwm in &mut state.pwms {
+    /// Drives the PWM channels, before the step: a period starting now takes the duty set before.
+    fn update_pwms(&self, io: &mut DeviceIo<'_>) {
+        for pwm in &mut self.state.borrow_mut().pwms {
             pwm.update(io);
+        }
+    }
+
+    /// Drives the outputs set during the step.
+    fn apply(&self, io: &mut DeviceIo<'_>) {
+        for output in &mut self.state.borrow_mut().outputs {
+            if let (true, Some(level)) = (std::mem::take(&mut output.changed), output.level) {
+                io.set(&output.pin, level);
+            }
         }
     }
 }
@@ -233,6 +235,7 @@ impl<T, F: FnMut(&mut T)> DeviceModel for Firmware<T, F> {
         if io.is_first_point() {
             self.board.restart();
         }
+        self.board.update_pwms(io);
         if self.timer.due(io) {
             self.board.capture(io);
             (self.step)(&mut self.task);
@@ -273,9 +276,8 @@ impl OutputPinHandle {
     fn set(&mut self, level: Level) {
         let mut state = self.state.borrow_mut();
         let output = &mut state.outputs[self.index];
-        output.level = level;
+        output.level = Some(level);
         output.changed = true;
-        output.driven = true;
     }
 }
 
@@ -297,11 +299,11 @@ impl digital::OutputPin for OutputPinHandle {
 
 impl digital::StatefulOutputPin for OutputPinHandle {
     fn is_set_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.state.borrow().outputs[self.index].level == Level::High)
+        Ok(self.state.borrow().outputs[self.index].level == Some(Level::High))
     }
 
     fn is_set_low(&mut self) -> Result<bool, Infallible> {
-        self.is_set_high().map(|high| !high)
+        Ok(self.state.borrow().outputs[self.index].level == Some(Level::Low))
     }
 }
 

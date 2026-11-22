@@ -104,6 +104,22 @@ impl DeviceRun<'_> {
     }
 }
 
+/// Why the models cannot be called at the accepted point `time` after the one at `last`: the
+/// models run from time 0 and are called once per time point.
+fn time_error(last: Option<f64>, time: f64) -> Option<String> {
+    match last {
+        None if time != 0.0 => Some(format!(
+            "the first point of the transient analysis is at {time:e} s, not 0 \
+             (`tran` with a `tstart` is not supported: the models run from time 0)"
+        )),
+        Some(last) if time <= last => Some(format!(
+            "the transient analysis gave the point at {time:e} s after the one at {last:e} s \
+             (`option interp` is not supported: the models need the points ngspice computes)"
+        )),
+        _ => None,
+    }
+}
+
 /// Which source of an output pin.
 #[derive(Debug, Clone, Copy)]
 enum Source {
@@ -118,6 +134,8 @@ pub(crate) struct CosimSession<'m> {
     sources: HashMap<String, (usize, usize, Source)>,
     /// The index of the `time` vector, in a transient analysis.
     time: Option<usize>,
+    /// The time of the last accepted point of the transient analysis.
+    last_time: Option<f64>,
     wakes: Vec<f64>,
     /// Why the models cannot be run (a node of a pin is not in the plot); the models are not
     /// called after it.
@@ -195,6 +213,7 @@ impl<'m> CosimSession<'m> {
             devices,
             sources,
             time: None,
+            last_time: None,
             wakes: Vec::new(),
             error: None,
         })
@@ -210,6 +229,7 @@ impl Session for CosimSession<'_> {
             .map(|(i, name)| (name.as_str(), i))
             .collect();
         self.time = index.get("time").copied().filter(|_| transient);
+        self.last_time = None;
         for device in &mut self.devices {
             device.vectors = device
                 .nodes
@@ -236,6 +256,11 @@ impl Session for CosimSession<'_> {
         if self.error.is_some() {
             return;
         }
+        if let Some(error) = time_error(self.last_time, time) {
+            self.error = Some(error);
+            return;
+        }
+        self.last_time = Some(time);
         for device in &mut self.devices {
             let voltage = |vector: Option<usize>| vector.and_then(|i| values.get(i)).copied();
             let gnd = voltage(*device.vectors.last().expect("gnd is a node")).unwrap_or(0.0);

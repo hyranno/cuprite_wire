@@ -148,7 +148,10 @@ impl Adc {
 }
 
 /// A PWM output: `High` for `duty * period` at the start of each period, then `Low`.
-/// A new duty takes effect at the next period, as with the buffered compare registers of timers.
+/// A new duty takes effect at the next period, as with the buffered compare registers of timers:
+/// [`Pwm::update`] takes the duty when it starts a period. At a time point where a period starts,
+/// a duty set before `update` is called takes effect in that period, so call `update` before the
+/// code setting the duty (a timer interrupt at the start of the period runs after the start).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pwm {
     pin: String,
@@ -183,7 +186,8 @@ impl Pwm {
         self.duty = duty.clamp(0.0, 1.0);
     }
 
-    /// Drives the pin; call it at every step.
+    /// Drives the pin, and starts a period with the duty set last when one is due; call it at
+    /// every step, before the duty is set.
     #[track_caller]
     pub fn update(&mut self, io: &mut DeviceIo<'_>) {
         if io.is_first_point() {

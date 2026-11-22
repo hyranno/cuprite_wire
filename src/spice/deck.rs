@@ -82,6 +82,22 @@ const DEFAULT_RAW_FILE: &str = "rawspice.raw";
 
 impl SpiceDeck {
     #[cfg(feature = "shared-ngspice")]
+    /// The first control command that runs in the background thread of the shared library
+    /// (`bg_run`, `bg_halt`, ...), which the runs of [`SharedNgspice`](crate::spice::SharedNgspice)
+    /// do not wait for.
+    pub(crate) fn background_command(&self) -> Option<&str> {
+        self.control
+            .iter()
+            .flat_map(|commands| commands.lines())
+            .filter_map(|line| line.split_whitespace().next())
+            .find(|command| {
+                command
+                    .get(..3)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("bg_"))
+            })
+    }
+
+    #[cfg(feature = "shared-ngspice")]
     /// The deck for the ngspice shared library, which runs in the working directory of the
     /// process: relative output files of `wrdata`, `write` and `wrs2p` are put in `dir`, and the
     /// control block does not end with `quit` (which would make the library exit).

@@ -225,8 +225,12 @@ co-simulation with Rust models; plain runs should keep using the CLI:
   the process, or else `~/.spiceinit`. The CLI does not (see above), so settings there can make the
   two differ. ngspice cannot be told to skip it on Linux and macOS (`ngSpice_nospiceinit` only
   works in the Windows build).
-- After an error ngspice cannot recover from (it reports `cannot recover and awaits to be reset`),
-  the library is unloaded and loaded again for the next run.
+- The library is loaded for each run and unloaded after it, so nothing a run sets (`set`,
+  `option`, `define`, ...) carries over to the next run, also after an error ngspice cannot recover
+  from (it reports `cannot recover and awaits to be reset`).
+- The commands of the background thread (`bg_run`, `bg_halt`, ...) are not supported
+  (`SimulationError::SharedLibrary`): the run would end, and the circuit be removed, while the
+  analysis goes on.
 
 `SharedNgspice::run_with` (and `SpiceDeck::run_with`) runs a deck with Rust models of devices:
 see `doc/cosimulation.md`.

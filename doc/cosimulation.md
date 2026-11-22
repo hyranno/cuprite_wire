@@ -41,7 +41,9 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
   voltages. Names are ASCII letters, digits and `_`; pin names are unique case-insensitively and
   cannot be `gnd`, `ref` or `0` (nodes of the generated subcircuit).
 - A `DeviceModel` is the behavior: `step(&mut self, io)` is called at every accepted time point of
-  the transient analysis, from time 0 on.
+  the transient analysis, from time 0 on. The models need the points ngspice computes, from time 0:
+  `tran` with a `tstart` and `option interp` are `SimulationError::Cosimulation`. The commands of
+  the background thread (`bg_run`, ...) are not supported (`SimulationError::SharedLibrary`).
 - `deck.run_with(DeviceModels::new().with(name, &mut model))` runs the deck in the shared library
   (`SharedNgspice::default().run_with(...)` for another library file) and returns the same
   `Simulation` as `run()`. Models are bound to devices by name. Every device needs a model and every
@@ -112,7 +114,8 @@ impl DeviceModel for Sram {
   leaves out the node of a pin (or of `gnd`) makes `run_with` return
   `SimulationError::Cosimulation`, and the models are not called.
 - A panic in a model (e.g. an `assert!` or an unknown pin name) is resumed by `run_with` after the
-  run, so it fails the test as usual; the models are not called after it.
+  run, so it fails the test as usual. The analysis still runs to its end, without calling the
+  models: the outputs of all devices are released (high impedance, with the drive source at 0 V).
 
 ## 3. Peripherals
 
@@ -123,16 +126,18 @@ impl DeviceModel for Sram {
 - `Adc::new(pin, bits, reference)`: `read(io)` converts the pin voltage
   (`floor(v / reference * 2^bits)`, clamped); `voltage_of(code)` converts back.
 - `Pwm::new(pin, period, start)`: `set_duty(duty)` takes effect at the next period;
-  call `update(io)` at every step.
+  call `update(io)` at every step. `update` takes the duty when it starts a period, so call it
+  before the code setting the duty: otherwise a duty set at the time a period starts (a control
+  loop with the same or a multiple of the PWM period) takes effect in that period.
 
 ```rust
 impl DeviceModel for Controller {
     fn step(&mut self, io: &mut DeviceIo<'_>) {
+        self.pwm.update(io);
         if self.control.due(io) {
             let measured = self.adc.voltage_of(self.adc.read(io));
             self.pwm.set_duty(self.pwm.duty() + 0.05 * (TARGET - measured));
         }
-        self.pwm.update(io);
     }
 }
 ```
@@ -160,8 +165,12 @@ let regulator = mcu.into_task();   // check its state after the run
 
 - `Board` hands out the pins of the `CosimDevice` as `embedded-hal` objects:
   `input_pin(pin)` (`InputPin`), `output_pin(pin)` (`OutputPin`, `StatefulOutputPin`),
-  `pwm(pin, period, max_duty)` (`SetDutyCycle`; a new duty takes effect at the next period) and
-  `adc(pin, bits, reference)` (`AdcChannel`). The errors are `Infallible`.
+  `pwm(pin, period, max_duty)` (`SetDutyCycle`; a new duty takes effect at the next period, also
+  when the task sets it at the time a period starts) and `adc(pin, bits, reference)`
+  (`AdcChannel`). The errors are `Infallible`. An output pin stays as the device starts it (`Low`,
+  or `HiZ` for a bidirectional pin) until it is set; until then neither `is_set_high()` nor
+  `is_set_low()` is true. A pin driven open-drain (`HiZ` / `Low`) has no handle: use a
+  `DeviceModel` of your own.
 - **The firmware runs as a periodic task.** `Firmware::new(&board, period, task, step)` calls
   `step(&mut task)` every `period` seconds from time 0, as a timer interrupt or the body of a super
   loop would. At each call the inputs and ADC codes are those of that time, and the outputs set

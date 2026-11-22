@@ -1,10 +1,11 @@
 //! Running decks in the ngspice shared library (libngspice), with the `shared-ngspice` feature.
 //!
 //! The library is loaded at run time, so building does not need it. It keeps global state, so it
-//! is loaded once per process and runs one deck at a time: runs from several threads (the tests of
-//! `cargo test`) wait for each other. A crash of ngspice takes the whole process down, which the
-//! CLI ([`Ngspice`](crate::spice::Ngspice)) does not; prefer the CLI unless the run needs the
-//! library (co-simulation with Rust models).
+//! runs one deck at a time: runs from several threads (the tests of `cargo test`) wait for each
+//! other. It is loaded for each run and unloaded after it, so that nothing a run sets (`set`,
+//! `option`, ...) carries over to the next. A crash of ngspice takes the whole process down,
+//! which the CLI ([`Ngspice`](crate::spice::Ngspice)) does not; prefer the CLI unless the run
+//! needs the library (co-simulation with Rust models).
 
 use std::{
     any::Any,
@@ -84,11 +85,15 @@ impl SharedNgspice {
 
     /// Runs the deck in a new temporary directory.
     ///
-    /// After an error ngspice cannot recover from, the library is unloaded and loaded again for
-    /// the next run.
+    /// The library is loaded for the run and unloaded after it: the variables and options a run
+    /// sets do not carry over to the next run.
+    ///
+    /// The commands of the background thread (`bg_run`, `bg_halt`, ...) are not supported: the run
+    /// would end, and the circuit be removed, while the analysis goes on.
     ///
     /// # Errors
-    /// [`SimulationError::SharedLibrary`] if the library cannot be loaded or used,
+    /// [`SimulationError::SharedLibrary`] if the library cannot be loaded or used or the deck has
+    /// a `bg_*` command,
     /// [`SimulationError::Ngspice`] if ngspice reports an error, and [`SimulationError::Io`] if
     /// the run directory cannot be prepared.
     pub fn run(&self, deck: &SpiceDeck) -> Result<Simulation, SimulationError> {
@@ -102,6 +107,12 @@ impl SharedNgspice {
         deck: &SpiceDeck,
         session: Option<&mut dyn Session>,
     ) -> Result<Simulation, SimulationError> {
+        if let Some(command) = deck.background_command() {
+            return Err(SimulationError::SharedLibrary(format!(
+                "the control command {command:?} is not supported: a run waits for its commands, \
+                 not for the background thread"
+            )));
+        }
         let dir = prepare_run_dir(deck)?;
         // ngspice takes the rest of a command line as it is, quotes included.
         let deck_path = dir.join(SHARED_DECK_FILE);
@@ -120,14 +131,9 @@ impl SharedNgspice {
         }
         fs::write(&deck_path, deck.for_shared_library(&dir))?;
 
-        let mut library = lock(&LIBRARY);
-        if library.as_ref().is_none_or(|l| l.path != self.library) {
-            // Unload the other library first: both would share the callbacks.
-            *library = None;
-            *library = Some(Loaded::load(&self.library)?);
-        }
-        let loaded = library.as_ref().expect("the library is loaded");
+        let running = lock(&RUNNING);
         lock(&OUTPUT).clear();
+        let loaded = Loaded::load(&self.library)?;
         EXITED.store(false, Ordering::SeqCst);
         let mode = ngbehavior_command(deck);
         let source = format!("source {}", spice_path(&deck_path));
@@ -146,17 +152,8 @@ impl SharedNgspice {
         let panic = Active::take_panic();
         let log = std::mem::take(&mut *lock(&OUTPUT));
         let exited = EXITED.load(Ordering::SeqCst);
-        if exited {
-            // "ngspice.dll cannot recover and awaits to be reset or detached".
-            *library = None;
-        } else {
-            // Free the circuit and its results.
-            for command in ["remcirc", "destroy all"] {
-                loaded.command(command).expect("no NUL character");
-            }
-            lock(&OUTPUT).clear();
-        }
-        drop(library);
+        drop(loaded);
+        drop(running);
         if let Some(panic) = panic {
             resume_unwind(panic);
         }
@@ -253,8 +250,8 @@ impl Simulator for SharedNgspice {
     }
 }
 
-/// The loaded library; `None` before the first run and after an error ngspice cannot recover from.
-static LIBRARY: Mutex<Option<Loaded>> = Mutex::new(None);
+/// Held during a run: the callbacks and the state of ngspice are global.
+static RUNNING: Mutex<()> = Mutex::new(());
 /// The output of ngspice since it was last cleared, one line per call of [`send_char`].
 static OUTPUT: Mutex<String> = Mutex::new(String::new());
 /// Set by [`controlled_exit`].
@@ -333,7 +330,6 @@ struct VecInfoAll {
 static IDENT: AtomicI32 = AtomicI32::new(0);
 
 struct Loaded {
-    path: PathBuf,
     command: NgSpiceCommand,
     set_breakpoint: NgSpiceSetBkpt,
     /// Keeps `command` valid; unloaded on drop.
@@ -393,7 +389,6 @@ impl Loaded {
             return Err(error(format!("ngSpice_Init returned {status}\n{banner}")));
         }
         Ok(Loaded {
-            path: path.to_path_buf(),
             command,
             set_breakpoint,
             _library: library,

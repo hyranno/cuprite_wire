@@ -50,13 +50,14 @@ impl Controller {
 
 impl DeviceModel for Controller {
     fn step(&mut self, io: &mut DeviceIo<'_>) {
+        // Before the control loop: a duty set at the start of a PWM period waits for the next.
+        self.pwm.update(io);
         if self.control.due(io) {
             let measured = self.adc.voltage_of(self.adc.read(io));
             self.measured.push((io.time(), measured));
             self.pwm
                 .set_duty(self.pwm.duty() + 0.05 * (TARGET - measured));
         }
-        self.pwm.update(io);
     }
 }
 
