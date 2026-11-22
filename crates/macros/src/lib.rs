@@ -234,7 +234,7 @@ fn generate(
                     Some(quote! {
                         #(
                             if let ::core::result::Result::Err(error) =
-                                #krate::spice::part::spice_value(#devices, &value)
+                                #krate::spice::spice_value(#devices, &value)
                             {
                                 ::core::panic!("{}", error);
                             }
@@ -413,7 +413,7 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
                 "{}{}",
                 #prefix,
                 // Checked by `new`.
-                #krate::spice::part::spice_value(#device, &self.value)
+                #krate::spice::spice_value(#device, &self.value)
                     .unwrap_or_else(|error| ::core::panic!("{}", error))
             )
         },

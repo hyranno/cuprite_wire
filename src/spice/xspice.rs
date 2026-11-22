@@ -13,8 +13,7 @@ use crate::{
     spice::{
         SpicePartInfo,
         digital::{InputCharacteristics, OutputCharacteristics},
-        sources::spice_number,
-        spice_path,
+        spice_number, spice_path,
         subcircuit::{
             SUBCIRCUIT_REFERENCE, assert_subcircuit_pin, hashed_subcircuit, internal_node,
             subcircuit_part,

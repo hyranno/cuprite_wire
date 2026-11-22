@@ -175,7 +175,7 @@ impl Part for DigitalLoad {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spice::sources::spice_number;
+    use crate::spice::spice_number;
 
     #[test]
     fn test_driver_subcircuit() {

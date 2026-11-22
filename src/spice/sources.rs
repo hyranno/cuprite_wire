@@ -5,23 +5,8 @@
 
 use crate::{
     parts::Part,
-    spice::{SpiceElement, SpicePartInfo},
+    spice::{SpiceElement, SpicePartInfo, spice_number},
 };
-
-/// Formats a number for SPICE: plain decimal for moderate magnitudes, exponent form otherwise.
-///
-/// # Panics
-/// If `value` is NaN or infinite, which ngspice cannot read.
-#[track_caller]
-pub fn spice_number(value: f64) -> String {
-    assert!(value.is_finite(), "a SPICE number must be finite: {value}");
-    let magnitude = value.abs();
-    if value == 0.0 || (1e-3..1e6).contains(&magnitude) {
-        format!("{value}")
-    } else {
-        format!("{value:e}")
-    }
-}
 
 /// Whether an [`IndependentSource`] is a voltage or a current source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,22 +281,6 @@ impl Part for Ammeter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_spice_number() {
-        assert_eq!(spice_number(0.0), "0");
-        assert_eq!(spice_number(5.0), "5");
-        assert_eq!(spice_number(-1.5), "-1.5");
-        assert_eq!(spice_number(0.001), "0.001");
-        assert_eq!(spice_number(1e-9), "1e-9");
-        assert_eq!(spice_number(2.5e6), "2.5e6");
-    }
-
-    #[test]
-    #[should_panic(expected = "a SPICE number must be finite: NaN")]
-    fn test_spice_number_nan() {
-        spice_number(f64::NAN);
-    }
 
     #[test]
     #[should_panic(expected = "the values of a source must be finite")]

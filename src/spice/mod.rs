@@ -14,6 +14,7 @@ pub mod simulation;
 pub mod sources;
 mod subcircuit;
 mod temp_dir;
+pub mod value;
 pub mod xspice;
 
 pub use deck::SpiceDeck;
@@ -23,6 +24,7 @@ pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProb
 pub use shared::SharedNgspice;
 pub use simulation::{Ngspice, Simulation, SimulationError, Simulator, Table};
 pub use sources::{Ammeter, IndependentSource, SourceKind, Waveform};
+pub use value::{spice_number, spice_value};
 
 #[cfg(test)]
 mod tests;
