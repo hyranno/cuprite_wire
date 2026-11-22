@@ -143,7 +143,7 @@ impl Parse for PartInput {
                         Some(OptionKey::Footprint)
                     }
                     "fields" => {
-                        options.fields = string_map(content)?;
+                        options.fields = fields(content)?;
                         None
                     }
                     "extra_pads" => {
@@ -217,18 +217,16 @@ impl Parse for SpicePartInput {
         parse_keys(
             &content,
             |key, content, span| {
+                // Before the value is parsed: `sim` keys such as `suffix` are not options here.
+                if !SPICE_KEYS.split(", ").any(|k| key == k) {
+                    return Err(unknown_key(key, SPICE_KEYS));
+                }
                 if let Some(recorded) = common_key(key, content, &mut options.common)? {
                     return Ok(recorded.map(|k| vec![(k, span)]).unwrap_or_default());
                 }
                 match model_key(key, content, &mut options.model)? {
-                    Some(field)
-                        if field != BindingField::Pins
-                            && field != BindingField::Unused
-                            && field != BindingField::Suffix =>
-                    {
-                        Ok(vec![(OptionKey::Model { element: 0, field }, span)])
-                    }
-                    _ => Err(unknown_key(key, SPICE_KEYS)),
+                    Some(field) => Ok(vec![(OptionKey::Model { element: 0, field }, span)]),
+                    None => Err(unknown_key(key, SPICE_KEYS)),
                 }
             },
             &mut spans,
@@ -456,15 +454,51 @@ fn string_list(input: ParseStream) -> syn::Result<Vec<String>> {
     Ok(items.iter().map(LitStr::value).collect())
 }
 
-/// `{ "a" => "b", ... }`
+/// `{ "a" => "b", ... }` with distinct keys.
 fn string_map(input: ParseStream) -> syn::Result<Vec<(String, String)>> {
-    let content;
-    braced!(content in input);
-    let entries = Punctuated::<Entry, Token![,]>::parse_terminated(&content)?;
-    Ok(entries
+    Ok(pairs(entries(input)?))
+}
+
+fn pairs(entries: Vec<Entry>) -> Vec<(String, String)> {
+    entries
         .into_iter()
         .map(|e| (e.key.value(), e.value.value()))
-        .collect())
+        .collect()
+}
+
+/// The entries of `{ "a" => "b", ... }`, rejecting a key given twice.
+fn entries(input: ParseStream) -> syn::Result<Vec<Entry>> {
+    let content;
+    braced!(content in input);
+    let entries: Vec<Entry> = Punctuated::<Entry, Token![,]>::parse_terminated(&content)?
+        .into_iter()
+        .collect();
+    let mut keys = std::collections::BTreeSet::new();
+    for entry in &entries {
+        if !keys.insert(entry.key.value()) {
+            return Err(syn::Error::new(
+                entry.key.span(),
+                format!("{:?} is given twice", entry.key.value()),
+            ));
+        }
+    }
+    Ok(entries)
+}
+
+/// `fields`: the `Sim.*` fields are written from the `sim` block (or are the symbol's), so the
+/// user cannot give them.
+fn fields(input: ParseStream) -> syn::Result<Vec<(String, String)>> {
+    let entries = entries(input)?;
+    if let Some(entry) = entries
+        .iter()
+        .find(|e| e.key.value().to_ascii_lowercase().starts_with("sim."))
+    {
+        return Err(syn::Error::new(
+            entry.key.span(),
+            "`Sim.*` fields cannot be given in `fields`; give the model with `sim`",
+        ));
+    }
+    Ok(pairs(entries))
 }
 
 struct Entry {

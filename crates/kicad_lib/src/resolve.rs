@@ -123,10 +123,18 @@ impl Resolver {
     }
 
     /// Resolves a `Sim.Library` value: expands `${VAR}` and makes relative paths absolute.
+    /// `${KIPRJMOD}`, the project directory for KiCad, is the directory relative paths are
+    /// resolved against (`sim_library_dir`, or the manifest directory).
     pub fn sim_library_path(&mut self, value: &str) -> Result<PathBuf, Error> {
+        let base = match &self.sim_library_dir {
+            Some(dir) => self.manifest_dir.join(dir),
+            None => self.manifest_dir.clone(),
+        };
         let expanded = text_var::expand(value, |name| {
             if is_symbol_dir_var(name) {
                 Ok(Some(self.symbol_dir().to_string_lossy().into_owned()))
+            } else if name == "KIPRJMOD" {
+                Ok(Some(base.to_string_lossy().into_owned()))
             } else {
                 self.var(name).map(Some).ok_or_else(|| {
                     Error::new(format!(
@@ -139,10 +147,6 @@ impl Resolver {
         Ok(if path.is_absolute() {
             path
         } else {
-            let base = match &self.sim_library_dir {
-                Some(dir) => self.manifest_dir.join(dir),
-                None => self.manifest_dir.clone(),
-            };
             base.join(path)
         })
     }
@@ -244,6 +248,11 @@ mod tests {
         resolver.sim_library_dir = Some("spice".into());
         assert_eq!(
             resolver.sim_library_path("d.lib").unwrap(),
+            PathBuf::from("/crate/spice/d.lib")
+        );
+        // The project directory of KiCad, not an environment variable.
+        assert_eq!(
+            resolver.sim_library_path("${KIPRJMOD}/d.lib").unwrap(),
             PathBuf::from("/crate/spice/d.lib")
         );
         assert!(resolver.sim_library_path("${NONE}/d.lib").is_err());

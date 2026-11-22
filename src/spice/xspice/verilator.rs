@@ -10,8 +10,9 @@ use std::{
 };
 
 use super::DCosim;
-use crate::spice::digital::{
-    InputCharacteristics, OutputCharacteristics, check_subcircuit_pin, fnv1a,
+use crate::spice::{
+    digital::{InputCharacteristics, OutputCharacteristics, check_subcircuit_pin, fnv1a},
+    simulation::output_log,
 };
 
 /// Where ngspice installs `verilator_shim.cpp`, `verilator_main.cpp` and the headers they include.
@@ -113,7 +114,7 @@ impl Verilator {
                 }
                 Err(e) => return Err(e),
             }
-            staging.install(&dir);
+            staging.install(&dir)?;
         }
         let header = fs::read_to_string(dir.join("obj").join(format!("{PREFIX}.h")))?;
         let (inputs, outputs) = read_ports(&header)?;
@@ -147,16 +148,16 @@ impl Verilator {
     /// record of the build ([`inputs_unchanged`]).
     fn key(&self) -> Result<u64, VerilatorError> {
         let cwd = std::env::current_dir()?;
-        let mut text = String::new();
+        let mut text: Vec<u8> = Vec::new();
         let shims = [
             self.shim_dir.join("verilator_shim.cpp"),
             self.shim_dir.join("verilator_main.cpp"),
         ];
         for (i, file) in shims.iter().chain(&self.sources).enumerate() {
-            text.push('\0');
-            text.push_str(&file.display().to_string());
-            text.push('\0');
-            text.push_str(&fs::read_to_string(file).map_err(|e| {
+            text.push(0);
+            text.extend_from_slice(file.display().to_string().as_bytes());
+            text.push(0);
+            text.extend_from_slice(&fs::read(file).map_err(|e| {
                 let hint = if i < shims.len() && e.kind() == io::ErrorKind::NotFound {
                     format!(
                         "; set `shim_dir` to the `share/ngspice/scripts/src` directory of \
@@ -171,15 +172,18 @@ impl Verilator {
                 )
             })?);
         }
-        text.push('\0');
-        text.push_str(&self.run(Command::new(&self.program).arg("--version"), &cwd)?);
+        text.push(0);
+        text.extend_from_slice(
+            self.run(Command::new(&self.program).arg("--version"), &cwd)?
+                .as_bytes(),
+        );
         for arg in &self.args {
-            text.push('\0');
-            text.push_str(arg);
+            text.push(0);
+            text.extend_from_slice(arg.as_bytes());
         }
-        text.push('\0');
-        text.push_str(&cwd.display().to_string());
-        Ok(fnv1a(text.as_bytes()))
+        text.push(0);
+        text.extend_from_slice(cwd.display().to_string().as_bytes());
+        Ok(fnv1a(&text))
     }
 
     /// The steps of `vlnggen`, building in `dir`.
@@ -252,11 +256,7 @@ impl Verilator {
                 ),
             )
         })?;
-        let log = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let log = output_log(&output);
         if output.status.success() {
             Ok(log)
         } else {
@@ -291,13 +291,25 @@ impl Staging {
 
     /// Moves the build to `dir`, replacing an outdated build there. Another build of the same
     /// key may have been installed first; either is fine.
-    fn install(mut self, dir: &Path) {
+    ///
+    /// # Errors
+    /// If the build cannot be moved and `dir` has no up-to-date build either (e.g. the outdated
+    /// one cannot be removed).
+    fn install(mut self, dir: &Path) -> io::Result<()> {
         if dir.exists() && !inputs_unchanged(dir) {
             // A library already loaded keeps working after it is removed.
             let _ = fs::remove_dir_all(dir);
         }
-        if fs::rename(&self.dir, dir).is_ok() {
-            self.keep = true;
+        match fs::rename(&self.dir, dir) {
+            Ok(()) => {
+                self.keep = true;
+                Ok(())
+            }
+            Err(_) if dir.join("libmodel.so").exists() && inputs_unchanged(dir) => Ok(()),
+            Err(e) => Err(io::Error::new(
+                e.kind(),
+                format!("cannot move the build to {}: {e}", dir.display()),
+            )),
         }
     }
 }

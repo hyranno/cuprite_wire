@@ -103,6 +103,7 @@ pub trait SubcircuitGenerator: Debug + Clone {
 
     /// Base of automatic instance names (`<base name>#<n>`).
     /// Defaults to the type name without the module path and generic arguments.
+    /// It must not be empty or contain `#` or `{`, like an explicit name.
     fn base_name(&self) -> String {
         short_type_name::<Self>()
     }

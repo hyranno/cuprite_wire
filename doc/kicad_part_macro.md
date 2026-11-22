@@ -33,21 +33,22 @@ Ready-made parts generated from the MIT-licensed library in `libs/` are in `cupr
 
 ## 1. Options
 
-Only `symbol` is required. Options are separated by commas.
+Only `symbol` is required. Options are separated by commas. A key of a `{ ... }` map may be given
+once.
 
 | Key | Value | Default |
 |---|---|---|
 | `symbol` | `"Library:Name"` | |
 | `footprint` | `"Library:Name"`, or `none` for simulation-only parts | the symbol's `Footprint` property; an error if it is empty |
 | `value` | `"text"`, or `param` to take it as a constructor argument | the symbol's `Value` |
-| `ref_base` | the reference prefix, e.g. `"RN"` | the symbol's `Reference` without `?` |
+| `ref_base` | the reference prefix, e.g. `"RN"`: a letter, then letters, digits and `_`, not ending with a digit | the symbol's `Reference` without the trailing `?` and digits |
 | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin (or extra pad) number | the pin numbers |
 | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs connected inside the part | stacked pins only |
 | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins of the part | none |
 | `spice` | `auto`, `none` (`spice()` returns `None`) or `excluded` (excluded from the simulation) | `auto` |
 | `sim` | a library model mapped to the pins by hand, replacing the symbol's `Sim.*` fields (section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
-| `fields` | `{ "MPN" => "..." }`: fields written to the footprint | none |
+| `fields` | `{ "MPN" => "..." }`: fields written to the footprint; not `Sim.*`, which come from the symbol or `sim` | none |
 | `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD10_SYMBOL_DIR`, else `$KICAD9_SYMBOL_DIR`, else `/usr/share/kicad/symbols` (and `FOOTPRINT` / `footprints`) |
 | `sim_library_dir` | base of relative `Sim.Library` / `sim` library paths, relative to the crate | the crate |
 
@@ -70,7 +71,8 @@ with the same nickname.
 - `pub struct Name;` with `const fn new()` and `Default`, or `pub struct Name { value }` with
   `fn new(value: impl Into<String>)` for `value: param`. It derives `Debug`, `Clone`, `PartialEq` and `Eq`.
   When the simulation writes the value (section 4), `new` panics if it is not a number.
-- `Name::PINS`: the pin IDs. Each pin renamed with `pins` also gets a constant (`out_a` -> `Name::OUT_A`).
+- `Name::PINS`: the pin IDs. Each pin renamed with `pins` also gets a constant (`out_a` -> `Name::OUT_A`),
+  so the given IDs must differ in more than case (`out` and `OUT` are an error).
 - The documentation of the type gets the symbol, the footprint, the symbol's description and
   datasheet, and a table of the pins (ID, pad, name, electrical type, unit), shown by rust-analyzer.
 - `impl Part`: the reference prefix, the pins, the value, the internal connections, `kicad()`
@@ -147,8 +149,8 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   through its first pad; its other pads, connected inside the part, are unused. (KiCad 10.0.8's
   SPICE export leaves such a pin unconnected, `NC-<ref>-<n>`.)
 - `Sim.Library` paths: `${KICAD<n>_SYMBOL_DIR}` of any version (`${KICAD9_SYMBOL_DIR}`, `${KICAD10_SYMBOL_DIR}`) is the symbol directory
-  used, other `${VAR}` are environment variables, and relative paths are relative to
-  `sim_library_dir`. The library is read (with the files it `.include`s) to find the model and to
+  used, `${KIPRJMOD}` (KiCad's project directory) is `sim_library_dir`, other `${VAR}` are
+  environment variables, and relative paths are relative to `sim_library_dir`. The library is read (with the files it `.include`s) to find the model and to
   check the pin mapping against the `.subckt` ports and the model type against `Sim.Device`.
 - `sim_model: include` (default) writes `.include "<absolute path>"` in the deck.
   `sim_model: inline` copies the definition, and the top-level definitions it refers to by name,

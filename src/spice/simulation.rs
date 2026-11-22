@@ -60,12 +60,7 @@ impl Ngspice {
             .arg(dir.join(DECK_FILE))
             .current_dir(dir.path())
             .output()?;
-        let log = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        finish_run(dir, log, output.status.success())
+        finish_run(dir, output_log(&output), output.status.success())
     }
 }
 
@@ -110,6 +105,16 @@ pub(crate) fn ngbehavior_command(deck: &SpiceDeck) -> String {
     }
 }
 
+/// The standard output of a program followed by its standard error, on a new line.
+pub(crate) fn output_log(output: &std::process::Output) -> String {
+    let mut log = String::from_utf8_lossy(&output.stdout).into_owned();
+    if !log.is_empty() && !log.ends_with('\n') && !output.stderr.is_empty() {
+        log.push('\n');
+    }
+    log.push_str(&String::from_utf8_lossy(&output.stderr));
+    log
+}
+
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
 pub(crate) fn finish_run(
     dir: RunDir,
@@ -127,9 +132,14 @@ pub(crate) fn finish_run(
 }
 
 /// Whether ngspice reports an error with `line`: it starts with the word `error` (`Error: ...`,
-/// `ERROR ...`), but is not a value printed as `name = value` (`error_max = 1.0` of `meas`).
+/// `ERROR ...`), but is not a value printed as `name = value` (`error_max = 1.0` of `meas`), or it
+/// reports an analysis that stopped (`tran simulation(s) aborted`, after `Timestep too small` in
+/// the middle of a transient analysis, which prints no `Error` line and exits with 0).
 fn is_error_line(line: &str) -> bool {
-    let line = line.trim_start();
+    let line = line.trim();
+    if line.ends_with("simulation(s) aborted") {
+        return true;
+    }
     let end = line
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .unwrap_or(line.len());
@@ -210,14 +220,16 @@ impl Simulation {
     /// Reads a file written by `wrdata` in the control block.
     ///
     /// # Errors
-    /// [`SimulationError::Io`] if the file cannot be read, and [`SimulationError::Table`] if it
-    /// is not a `wrdata` table.
+    /// [`SimulationError::Table`] if the file cannot be read (e.g. no command wrote it) or is not
+    /// a `wrdata` table.
     pub fn table(&self, file: &str) -> Result<Table, SimulationError> {
-        let text = fs::read_to_string(self.dir.join(file))?;
-        Table::parse(&text).map_err(|reason| SimulationError::Table {
-            file: file.to_string(),
-            reason,
-        })
+        fs::read_to_string(self.dir.join(file))
+            .map_err(|e| e.to_string())
+            .and_then(|text| Table::parse(&text))
+            .map_err(|reason| SimulationError::Table {
+                file: file.to_string(),
+                reason,
+            })
     }
 
     /// A value printed as `name = value` (by `meas` or `print`), matched case-insensitively.
@@ -334,7 +346,7 @@ pub enum SimulationError {
         /// The run directory, with the deck (`deck.cir`) to reproduce the run.
         dir: PathBuf,
     },
-    /// A `wrdata` file cannot be read as a table.
+    /// A `wrdata` file cannot be read, or not as a table.
     Table {
         /// The file name passed to [`Simulation::table`].
         file: String,
@@ -419,6 +431,23 @@ mod tests {
         fs::remove_dir(&path).unwrap();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn test_output_log() {
+        use std::os::unix::process::ExitStatusExt;
+        let log = |stdout: &str, stderr: &str| {
+            output_log(&std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: stdout.into(),
+                stderr: stderr.into(),
+            })
+        };
+        assert_eq!(log("out", "err"), "out\nerr");
+        assert_eq!(log("out\n", "err"), "out\nerr");
+        assert_eq!(log("out", ""), "out");
+        assert_eq!(log("", "err"), "err");
+    }
+
     #[test]
     fn test_is_error_line() {
         assert!(is_error_line("Error: unknown subckt: x1 out 0 nosuch"));
@@ -431,6 +460,8 @@ mod tests {
         assert!(!is_error_line("errors: none"));
         assert!(!is_error_line("PPerror: syntax error in line segment"));
         assert!(!is_error_line("Warning: error ignored"));
+        assert!(is_error_line("tran simulation(s) aborted"));
+        assert!(is_error_line("op simulation(s) aborted  "));
     }
 
     #[test]

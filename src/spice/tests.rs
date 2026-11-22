@@ -49,6 +49,7 @@ on_each_simulator!(
     simulate_subcircuit_model,
     simulate_pspice_model,
     simulation_error,
+    aborted_transient_error,
     simulate_digital_rc_load,
     simulate_open_drain,
     simulate_uart,
@@ -473,6 +474,48 @@ fn simulation_error(simulator: &dyn Simulator) {
         .control(["op", r#"wrdata x.txt v("/nothing")"#]);
     let error = simulation_error_message(simulator.run(&deck).unwrap_err());
     assert!(error.contains("no such vector"), "{error}");
+}
+
+/// A transient analysis that stops in the middle (`Timestep too small`) is an error, although
+/// ngspice prints no `Error` line and exits with 0.
+fn aborted_transient_error(simulator: &dyn Simulator) {
+    // The source switches whenever the output crosses 0.5 V, which ngspice cannot step over.
+    let element = SpiceElement::new(
+        'B',
+        ["1", "2"],
+        "V = time < 0.2m ? 0.4 : (v(FB) > 0.5 ? 0 : 1)",
+    );
+    let mut circuit = CircuitBuilder::new();
+    let source = circuit.instantiate_part(Box::new(CustomPart {
+        ref_base_name: "B",
+        spice: Some(SpicePartInfo::element(element)),
+        ..CustomPart::valid()
+    }));
+    let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+    let c = circuit.instantiate_part(Box::new(test_parts::Capacitor("1n")));
+    circuit.connect(source["1"], r["1"]);
+    circuit.connect(r["2"], c["1"]);
+    circuit.label(c["1"], NetLabel::global("FB"));
+    circuit.label(source["2"], NetLabel::global("GND"));
+    circuit.label(c["2"], NetLabel::global("GND"));
+    let deck = deck_of(&circuit).control(["tran 1u 1m", "wrdata fb.txt v(FB)"]);
+    let error = simulation_error_message(simulator.run(&deck).unwrap_err());
+    assert!(error.contains("simulation(s) aborted"), "{error}");
+}
+
+/// A file no command wrote is reported with its name.
+#[test]
+fn test_missing_table() {
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).control(["op"]);
+    let error = deck.run().unwrap().table("missing.txt").unwrap_err();
+    assert!(
+        matches!(&error, crate::spice::SimulationError::Table { file, .. } if file == "missing.txt"),
+        "{error}"
+    );
+    assert!(
+        error.to_string().starts_with("cannot read missing.txt: "),
+        "{error}"
+    );
 }
 
 #[test]

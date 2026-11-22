@@ -472,28 +472,34 @@ fn is_comment_line(line: &str) -> bool {
 }
 
 /// Removes an inline comment: `;`, `//`, or a `$` after whitespace and followed by whitespace
-/// (ngspice's `$` comment; `$G_DPWR` is a node name in PSpice and stays).
-fn strip_comment(line: &str) -> &str {
-    let mut end = line.len();
-    if let Some(i) = line.find(';') {
-        end = end.min(i);
-    }
-    if let Some(i) = line.find("//") {
-        end = end.min(i);
-    }
+/// (ngspice's `$` comment; `$G_DPWR` is a node name in PSpice and stays). Like [`tokenize`],
+/// `{...}`, `'...'` and `"..."` are not searched (`.include "a;b.lib"`).
+pub(crate) fn strip_comment(line: &str) -> &str {
     let bytes = line.as_bytes();
-    for (i, b) in bytes.iter().enumerate() {
-        if *b == b'$'
-            && (i == 0 || bytes[i - 1].is_ascii_whitespace())
-            && bytes
-                .get(i + 1)
-                .is_none_or(|next| next.is_ascii_whitespace())
-        {
-            end = end.min(i);
-            break;
+    let mut depth = 0usize;
+    let mut quote: Option<u8> = None;
+    for (i, &b) in bytes.iter().enumerate() {
+        match (quote, b) {
+            (Some(q), b) if b == q => quote = None,
+            (Some(_), _) => {}
+            (None, b'\'' | b'"') => quote = Some(b),
+            (None, b'{') => depth += 1,
+            (None, b'}') => depth = depth.saturating_sub(1),
+            (None, _) if depth > 0 => {}
+            (None, b';') => return &line[..i],
+            (None, b'/') if bytes.get(i + 1) == Some(&b'/') => return &line[..i],
+            (None, b'$')
+                if (i == 0 || bytes[i - 1].is_ascii_whitespace())
+                    && bytes
+                        .get(i + 1)
+                        .is_none_or(|next| next.is_ascii_whitespace()) =>
+            {
+                return &line[..i];
+            }
+            (None, _) => {}
         }
     }
-    &line[..end]
+    line
 }
 
 fn keyword(text: &str) -> &str {
@@ -771,6 +777,23 @@ R1 a b 1k
             lib.find("VREF").is_none(),
             "find looks for models and subcircuits only"
         );
+    }
+
+    #[test]
+    fn test_comment_markers_in_quotes_and_braces() {
+        assert_eq!(
+            strip_comment(".include \"a;b.lib\" ; c"),
+            ".include \"a;b.lib\" "
+        );
+        assert_eq!(
+            strip_comment(".lib 'x // y.lib' // c"),
+            ".lib 'x // y.lib' "
+        );
+        assert_eq!(strip_comment(".param p={a $ b} $ c"), ".param p={a $ b} ");
+        assert_eq!(strip_comment("$ c"), "");
+        assert_eq!(strip_comment("x1 a $G_DPWR s"), "x1 a $G_DPWR s");
+        let lib = SpiceLib::parse(".include \"a;b.lib\"\n").unwrap();
+        assert_eq!(lib.includes[0].path, "a;b.lib");
     }
 
     #[test]

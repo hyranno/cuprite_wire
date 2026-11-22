@@ -43,4 +43,31 @@ cuprite_wire::kicad_part! {
     }
 }
 
+cuprite_wire::kicad_part! {
+    struct KeyTwice {
+        symbol: "test:R",
+        footprint: "test:R_0603",
+        value: param,
+        fields: { "MPN" => "a", "MPN" => "b" },
+    }
+}
+
+cuprite_wire::kicad_part! {
+    struct SimField {
+        symbol: "test:R",
+        footprint: "test:R_0603",
+        value: param,
+        fields: { "MPN" => "a", "Sim.Device" => "R" },
+    }
+}
+
+cuprite_wire::kicad_part! {
+    struct UpperCaseClash {
+        symbol: "test:R",
+        footprint: "test:R_0603",
+        value: param,
+        pins: { "1" => "out", "2" => "OUT" },
+    }
+}
+
 fn main() {}

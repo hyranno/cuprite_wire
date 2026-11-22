@@ -15,7 +15,7 @@ use crate::{
     Error,
     resolve::Resolver,
     sim::{Args, ElementDef, ModelDef, ModelMode},
-    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, SpiceLib},
+    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, SpiceLib, strip_comment},
 };
 
 /// The dialect of a model: detected from the library, or given.
@@ -693,7 +693,7 @@ pub fn model_device(model_type: &str, text: &str) -> Option<ModelDevice> {
 fn has_pchan(text: &str) -> bool {
     text.lines()
         .filter(|line| !line.trim_start().starts_with('*'))
-        .map(|line| line.split(';').next().unwrap_or_default())
+        .map(strip_comment)
         .flat_map(|line| line.split(|c: char| c.is_whitespace() || "(),=".contains(c)))
         .filter(|word| !word.is_empty())
         .skip(3)
@@ -779,6 +779,7 @@ fn dependencies(definition: &Definition, libs: &[LibFile]) -> Vec<Definition> {
 fn referenced_names(text: &str) -> impl Iterator<Item = &str> {
     text.lines()
         .filter(|line| !line.trim_start().starts_with('*'))
+        .map(strip_comment)
         .flat_map(|line| {
             line.split(|c: char| c.is_whitespace() || "(),={}'\"*/<>&|?:!^;".contains(c))
         })
@@ -1319,6 +1320,17 @@ suggested from the names (not applied; check them against the datasheet):
     }
 
     #[test]
+    fn test_referenced_names_skip_comments() {
+        let names: Vec<&str> =
+            referenced_names(".subckt s a b\nx1 a b inner ; other\n* third\n+ $ fourth\n.ends")
+                .collect();
+        assert!(names.contains(&"inner"), "{names:?}");
+        for comment in ["other", "third", "fourth"] {
+            assert!(!names.contains(&comment), "{names:?}");
+        }
+    }
+
+    #[test]
     fn test_model_devices() {
         let device = |text: &str| {
             let model_type = text.split([' ', '(']).nth(2).unwrap().to_ascii_lowercase();
@@ -1333,6 +1345,15 @@ suggested from the names (not applied; check them against the datasheet):
         );
         assert_eq!(device(".model pchan VDMOS NCHAN"), Some(("NMOS", 'M', 3)));
         assert_eq!(device(".model a VDMOS PCHAN"), Some(("PMOS", 'M', 3)));
+        // Inline comments are not parameters.
+        assert_eq!(
+            device(".model a VDMOS(Kp=1) $ pchan"),
+            Some(("NMOS", 'M', 3))
+        );
+        assert_eq!(
+            device(".model a VDMOS(Kp=1) // pchan"),
+            Some(("NMOS", 'M', 3))
+        );
         assert_eq!(device(".model a SW"), None);
     }
 

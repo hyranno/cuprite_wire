@@ -124,7 +124,8 @@ pub fn to_spice(text: &str, device: char) -> Option<String> {
     match (exponent, spice) {
         (None, Some(spice)) => out.push_str(spice),
         _ => {
-            let power = exponent.unwrap_or(0) + power;
+            // An exponent that overflows with the prefix is not a number.
+            let power = exponent.unwrap_or(0).checked_add(power)?;
             if power != 0 {
                 out.push_str(&format!("e{power}"));
             }
@@ -213,6 +214,10 @@ mod tests {
             ('R', "10k 1%"),
             ('C', "0R"),
             ('C', "1R5k"),
+            // The exponent overflows `i32`, alone or with the prefix.
+            ('R', "1e2147483648"),
+            ('R', "1e2147483647P"),
+            ('C', "1e-2147483648a"),
         ] {
             assert_eq!(to_spice(text, device), None, "{device} {text}");
         }

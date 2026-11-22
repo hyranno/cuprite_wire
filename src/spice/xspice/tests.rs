@@ -425,6 +425,24 @@ fn test_verilator_missing_program() {
     );
 }
 
+/// A source that is not UTF-8 (a Latin-1 comment) can be built.
+#[test]
+#[cfg_attr(
+    not(target_os = "linux"),
+    ignore = "Verilator builds are supported on Linux only"
+)]
+fn test_verilator_latin1_source() {
+    let dir = TestDir::new("latin1");
+    let source = dir.join("buffer.v");
+    let mut text = b"// caf\xe9\n".to_vec();
+    text.extend_from_slice(b"module buffer(input a, output y);\n  assign y = a;\nendmodule\n");
+    std::fs::write(&source, text).unwrap();
+    Verilator::new([&source])
+        .cache_dir(dir.join("cache"))
+        .build()
+        .unwrap();
+}
+
 /// Relative paths are resolved against the current directory: the sources, the cache directory
 /// (the library is absolute) and the include directories in the arguments. A change to an
 /// included file is a new build.

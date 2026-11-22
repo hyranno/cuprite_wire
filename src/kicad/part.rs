@@ -1,6 +1,6 @@
 //! KiCad-specific information of parts: footprint, symbol, pins and fields.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::parts::PartPins;
 pub use crate::parts::PinType;
@@ -93,24 +93,29 @@ impl KicadPartInfo {
                 pin_id: pin_id.clone(),
             })
             .collect();
-        // Pad -> internal connection group of its pins (`None` for a pin in no group).
-        let mut pads: HashMap<&str, Option<usize>> = HashMap::new();
+        // Pad -> internal connection groups of its pins (`None` for a pin in no group). Unknown
+        // pins are reported as such and not on their pads.
+        let mut pads: BTreeMap<&str, Vec<Option<usize>>> = BTreeMap::new();
         for (pin_id, pin) in &self.pins {
-            if !part_pins.contains(pin_id) {
+            if part_pins.contains(pin_id) {
+                pads.entry(&pin.pad)
+                    .or_default()
+                    .push(part_pins.group(pin_id));
+            } else {
                 problems.push(PinInfoProblem::Unknown {
                     pin_id: pin_id.clone(),
                 });
             }
-            let group = part_pins.group(pin_id);
-            match pads.insert(&pin.pad, group) {
-                // Duplicate pins: several pins on a pad, connected inside the part.
-                Some(other) if other.is_some() && other == group => {}
-                Some(_) => problems.push(PinInfoProblem::DuplicatePad {
-                    pad: pin.pad.clone(),
-                }),
-                None => {}
-            }
         }
+        // Several pins on a pad are duplicate pins if they are all connected inside the part.
+        problems.extend(
+            pads.into_iter()
+                .filter(|(_, groups)| {
+                    groups.len() > 1
+                        && (groups[0].is_none() || groups.iter().any(|g| *g != groups[0]))
+                })
+                .map(|(pad, _)| PinInfoProblem::DuplicatePad { pad: pad.into() }),
+        );
         problems
     }
 
@@ -144,8 +149,28 @@ mod tests {
             info.check_pins(&part_pins),
             vec![
                 PinInfoProblem::Missing { pin_id: "c".into() },
-                PinInfoProblem::DuplicatePad { pad: "1".into() },
                 PinInfoProblem::Unknown { pin_id: "x".into() },
+                PinInfoProblem::DuplicatePad { pad: "1".into() },
+            ]
+        );
+        // A pad is reported once, however many pins share it; unknown pins are not on pads.
+        let crowded = KicadPartInfo {
+            pins: BTreeMap::from([
+                ("a".into(), KicadPinInfo::new("1", None, PinType::Passive)),
+                ("b".into(), KicadPinInfo::new("1", None, PinType::Passive)),
+                ("c".into(), KicadPinInfo::new("1", None, PinType::Passive)),
+                ("x".into(), KicadPinInfo::new("2", None, PinType::Passive)),
+                ("y".into(), KicadPinInfo::new("2", None, PinType::Passive)),
+            ]),
+            ..Default::default()
+        };
+        let crowded_pins = PartPins::new(["a", "b", "c"].map(String::from), &[]);
+        assert_eq!(
+            crowded.check_pins(&crowded_pins),
+            vec![
+                PinInfoProblem::Unknown { pin_id: "x".into() },
+                PinInfoProblem::Unknown { pin_id: "y".into() },
+                PinInfoProblem::DuplicatePad { pad: "1".into() },
             ]
         );
         // Pins on one pad may be connected inside the part (duplicate pins).
