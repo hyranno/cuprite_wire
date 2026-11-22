@@ -3,7 +3,8 @@
 //! The three ways a part gets a library model share this: a symbol's `Sim.*` fields, the `sim`
 //! block of `kicad_part!`, and `spice_part!`. Pins are mapped to ports by name; the order of the
 //! nodes is always the order of the ports in the `.subckt` line (or of the device's terminals).
-//! The bodies of the models are not interpreted.
+//! The bodies of the models are not interpreted, except for the files their XSPICE code models
+//! read, which are resolved relative to the library.
 
 use std::{
     collections::BTreeSet,
@@ -24,7 +25,7 @@ use crate::{
     Error,
     resolve::Resolver,
     sim::{Args, ElementDef, Elements, ModelDef, ModelMode},
-    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint},
+    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, FileRef, file_refs},
 };
 
 /// The dialect of a model: detected from the library, or given.
@@ -234,10 +235,11 @@ fn bind_one(
         .sim_library_path(&binding.library)
         .map_err(|e| (Library, e))?;
     let libs = read_library(&path, resolver).map_err(|e| (Library, e))?;
-    let found = find_definition(&binding.name, &path, &libs)?;
+    let (found, file) = find_definition(&binding.name, &path, &libs)?;
     let model = model_of(&found)?;
-    let dependencies = dependencies(&found, &libs);
+    let dependencies = dependencies(&found, &file, &libs);
     check_encrypted(&found, &dependencies)?;
+    let files = model_files(&found, &dependencies, resolver)?;
 
     let (part_pins, mapping) = match options.pins {
         PartPins::Given(pins) => (pins.to_vec(), binding.pins.clone()),
@@ -270,10 +272,18 @@ fn bind_one(
     let models = match options.mode {
         ModelMode::Include => {
             check_includes(&libs, dialect)?;
+            check_relative_files(&found, &files)?;
             vec![ModelDef::Include(path.clone())]
         }
         ModelMode::Inline => {
-            let mut definitions = dependencies;
+            let mut definitions: Vec<Definition> = dependencies
+                .into_iter()
+                .zip(files)
+                .map(|((d, _), files)| Definition {
+                    text: with_absolute_files(&d.text, &files),
+                    ..d
+                })
+                .collect();
             definitions.sort_by_key(|d| d.name.to_ascii_lowercase());
             definitions
                 .into_iter()
@@ -305,12 +315,118 @@ fn bind_one(
     Ok((element, unmapped_pins))
 }
 
-/// The `.subckt` or `.model` named `name` in the library or the files it includes.
-fn find_definition(name: &str, path: &Path, libs: &[LibFile]) -> Result<Definition, FieldError> {
+/// The `.subckt` or `.model` named `name` in the library or the files it includes, with the file
+/// it is in.
+fn find_definition(
+    name: &str,
+    path: &Path,
+    libs: &[LibFile],
+) -> Result<(Definition, PathBuf), FieldError> {
     libs.iter()
-        .find_map(|(lib, section, _)| lib.find_in(name, section.as_deref()))
-        .cloned()
+        .find_map(|(lib, section, file)| {
+            lib.find_in(name, section.as_deref())
+                .map(|d| (d.clone(), file.clone()))
+        })
         .ok_or_else(|| (BindingField::Name, not_found(name, path, libs)))
+}
+
+/// A file named by a code model, resolved.
+struct ModelFile {
+    reference: FileRef,
+    /// The definition it is in.
+    definition: String,
+    /// Absolute: relative paths are relative to the library file the definition is in.
+    path: PathBuf,
+}
+
+/// The files named by the code models of the definitions (`d_state`'s `state_file`, ...), for
+/// each definition. They must exist, and are tracked for rebuilds.
+fn model_files(
+    found: &Definition,
+    dependencies: &[(Definition, PathBuf)],
+    resolver: &mut Resolver,
+) -> Result<Vec<Vec<ModelFile>>, FieldError> {
+    dependencies
+        .iter()
+        .map(|(definition, library)| {
+            file_refs(&definition.text)
+                .into_iter()
+                .map(|reference| {
+                    let dir = library.parent().unwrap_or(Path::new(""));
+                    let path = resolver.track(&dir.join(&reference.path));
+                    if !path.is_file() {
+                        return Err(fail(
+                            BindingField::Library,
+                            format!(
+                                "model {} ({}{}) reads {:?} ({}), which does not exist",
+                                reference.model,
+                                reference.model_type,
+                                used_by(definition, found),
+                                reference.path,
+                                path.display()
+                            ),
+                        ));
+                    }
+                    Ok(ModelFile {
+                        reference,
+                        definition: definition.name.clone(),
+                        path,
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// `, used by NAME` when `definition` is not the model itself.
+fn used_by(definition: &Definition, found: &Definition) -> String {
+    if definition.name.eq_ignore_ascii_case(&found.name) {
+        String::new()
+    } else {
+        format!(", used by {}", found.name)
+    }
+}
+
+/// An error for a file named by a relative path in an included library: ngspice would open it
+/// relative to the directory it runs in.
+fn check_relative_files(found: &Definition, files: &[Vec<ModelFile>]) -> Result<(), FieldError> {
+    let Some(file) = files
+        .iter()
+        .flatten()
+        .find(|file| Path::new(&file.reference.path).is_relative())
+    else {
+        return Ok(());
+    };
+    let reference = &file.reference;
+    let in_definition = if file.definition.eq_ignore_ascii_case(&reference.model) {
+        String::new()
+    } else {
+        format!(" in {}", file.definition)
+    };
+    Err(fail(
+        BindingField::Library,
+        format!(
+            "model {}{in_definition} ({}, used by {}) names its {} by the relative path {:?}, which \
+             ngspice resolves against the directory it runs in; use `sim_model: inline` (the path is \
+             made absolute: {}), or write an absolute path in the library",
+            reference.model,
+            reference.model_type,
+            found.name,
+            reference.param,
+            reference.path,
+            file.path.display()
+        ),
+    ))
+}
+
+/// `text` with the files of its code models written as absolute paths.
+fn with_absolute_files(text: &str, files: &[ModelFile]) -> String {
+    let mut text = text.to_string();
+    for file in files.iter().rev() {
+        let path = file.path.to_string_lossy();
+        text.replace_range(file.reference.range.clone(), &format!("\"{path}\""));
+    }
+    text
 }
 
 /// What a definition is as a device.
@@ -380,8 +496,11 @@ fn model_of(found: &Definition) -> Result<Model, FieldError> {
 }
 
 /// An error if the definition or one it uses is encrypted.
-fn check_encrypted(found: &Definition, dependencies: &[Definition]) -> Result<(), FieldError> {
-    let Some(locked) = dependencies.iter().find(|d| d.encrypted) else {
+fn check_encrypted(
+    found: &Definition,
+    dependencies: &[(Definition, PathBuf)],
+) -> Result<(), FieldError> {
+    let Some((locked, _)) = dependencies.iter().find(|(d, _)| d.encrypted) else {
         return Ok(());
     };
     let detail = if locked.name.eq_ignore_ascii_case(&found.name) {
@@ -987,6 +1106,85 @@ suggested from the names (not applied; check them against the datasheet):
             e.error
         );
         assert!(run(&[ngspice], &symbol_pins(), ModelMode::Inline).is_ok());
+    }
+
+    #[test]
+    fn test_code_model_files() {
+        let counter = |name: &str| ModelBinding {
+            library: "models/xspice/counter2.lib".into(),
+            name: name.into(),
+            pins: pairs(&[("1", "clk"), ("2", "q0"), ("3", "q1")]),
+            ..Default::default()
+        };
+        let pins = &symbol_pins()[..3];
+        let dir = fixture_resolver().manifest_dir.join("models/xspice");
+        let state_file = dir.join("counter2.in");
+
+        // Inlined, the relative paths are made absolute, relative to the file of the definition.
+        let mut resolver = fixture_resolver();
+        let options = BindOptions {
+            pins: PartPins::Given(pins),
+            strict: true,
+            internal_connections: &[],
+            mode: ModelMode::Inline,
+        };
+        // `..` is kept, as for includes (`states` may be a link).
+        let ext_state_file = dir.join("states/../counter2.in");
+        for (name, path) in [("counter2", &state_file), ("counter2_ext", &ext_state_file)] {
+            let elements = bind(&[counter(name)], &options, &mut resolver).unwrap();
+            let texts: Vec<&str> = elements.elements[0]
+                .models
+                .iter()
+                .map(|m| match m {
+                    ModelDef::Inline { text, .. } => text.as_str(),
+                    other => panic!("{other:?}"),
+                })
+                .collect();
+            let expected = format!("state_file = \"{}\")", path.display());
+            assert_eq!(
+                texts.iter().filter(|t| t.contains(&expected)).count(),
+                1,
+                "{texts:?}"
+            );
+        }
+        // The state files are tracked for rebuilds.
+        for path in [&state_file, &ext_state_file] {
+            assert!(resolver.files.contains(path), "{:?}", resolver.files);
+        }
+
+        // Included, ngspice would look for them in the directory it runs in.
+        let e = run(&[counter("counter2_ext")], pins, ModelMode::Include).unwrap_err();
+        assert_eq!(e.field, BindingField::Library);
+        assert_eq!(
+            e.error.message,
+            format!(
+                "model count2_ext (d_state, used by counter2_ext) names its state_file by the relative \
+                 path \"../counter2.in\", which ngspice resolves against the directory it runs in; use \
+                 `sim_model: inline` (the path is made absolute: {}), or write an absolute path in the \
+                 library",
+                ext_state_file.display()
+            )
+        );
+        let e = run(&[counter("counter2")], pins, ModelMode::Include).unwrap_err();
+        assert!(
+            e.error
+                .message
+                .starts_with("model count2 in counter2 (d_state, used by counter2) names"),
+            "{}",
+            e.error
+        );
+
+        let mut missing = counter("missing");
+        missing.pins = pairs(&[("1", "clk"), ("2", "q")]);
+        let e = run(&[missing], &pins[..2], ModelMode::Inline).unwrap_err();
+        assert_eq!(e.field, BindingField::Library);
+        assert_eq!(
+            e.error.message,
+            format!(
+                "model nothing (d_state) reads \"missing.in\" ({}), which does not exist",
+                dir.join("missing.in").display()
+            )
+        );
     }
 
     #[test]

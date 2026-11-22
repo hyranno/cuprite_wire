@@ -156,8 +156,10 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   `sim_model: inline` copies the definition, and the top-level definitions it refers to by name,
   into the generated code, so the deck does not depend on the library file. **Check the license of
   the model library before inlining it** (section 6): vendor models often restrict redistribution.
-- Anything else (other `Sim.Device` / `Sim.Type`, `Sim.Params` with expressions, IBIS, XSPICE) is a
-  compile error. Choose `spice: none` (not simulated) or `spice: excluded` explicitly.
+- Anything else (other `Sim.Device` / `Sim.Type`, `Sim.Params` with expressions, IBIS, XSPICE
+  code models as `Sim.Device`) is a compile error. Choose `spice: none` (not simulated) or
+  `spice: excluded` explicitly. A `.subckt` built from XSPICE code models is a `SUBCKT` like any
+  other; files its code models read are handled as in `doc/spice_part_macro.md` section 5.
 - Built-in models are named after the generated type (`__Diode`), while KiCad names them after the
   reference (`__D1`); the definitions are the same.
 - The library model is checked as described in `doc/spice_part_macro.md` section 3 (except that

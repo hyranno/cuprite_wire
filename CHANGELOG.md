@@ -10,6 +10,14 @@ break the API).
 
 ## [Unreleased]
 
+### Added
+
+- XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
+  named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
+  resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes
+  them as absolute paths; with `sim_model: include`, a relative path is a compile error, since
+  ngspice would look for it in the directory it runs in.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added

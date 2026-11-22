@@ -1,0 +1,36 @@
+* XSPICE test models written for cuprite_wire: 2-bit counters built from a d_state machine,
+* whose state file is named by a relative path (ngspice would open it relative to the directory
+* it runs in).
+
+.subckt counter2 clk q0 q1
+a0 [en] dclk zero [b1 b0] count2
+.model count2 d_state(state_file = "counter2.in")
+a1 en one
+.model one d_pullup(load = 1pF)
+a2 zero low
+.model low d_pulldown(load = 1pF)
+a3 [clk] [dclk] adc
+.model adc adc_bridge(in_low = 0.8 in_high = 2.0)
+a4 [b0 b1] [q0 q1] dac
+.model dac dac_bridge(out_low = 0 out_high = 3.3 out_undef = 1.65)
+.ends counter2
+
+* The same with the d_state model in an included file (relative to that file).
+.include "states/states.lib"
+.subckt counter2_ext clk q0 q1
+a0 [en] dclk zero [b1 b0] count2_ext
+a1 en one
+.model one d_pullup(load = 1pF)
+a2 zero low
+.model low d_pulldown(load = 1pF)
+a3 [clk] [dclk] adc
+.model adc adc_bridge(in_low = 0.8 in_high = 2.0)
+a4 [b0 b1] [q0 q1] dac
+.model dac dac_bridge(out_low = 0 out_high = 3.3 out_undef = 1.65)
+.ends counter2_ext
+
+* A state file that does not exist.
+.subckt missing clk q
+a0 [q] clk q [q] nothing
+.model nothing d_state(state_file = "missing.in")
+.ends missing

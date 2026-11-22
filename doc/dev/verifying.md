@@ -24,9 +24,12 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
   nodes follow the `.subckt` order rather than the pin numbers, and simulates the supervisor in the
   PSpice mode: swapping two pins in the mapping changes the result, and without the PSpice mode
   ngspice rejects the model.
+- **XSPICE code models**: `tests/xspice_models.rs` simulates a counter made of a `d_state` machine
+  in a `.subckt` (`crates/kicad_lib/tests/fixtures/models/xspice/`), whose state file is named by
+  a relative path, made absolute by `sim_model: inline`.
 - **Vendor models** (opt-in, not run by CI):
   `CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
-  (`doc/spice_part_macro.md` section 6).
+  (`doc/spice_part_macro.md` section 7).
 - **Compile errors of the macros**: `tests/kicad_part_errors.rs` (trybuild); regenerate the
   messages with `TRYBUILD=overwrite cargo test --test kicad_part_errors`.
 - **S-expression helpers of the tools**: `python3 -m doctest tools/kicad_netlist.py` checks the

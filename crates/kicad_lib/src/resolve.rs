@@ -161,7 +161,7 @@ impl Resolver {
         cached(&path, decode, parse).map_err(|e| e.context(path.display()))
     }
 
-    fn track(&mut self, path: &Path) -> PathBuf {
+    pub(crate) fn track(&mut self, path: &Path) -> PathBuf {
         let path = normalize(path);
         if !self.files.contains(&path) {
             self.files.push(path.clone());

@@ -1,0 +1,2 @@
+* The d_state model of counter2_ext; its state file is in the parent directory.
+.model count2_ext d_state(state_file = "../counter2.in")
