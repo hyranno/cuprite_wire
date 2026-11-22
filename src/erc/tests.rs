@@ -1,11 +1,11 @@
-use petgraph::graph::NodeIndex;
-
 use super::*;
 use crate::{
     basic::{OpAmpSot23, Resistor0603},
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named, Node},
+    error::CircuitErrorKind,
     kicad::{KicadPartInfo, KicadPinInfo},
     naming::NetLabel,
+    parts::Part,
     subcircuit::{Interface, SubcircuitGenerator},
     test_parts::{CustomPart, rc_filter},
 };
@@ -39,7 +39,7 @@ fn warning(message: &str) -> (Severity, String) {
 struct Follower;
 
 #[derive(Interface)]
-struct FollowerPorts<T = NodeIndex> {
+struct FollowerPorts<T = Node> {
     input: T,
     output: T,
     vcc: T,
@@ -62,8 +62,8 @@ impl SubcircuitGenerator for Follower {
             vcc,
             gnd,
         } = interface;
-        let u = circuit.instantiate_part_named("u", Box::new(OpAmpSot23::new("OPA")));
-        let load = circuit.instantiate_part_named("load", Box::new(Resistor0603::new("10k")));
+        let u = circuit.instantiate_part(Named("u", OpAmpSot23::new("OPA")));
+        let load = circuit.instantiate_part(Named("load", Resistor0603::new("10k")));
         circuit.connect(input, u["in_p"]);
         circuit.connect(output, u["out"]);
         circuit.connect(u["out"], u["in_n"]);
@@ -82,7 +82,7 @@ fn follower_circuit(power_flags: bool) -> CircuitBuilder {
         output,
         vcc,
         gnd,
-    } = circuit.instantiate_subcircuit_named("f", Follower);
+    } = circuit.instantiate_subcircuit(Named("f", Follower));
     circuit.virtual_pin(input, PinType::Output, "signal");
     circuit.label(output, NetLabel::global("OUT"));
     circuit.label(vcc, NetLabel::global("VCC"));
@@ -131,13 +131,13 @@ fn test_label_single_pin() {
     );
     // Traced to the label, with a note at the pin.
     let diagnostic = &report.violations[0].diagnostic;
-    assert_eq!(diagnostic.trace.0[0].line(), 31);
+    assert_eq!(diagnostic.trace.0[0].line(), 29);
     assert_eq!(diagnostic.notes[0].message, "R1.1 (passive) is here");
-    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 29);
+    assert_eq!(diagnostic.notes[0].trace.0[0].line(), 27);
 
     // A no-connect mark or an allow mark silences it.
     let mut circuit = CircuitBuilder::new();
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.label(r["1"], NetLabel::global("A"));
     circuit.label(r["2"], NetLabel::global("B"));
     circuit.no_connect(r["1"]);
@@ -158,7 +158,7 @@ fn ground_pins_part() -> CustomPart {
         ("shield", "4", "GND", PinType::Passive),
     ];
     CustomPart {
-        ref_base_name: "U",
+        ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![],
         kicad: Some(KicadPartInfo {
@@ -178,7 +178,7 @@ fn ground_pins_part() -> CustomPart {
 fn test_ground_pin_not_ground() {
     let build = |ground: &str| {
         let mut circuit = CircuitBuilder::new();
-        let u = circuit.instantiate_part(Box::new(ground_pins_part()));
+        let u = circuit.instantiate_part(ground_pins_part());
         circuit.label(u["vcc"], NetLabel::global("VCC"));
         circuit.power_flag(u["vcc"]);
         circuit.label(u["gnd"], NetLabel::global(ground));
@@ -223,7 +223,7 @@ fn test_ground_names() {
 #[test]
 fn test_conflicting_outputs() {
     let mut circuit = follower_circuit(true);
-    let u = circuit.instantiate_part(Box::new(OpAmpSot23::new("OPA")));
+    let u = circuit.instantiate_part(OpAmpSot23::new("OPA"));
     circuit.label(u["out"], NetLabel::global("OUT"));
     circuit.connect(u["out"], u["in_n"]);
     circuit.label(u["in_p"], NetLabel::global("OUT"));
@@ -269,7 +269,7 @@ fn test_overlapping_internal_connections() {
         ("in", PinType::Input),
     ];
     let part = CustomPart {
-        ref_base_name: "U",
+        ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![vec!["4", "5"], vec!["4", "ep"]],
         kicad: Some(KicadPartInfo {
@@ -286,7 +286,7 @@ fn test_overlapping_internal_connections() {
         spice: None,
     };
     let mut circuit = CircuitBuilder::new();
-    let u = circuit.instantiate_part(Box::new(part));
+    let u = circuit.instantiate_part(part);
     circuit.connect(u["in"], u["5"]);
     // The three pins are one stack, so they neither conflict nor count as several drivers.
     erc(&circuit).assert_clean();
@@ -298,7 +298,7 @@ struct OpenResistor;
 
 impl SubcircuitGenerator for OpenResistor {
     type Options = ();
-    type Interface = [NodeIndex; 1];
+    type Interface = [Node; 1];
 
     fn construct_subcircuit(
         &self,
@@ -306,7 +306,7 @@ impl SubcircuitGenerator for OpenResistor {
         circuit: &mut CircuitBuilder,
         interface: Self::Interface,
     ) {
-        let r = circuit.instantiate_part_named("r", Box::new(Resistor0603::new("1k")));
+        let r = circuit.instantiate_part(Named("r", Resistor0603::new("1k")));
         circuit.connect(interface[0], r["1"]);
         circuit.erc_allow(r["2"], ErcRule::PinNotConnected);
     }
@@ -315,8 +315,8 @@ impl SubcircuitGenerator for OpenResistor {
 #[test]
 fn test_allow() {
     let mut circuit = CircuitBuilder::new();
-    let [a] = circuit.instantiate_subcircuit_named("a", OpenResistor);
-    let [b] = circuit.instantiate_subcircuit_named("b", OpenResistor);
+    let [a] = circuit.instantiate_subcircuit(Named("a", OpenResistor));
+    let [b] = circuit.instantiate_subcircuit(Named("b", OpenResistor));
     // Allowing another rule has no effect.
     circuit.erc_allow(a, ErcRule::PinNotDriven);
     // The marks inside the subcircuits allow only the nets they are on.
@@ -347,7 +347,7 @@ fn test_allow() {
 #[test]
 fn test_allow_net_name_rules() {
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r["1"], r["2"]);
     circuit.label(r["1"], NetLabel::global("out"));
     circuit.label(r["2"], NetLabel::local("SIG"));
@@ -364,7 +364,7 @@ fn test_allow_net_name_rules() {
 
     // Either net of similar names allows it.
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r["1"], r["2"]);
     circuit.label(r["1"], NetLabel::global("out"));
     let output = circuit.add_node();
@@ -376,8 +376,8 @@ fn test_allow_net_name_rules() {
 #[test]
 fn test_no_connect_marks() {
     let mut circuit = CircuitBuilder::new();
-    let r1 = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
-    let r2 = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r1 = circuit.instantiate_part(Resistor0603::new("1k"));
+    let r2 = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.connect(r1["2"], r2["1"]);
     circuit.no_connect(r1["1"]);
     circuit.no_connect(r2["1"]);
@@ -434,7 +434,7 @@ fn test_allow_on_nets_without_part_pins() {
 #[test]
 fn test_similar_net_names() {
     let mut circuit = follower_circuit(true);
-    let r = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+    let r = circuit.instantiate_part(Resistor0603::new("1k"));
     circuit.label(r["1"], NetLabel::global("out"));
     circuit.label(r["2"], NetLabel::global("GND"));
     let report = erc(&circuit);
@@ -513,5 +513,79 @@ fn test_display() {
             "warning: label \"/IN\" is connected only to R1.1 (passive)\n  at src/test_parts.rs:"
         ),
         "{text}"
+    );
+}
+
+/// A part with extra pin types.
+#[derive(Debug, Clone)]
+struct WithExtraTypes(CustomPart, Vec<(&'static str, PinType)>);
+
+impl Part for WithExtraTypes {
+    fn ref_prefix(&self) -> String {
+        self.0.ref_prefix()
+    }
+    fn pin_ids(&self) -> Vec<String> {
+        self.0.pin_ids()
+    }
+    fn value(&self) -> String {
+        self.0.value()
+    }
+    fn kicad(&self) -> Option<KicadPartInfo> {
+        self.0.kicad()
+    }
+    fn extra_pin_types(&self) -> BTreeMap<String, PinType> {
+        self.1.iter().map(|(id, t)| (id.to_string(), *t)).collect()
+    }
+}
+
+#[test]
+fn test_extra_pin_types() {
+    // Pins without KiCad pin information get the extra types.
+    let no_kicad = CustomPart {
+        kicad: None,
+        ..CustomPart::valid()
+    };
+    let driver = WithExtraTypes(no_kicad, vec![("1", PinType::Output)]);
+    let mut circuit = CircuitBuilder::new();
+    let a = circuit.instantiate_part(driver.clone());
+    let b = circuit.instantiate_part(driver);
+    circuit.connect(a["1"], b["1"]);
+    circuit.label(a["1"], NetLabel::global("OUT"));
+    circuit.no_connect(a["2"]);
+    circuit.no_connect(b["2"]);
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    assert_eq!(
+        netlist.components[0].pin_types,
+        BTreeMap::from([("1".to_string(), PinType::Output)])
+    );
+    assert_eq!(
+        summary(&netlist.erc(&ErcSettings::default())),
+        vec![error(
+            "net \"OUT\": pins of type output and output are connected: X1.1 (output) and X2.1 (output)"
+        )]
+    );
+
+    // A pin with KiCad pin information keeps its type, and the extra type is reported, as is an
+    // unknown pin ID.
+    let both = WithExtraTypes(
+        CustomPart::valid(),
+        vec![("1", PinType::Output), ("x", PinType::Input)],
+    );
+    let mut circuit = CircuitBuilder::new();
+    circuit.instantiate_part(both);
+    let errors = circuit.build(&()).to_netlist().unwrap_err();
+    let kinds: Vec<_> = errors.0.iter().map(|error| error.kind.clone()).collect();
+    assert_eq!(
+        kinds,
+        [
+            CircuitErrorKind::DuplicatePinType {
+                ref_name: "X1".into(),
+                pin_id: "1".into()
+            },
+            CircuitErrorKind::UnknownPinId {
+                ref_name: "X1".into(),
+                pin_id: "x".into()
+            },
+        ]
     );
 }

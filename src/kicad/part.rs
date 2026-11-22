@@ -2,8 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::parts::PartPins;
-pub use crate::parts::PinType;
+use crate::parts::{PartPins, PinType};
 
 pub use cuprite_wire_kicad_lib::naming::{LibId, LibIdError};
 

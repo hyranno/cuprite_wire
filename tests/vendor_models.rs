@@ -93,7 +93,7 @@ fn run(
 #[test]
 fn test_tps3899() {
     let mut c = CircuitBuilder::new();
-    let u = c.instantiate_part(Box::new(Tps3899::new()));
+    let u = c.instantiate_part(Tps3899::new());
     let vdd = c.instantiate_part(
         IndependentSource::voltage(0.0).with_waveform(Waveform::Pwl(vec![
             (0.0, 0.0),
@@ -110,9 +110,9 @@ fn test_tps3899() {
             (751e-6, 3.3),
         ],
     )));
-    let pullup = c.instantiate_part(Box::new(Resistor0603::new("1k")));
-    let ctr = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
-    let cts = c.instantiate_part(Box::new(Capacitor0603::new("10p")));
+    let pullup = c.instantiate_part(Resistor0603::new("1k"));
+    let ctr = c.instantiate_part(Capacitor0603::new("10p"));
+    let cts = c.instantiate_part(Capacitor0603::new("10p"));
     c.connect(vdd[IndependentSource::P], u["VDD"]);
     c.connect(sense[IndependentSource::P], u["SENSE"]);
     c.connect(pullup["1"], u["VDD"]);
@@ -159,7 +159,7 @@ fn test_tps3899_symbol() {
 #[test]
 fn test_lm358_units() {
     let mut c = CircuitBuilder::new();
-    let u = c.instantiate_part(Box::new(Lm358::new()));
+    let u = c.instantiate_part(Lm358::new());
     let supply = c.instantiate_part(IndependentSource::voltage(5.0));
     let a = c.instantiate_part(IndependentSource::voltage(1.0));
     let b = c.instantiate_part(IndependentSource::voltage(2.0));

@@ -28,13 +28,13 @@ error: `name: "NAME"` is required
 39 |     struct NoName {
    |            ^^^^^^
 
-error: unknown key `unused`; expected one of: library, name, value, ref_base, pins, internal_connections, params, dialect, sim_model
+error: unknown key `unused`; expected one of: library, name, value, ref_prefix, pins, internal_connections, params, dialect, sim_model
   --> tests/ui/spice_part.rs:48:9
    |
 48 |         unused: ["CTR"],
    |         ^^^^^^
 
-error: unknown key `suffix`; expected one of: library, name, value, ref_base, pins, internal_connections, params, dialect, sim_model
+error: unknown key `suffix`; expected one of: library, name, value, ref_prefix, pins, internal_connections, params, dialect, sim_model
   --> tests/ui/spice_part.rs:56:9
    |
 56 |         suffix: 5,

@@ -11,7 +11,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::CircuitBuilder,
+    circuit::{CircuitBuilder, Named},
     naming::NetLabel,
     spice::{
         SpiceDeck,
@@ -27,9 +27,9 @@ pub fn bench(stop: f64) -> Result<SpiceDeck, Box<dyn std::error::Error>> {
         .output("pwm", OutputCharacteristics::cmos(3.3))
         .input("adc", InputCharacteristics::cmos(3.3));
     let mut bench = CircuitBuilder::new();
-    let mcu = bench.instantiate_part_named("mcu", mcu);
-    let r = bench.instantiate_part_named("r", Box::new(Resistor0603::new("1k")));
-    let c = bench.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
+    let mcu = bench.instantiate_part(Named("mcu", mcu));
+    let r = bench.instantiate_part(Named("r", Resistor0603::new("1k")));
+    let c = bench.instantiate_part(Named("c", Capacitor0603::new("100n")));
     bench.connect(mcu["pwm"], r["1"]);
     bench.connect(r["2"], c["1"]);
     bench.connect(c["1"], mcu["adc"]);

@@ -47,7 +47,7 @@ pub enum SpiceOption {
 pub struct CommonOptions {
     /// `None`: the symbol's `Value`, or the model name.
     pub value: Option<Value>,
-    pub ref_base: Option<String>,
+    pub ref_prefix: Option<String>,
     /// Pin ID by pin (or extra pad) number, or by port name.
     pub pins: Vec<(String, String)>,
     /// Groups of pin IDs connected inside the part, in addition to stacked pins.
@@ -86,7 +86,7 @@ pub enum OptionKey {
     Symbol,
     Footprint,
     Value,
-    RefBase,
+    RefPrefix,
     Pins,
     InternalConnections,
     ExtraPads,
@@ -142,7 +142,7 @@ pub struct PinDef {
 pub struct PartDef {
     /// `None` for parts made from a SPICE model, which cannot be exported to KiCad.
     pub kicad: Option<KicadDef>,
-    pub ref_base: String,
+    pub ref_prefix: String,
     pub value: Value,
     pub pins: Vec<PinDef>,
     /// Groups of pin IDs.
@@ -176,15 +176,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     let symbol = lib.symbol(symbol_id.name()).map_err(at(Symbol))?;
     check_symbol(&symbol).map_err(at(Symbol))?;
 
-    let ref_base = match &common.ref_base {
-        Some(ref_base) => ref_base.clone(),
+    let ref_prefix = match &common.ref_prefix {
+        Some(ref_prefix) => ref_prefix.clone(),
         None => symbol
             .property("Reference")
             .unwrap_or_default()
             .trim_end_matches(|c: char| c == '?' || c.is_ascii_digit())
             .to_string(),
     };
-    check_ref_base(&ref_base)?;
+    check_ref_prefix(&ref_prefix)?;
     let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
     // The value with its text variables expanded from the fields (`fields` of the part).
     let value_with = |fields: &[(String, String)]| match &common.value {
@@ -277,7 +277,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         (SpiceOption::Auto, true) => {
             let input = SimInput {
                 symbol: &symbol,
-                ref_prefix: &ref_base,
+                ref_prefix: &ref_prefix,
                 value: &value_with(&fields)?,
                 builtin_model_name: &format!("__{}", common.type_name),
                 model_mode: common.sim_model,
@@ -333,7 +333,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             description: non_empty("Description"),
             datasheet: non_empty("Datasheet"),
         }),
-        ref_base,
+        ref_prefix,
         value,
         pins,
         internal_connections,
@@ -490,16 +490,16 @@ pub fn load_spice_part(
     )?;
     elements[0].nodes = pins.iter().map(|pin| pin.id.clone()).collect();
     let internal_connections = check_internal_connections(&common.internal_connections, &pins)?;
-    let ref_base = match (&common.ref_base, elements[0].device) {
-        (Some(ref_base), _) => ref_base.clone(),
+    let ref_prefix = match (&common.ref_prefix, elements[0].device) {
+        (Some(ref_prefix), _) => ref_prefix.clone(),
         (None, 'X') => "U".to_string(),
         (None, 'D') => "D".to_string(),
         (None, _) => "Q".to_string(),
     };
-    check_ref_base(&ref_base)?;
+    check_ref_prefix(&ref_prefix)?;
     Ok(PartDef {
         kicad: None,
-        ref_base,
+        ref_prefix,
         value: common.value.clone().unwrap_or(Value::Fixed(info.name)),
         pins,
         internal_connections,
@@ -512,16 +512,16 @@ pub fn load_spice_part(
 
 /// A reference prefix starts with a letter, has only letters, digits and `_`, and does not end
 /// with a digit (the reference appends a number: `U1` + `1` would be `U11`).
-fn check_ref_base(ref_base: &str) -> Result<(), PartError> {
-    if !ref_base.starts_with(|c: char| c.is_ascii_alphabetic())
-        || !ref_base
+fn check_ref_prefix(ref_prefix: &str) -> Result<(), PartError> {
+    if !ref_prefix.starts_with(|c: char| c.is_ascii_alphabetic())
+        || !ref_prefix
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        || ref_base.ends_with(|c: char| c.is_ascii_digit())
+        || ref_prefix.ends_with(|c: char| c.is_ascii_digit())
     {
         return err(
-            OptionKey::RefBase,
-            format!("invalid reference prefix {ref_base:?}"),
+            OptionKey::RefPrefix,
+            format!("invalid reference prefix {ref_prefix:?}"),
         );
     }
     Ok(())
@@ -586,7 +586,7 @@ mod tests {
         opts.common.value = Some(Value::Param);
         let mut r = resolver();
         let part = load_part(&opts, &mut r).unwrap();
-        assert_eq!(part.ref_base, "R");
+        assert_eq!(part.ref_prefix, "R");
         assert_eq!(
             part.kicad.unwrap().footprint.unwrap().to_string(),
             "test:R_0603"
@@ -620,7 +620,7 @@ mod tests {
         opts.common.pins = vec![("1".into(), "out_a".into()), ("9".into(), "ep".into())];
         opts.common.internal_connections = vec![strings(&["4", "ep"])];
         let part = load_part(&opts, &mut resolver()).unwrap();
-        assert_eq!(part.ref_base, "U");
+        assert_eq!(part.ref_prefix, "U");
         assert_eq!(part.value, Value::Fixed("DUAL_AMP".into()));
         let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["out_a", "2", "3", "4", "5", "6", "7", "8", "ep"]);
@@ -669,10 +669,13 @@ mod tests {
         assert_eq!(key, OptionKey::Spice);
         assert!(message.starts_with("cannot simulate test:R"), "{message}");
         let mut opts = options("test:R", "test:R_0603");
-        opts.common.ref_base = Some("U1".into());
+        opts.common.ref_prefix = Some("U1".into());
         assert_eq!(
             error(opts),
-            (OptionKey::RefBase, "invalid reference prefix \"U1\"".into())
+            (
+                OptionKey::RefPrefix,
+                "invalid reference prefix \"U1\"".into()
+            )
         );
     }
 
@@ -903,7 +906,7 @@ mod tests {
         };
         let part = load_spice_part(&opts, &mut resolver()).unwrap();
         assert!(part.kicad.is_none());
-        assert_eq!(part.ref_base, "U");
+        assert_eq!(part.ref_prefix, "U");
         assert_eq!(part.value, Value::Fixed("VSUP01".into()));
         let ids: Vec<_> = part.pins.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["CTR", "CTS", "GND", "reset_n", "SENSE", "VDD"]);
@@ -928,6 +931,6 @@ mod tests {
         opts.model.library = "models/clamp.lib".into();
         opts.model.params.clear();
         let part = load_spice_part(&opts, &mut resolver()).unwrap();
-        assert_eq!((part.ref_base.as_str(), part.pins.len()), ("D", 2));
+        assert_eq!((part.ref_prefix.as_str(), part.pins.len()), ("D", 2));
     }
 }

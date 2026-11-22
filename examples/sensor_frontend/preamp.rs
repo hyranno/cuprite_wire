@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -30,7 +30,7 @@ impl Default for Preamp {
 
 /// The interface of [`Preamp`].
 #[derive(Interface)]
-pub struct PreampPorts<T = NodeIndex> {
+pub struct PreampPorts<T = Node> {
     pub input: T,
     pub vref: T,
     pub vcc: T,
@@ -55,14 +55,12 @@ impl SubcircuitGenerator for Preamp {
             gnd,
             output,
         } = interface;
-        let coupling = c.instantiate_part_named("c_in", Box::new(Capacitor0603::new("1u")));
-        let bias = c.instantiate_part_named("r_bias", Box::new(Resistor0603::new("100k")));
-        let feedback =
-            c.instantiate_part_named("r_feedback", Box::new(Resistor0603::new(self.feedback)));
-        let ground = c.instantiate_part_named("r_ground", Box::new(Resistor0603::new(self.ground)));
-        let decoupling =
-            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
-        let amp = c.instantiate_part_named("amp", Box::new(RrioOpAmp::new()));
+        let coupling = c.instantiate_part(Named("c_in", Capacitor0603::new("1u")));
+        let bias = c.instantiate_part(Named("r_bias", Resistor0603::new("100k")));
+        let feedback = c.instantiate_part(Named("r_feedback", Resistor0603::new(self.feedback)));
+        let ground = c.instantiate_part(Named("r_ground", Resistor0603::new(self.ground)));
+        let decoupling = c.instantiate_part(Named("c_decoupling", Capacitor0603::new("100n")));
+        let amp = c.instantiate_part(Named("amp", RrioOpAmp::new()));
         // Input coupling, biased at the reference.
         c.connect(input, coupling["1"]);
         c.connect(coupling["2"], amp[RrioOpAmp::IN_P]);
@@ -108,7 +106,7 @@ mod tests {
     }
 
     /// The preamp on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
-    fn bench(input: Box<IndependentSource>) -> Bench {
+    fn bench(input: IndependentSource) -> Bench {
         Bench::stage(input, |circuit| {
             let PreampPorts {
                 input,
@@ -116,7 +114,7 @@ mod tests {
                 vcc,
                 gnd,
                 output,
-            } = circuit.instantiate_subcircuit_named("preamp", Preamp::default());
+            } = circuit.instantiate_subcircuit(Named("preamp", Preamp::default()));
             StageNodes {
                 input,
                 vref,

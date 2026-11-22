@@ -5,23 +5,8 @@
 
 use crate::{
     parts::Part,
-    spice::{SpiceElement, SpicePartInfo},
+    spice::{SpiceElement, SpicePartInfo, spice_number},
 };
-
-/// Formats a number for SPICE: plain decimal for moderate magnitudes, exponent form otherwise.
-///
-/// # Panics
-/// If `value` is NaN or infinite, which ngspice cannot read.
-#[track_caller]
-pub fn spice_number(value: f64) -> String {
-    assert!(value.is_finite(), "a SPICE number must be finite: {value}");
-    let magnitude = value.abs();
-    if value == 0.0 || (1e-3..1e6).contains(&magnitude) {
-        format!("{value}")
-    } else {
-        format!("{value:e}")
-    }
-}
 
 /// Whether an [`IndependentSource`] is a voltage or a current source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,13 +153,13 @@ impl IndependentSource {
     /// # Panics
     /// If `dc` is not finite.
     #[track_caller]
-    pub fn voltage(dc: f64) -> Box<Self> {
-        let source = Box::new(IndependentSource {
+    pub fn voltage(dc: f64) -> Self {
+        let source = IndependentSource {
             kind: SourceKind::Voltage,
             dc,
             ac: None,
             waveform: None,
-        });
+        };
         source.validate();
         source
     }
@@ -182,17 +167,17 @@ impl IndependentSource {
     /// # Panics
     /// If `dc` is not finite.
     #[track_caller]
-    pub fn current(dc: f64) -> Box<Self> {
-        Box::new(IndependentSource {
+    pub fn current(dc: f64) -> Self {
+        IndependentSource {
             kind: SourceKind::Current,
-            ..*IndependentSource::voltage(dc)
-        })
+            ..IndependentSource::voltage(dc)
+        }
     }
 
     /// # Panics
     /// If `magnitude` is not finite.
     #[track_caller]
-    pub fn with_ac(mut self: Box<Self>, magnitude: f64) -> Box<Self> {
+    pub fn with_ac(mut self, magnitude: f64) -> Self {
         self.ac = Some(magnitude);
         self.validate();
         self
@@ -202,7 +187,7 @@ impl IndependentSource {
     /// As [`Waveform`]'s numbers are not finite, or the points of `Pwl` are none or not in
     /// increasing time.
     #[track_caller]
-    pub fn with_waveform(mut self: Box<Self>, waveform: Waveform) -> Box<Self> {
+    pub fn with_waveform(mut self, waveform: Waveform) -> Self {
         self.waveform = Some(waveform);
         self.validate();
         self
@@ -244,7 +229,7 @@ impl IndependentSource {
 }
 
 impl Part for IndependentSource {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         self.device().to_string()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -275,7 +260,7 @@ impl Ammeter {
 }
 
 impl Part for Ammeter {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "VM".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -296,22 +281,6 @@ impl Part for Ammeter {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_spice_number() {
-        assert_eq!(spice_number(0.0), "0");
-        assert_eq!(spice_number(5.0), "5");
-        assert_eq!(spice_number(-1.5), "-1.5");
-        assert_eq!(spice_number(0.001), "0.001");
-        assert_eq!(spice_number(1e-9), "1e-9");
-        assert_eq!(spice_number(2.5e6), "2.5e6");
-    }
-
-    #[test]
-    #[should_panic(expected = "a SPICE number must be finite: NaN")]
-    fn test_spice_number_nan() {
-        spice_number(f64::NAN);
-    }
 
     #[test]
     #[should_panic(expected = "the values of a source must be finite")]
@@ -365,6 +334,6 @@ mod tests {
             IndependentSource::voltage(0.0).with_waveform(pwl).value(),
             "DC 0 PWL( 0 0 0.001 1 )"
         );
-        assert_eq!(IndependentSource::current(1e-3).get_ref_base_name(), "I");
+        assert_eq!(IndependentSource::current(1e-3).ref_prefix(), "I");
     }
 }

@@ -301,8 +301,10 @@ pub enum SimulationError {
         reason: String,
     },
     /// The ngspice shared library cannot be loaded or used.
+    #[cfg(feature = "shared-ngspice")]
     SharedLibrary(String),
     /// The models of a co-simulation do not match the devices of the deck.
+    #[cfg(feature = "shared-ngspice")]
     Cosimulation(String),
 }
 
@@ -318,9 +320,11 @@ impl fmt::Display for SimulationError {
                 )
             }
             SimulationError::Table { file, reason } => write!(f, "cannot read {file}: {reason}"),
+            #[cfg(feature = "shared-ngspice")]
             SimulationError::SharedLibrary(reason) => {
                 write!(f, "cannot use the ngspice shared library: {reason}")
             }
+            #[cfg(feature = "shared-ngspice")]
             SimulationError::Cosimulation(reason) => write!(f, "cannot co-simulate: {reason}"),
         }
     }

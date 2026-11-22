@@ -9,7 +9,10 @@ mod common;
 
 use common::{check_golden, deck_of};
 use cuprite_wire::{
-    circuit::CircuitBuilder, kicad_part, naming::NetLabel, spice::IndependentSource,
+    circuit::{CircuitBuilder, Named},
+    kicad_part,
+    naming::NetLabel,
+    spice::IndependentSource,
 };
 
 kicad_part! {
@@ -102,17 +105,17 @@ kicad_part! {
 /// A circuit using every part: an op-amp stage driving a transistor, a diode and a MOSFET.
 fn circuit() -> CircuitBuilder {
     let mut c = CircuitBuilder::new();
-    let amp = c.instantiate_part_named("amp", Box::new(OpAmp));
-    let spare = c.instantiate_part_named("spare", Box::new(Lm358));
-    let rf = c.instantiate_part_named("rf", Box::new(Resistor::new("10k")));
-    let rg = c.instantiate_part_named("rg", Box::new(Resistor::new("1k")));
-    let rb = c.instantiate_part_named("rb", Box::new(Resistor::new("4.7k")));
-    let rc = c.instantiate_part_named("rc", Box::new(Resistor::new("1k")));
-    let cf = c.instantiate_part_named("cf", Box::new(Capacitor::new("100n")));
-    let rpd = c.instantiate_part_named("rpd", Box::new(Resistor::new("100k")));
-    let d = c.instantiate_part_named("d", Box::new(Diode::new("1N4148")));
-    let q = c.instantiate_part_named("q", Box::new(Npn));
-    let m = c.instantiate_part_named("m", Box::new(Nmos));
+    let amp = c.instantiate_part(Named("amp", OpAmp));
+    let spare = c.instantiate_part(Named("spare", Lm358));
+    let rf = c.instantiate_part(Named("rf", Resistor::new("10k")));
+    let rg = c.instantiate_part(Named("rg", Resistor::new("1k")));
+    let rb = c.instantiate_part(Named("rb", Resistor::new("4.7k")));
+    let rc = c.instantiate_part(Named("rc", Resistor::new("1k")));
+    let cf = c.instantiate_part(Named("cf", Capacitor::new("100n")));
+    let rpd = c.instantiate_part(Named("rpd", Resistor::new("100k")));
+    let d = c.instantiate_part(Named("d", Diode::new("1N4148")));
+    let q = c.instantiate_part(Named("q", Npn));
+    let m = c.instantiate_part(Named("m", Nmos));
     let gnd = |c: &mut CircuitBuilder, node| c.label(node, NetLabel::global("GND"));
     let vcc = |c: &mut CircuitBuilder, node| c.label(node, NetLabel::global("+5V"));
 
@@ -170,10 +173,10 @@ fn test_golden() {
 #[test]
 fn test_simulate() {
     let mut bench = circuit();
-    let supply = bench.instantiate_part_named("supply", IndependentSource::voltage(5.0));
+    let supply = bench.instantiate_part(Named("supply", IndependentSource::voltage(5.0)));
     bench.label(supply[IndependentSource::P], NetLabel::global("+5V"));
     bench.label(supply[IndependentSource::N], NetLabel::global("GND"));
-    let input = bench.instantiate_part_named("input", IndependentSource::voltage(0.2));
+    let input = bench.instantiate_part(Named("input", IndependentSource::voltage(0.2)));
     bench.label(input[IndependentSource::P], NetLabel::local("IN"));
     bench.label(input[IndependentSource::N], NetLabel::global("GND"));
     let deck = deck_of(&bench).control([
@@ -199,8 +202,8 @@ fn test_simulate() {
 #[test]
 fn test_golden_extra_pad() {
     let mut c = CircuitBuilder::new();
-    let u = c.instantiate_part_named("u", Box::new(Lm358Ep));
-    let r = c.instantiate_part_named("r", Box::new(Resistor::new("10k")));
+    let u = c.instantiate_part(Named("u", Lm358Ep));
+    let r = c.instantiate_part(Named("r", Resistor::new("10k")));
     for (out, inv, noninv) in [("1", "2", "3"), ("7", "6", "5")] {
         c.connect(u[out], u[inv]);
         c.label(u[noninv], NetLabel::global("GND"));
@@ -228,9 +231,9 @@ fn test_golden_extra_pad() {
 #[test]
 fn test_golden_duplicate_pins() {
     let mut c = CircuitBuilder::new();
-    let d = c.instantiate_part_named("d", Box::new(Bat54sdw));
-    let u = c.instantiate_part_named("u", Box::new(Sn74278));
-    let r = c.instantiate_part_named("r", Box::new(Resistor::new("10k")));
+    let d = c.instantiate_part(Named("d", Bat54sdw));
+    let u = c.instantiate_part(Named("u", Sn74278));
+    let r = c.instantiate_part(Named("r", Resistor::new("10k")));
     // Two diodes in series from IN to OUT, the midpoint (pad 6) through R to a 74278 output.
     c.label(d["1"], NetLabel::local("IN"));
     c.connect(d["6#2"], r["1"]);

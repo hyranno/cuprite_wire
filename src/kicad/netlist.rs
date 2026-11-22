@@ -318,13 +318,14 @@ impl KicadNet {
 mod tests {
     use std::collections::BTreeMap;
 
-    use petgraph::graph::NodeIndex;
+    use crate::circuit::Node;
 
     use super::*;
     use crate::{
-        circuit::CircuitBuilder,
-        kicad::{KicadPinInfo, PinType},
+        circuit::{CircuitBuilder, Named},
+        kicad::KicadPinInfo,
         naming::NetLabel,
+        parts::PinType,
         spice::IndependentSource,
         subcircuit::SubcircuitGenerator,
         test_parts::{
@@ -364,13 +365,13 @@ mod tests {
     #[test]
     fn test_golden_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let first = circuit.instantiate_subcircuit_named("stage1", RcStage);
+        let first = circuit.instantiate_subcircuit(Named("stage1", RcStage));
         let second = circuit.instantiate_subcircuit(RcStage);
         circuit.connect(first[1], second[0]);
         circuit.label(first[0], NetLabel::local("IN"));
-        let test_point = circuit.instantiate_part_named(
+        let test_point = circuit.instantiate_part(Named(
             "test_point",
-            Box::new(CustomPart {
+            CustomPart {
                 pin_ids: vec!["1"],
                 kicad: Some(KicadPartInfo {
                     footprint: Some("TestPoint:TestPoint_Pad_D1.0mm".parse().unwrap()),
@@ -390,8 +391,8 @@ mod tests {
                     ..Default::default()
                 }),
                 ..CustomPart::valid()
-            }),
-        );
+            },
+        ));
         circuit.connect(test_point["1"], second[1]);
 
         let netlist = export(&circuit);
@@ -405,7 +406,7 @@ mod tests {
     struct Inner;
     impl SubcircuitGenerator for Inner {
         type Options = ();
-        type Interface = [NodeIndex; 2];
+        type Interface = [Node; 2];
 
         fn construct_subcircuit(
             &self,
@@ -414,9 +415,9 @@ mod tests {
             interface: Self::Interface,
         ) {
             let [input, output] = interface;
-            let r_a = circuit.instantiate_part_named("a", Box::new(Resistor("1k")));
-            let r_b = circuit.instantiate_part(Box::new(Resistor("2k")));
-            let c = circuit.instantiate_part(Box::new(Capacitor("1n")));
+            let r_a = circuit.instantiate_part(Named("a", Resistor("1k")));
+            let r_b = circuit.instantiate_part(Resistor("2k"));
+            let c = circuit.instantiate_part(Capacitor("1n"));
             circuit.connect(input, r_a["1"]);
             circuit.connect(r_a["2"], r_b["1"]);
             circuit.connect(r_a["2"], c["1"]);
@@ -431,7 +432,7 @@ mod tests {
     struct Outer;
     impl SubcircuitGenerator for Outer {
         type Options = ();
-        type Interface = [NodeIndex; 2];
+        type Interface = [Node; 2];
 
         fn construct_subcircuit(
             &self,
@@ -440,8 +441,8 @@ mod tests {
             interface: Self::Interface,
         ) {
             let [input, output] = interface;
-            let inner = circuit.instantiate_subcircuit_named("inner", Inner);
-            let r_o = circuit.instantiate_part_named("o", Box::new(Resistor("3k")));
+            let inner = circuit.instantiate_subcircuit(Named("inner", Inner));
+            let r_o = circuit.instantiate_part(Named("o", Resistor("3k")));
             circuit.connect(input, inner[0]);
             circuit.connect(inner[1], r_o["1"]);
             circuit.connect(r_o["2"], output);
@@ -453,9 +454,9 @@ mod tests {
     #[test]
     fn test_golden_nested_hierarchy() {
         let mut circuit = CircuitBuilder::new();
-        let first = circuit.instantiate_subcircuit_named("outer", Outer);
+        let first = circuit.instantiate_subcircuit(Named("outer", Outer));
         let second = circuit.instantiate_subcircuit(Outer);
-        let r_root = circuit.instantiate_part_named("root", Box::new(Resistor("10k")));
+        let r_root = circuit.instantiate_part(Named("root", Resistor("10k")));
         circuit.label(r_root["1"], NetLabel::local("IN"));
         circuit.connect(r_root["1"], first[0]);
         circuit.connect(first[1], second[0]);
@@ -466,9 +467,9 @@ mod tests {
     #[test]
     fn test_golden_multi_pin_ic() {
         let mut circuit = CircuitBuilder::new();
-        let u_amp = circuit.instantiate_part_named("amp", Box::new(OpAmp));
-        let u_ic = circuit.instantiate_part_named("ic", Box::new(MultiGndIc));
-        let r_feedback = circuit.instantiate_part_named("feedback", Box::new(Resistor("100k")));
+        let u_amp = circuit.instantiate_part(Named("amp", OpAmp));
+        let u_ic = circuit.instantiate_part(Named("ic", MultiGndIc));
+        let r_feedback = circuit.instantiate_part(Named("feedback", Resistor("100k")));
         circuit.connect(u_amp["out"], r_feedback["1"]);
         circuit.connect(r_feedback["2"], u_amp["in_n"]);
         circuit.connect(u_amp["out"], u_ic["io"]);
@@ -500,7 +501,7 @@ mod tests {
             NetLabel::global("+3V3"),
         ];
         for label in labels {
-            let r = circuit.instantiate_part(Box::new(Resistor("1k")));
+            let r = circuit.instantiate_part(Resistor("1k"));
             circuit.label(r["1"], label);
         }
         check_golden("net_order.net", &export(&circuit));
@@ -522,21 +523,21 @@ mod tests {
         let input = circuit.add_node();
         circuit.label(input, NetLabel::local("IN"));
         if revision == Revision::NamedAdded {
-            let r_in = circuit.instantiate_part_named("r_in", Box::new(Resistor("1k")));
+            let r_in = circuit.instantiate_part(Named("r_in", Resistor("1k")));
             circuit.connect(input, r_in["1"]);
             let input = circuit.add_node();
             circuit.connect(r_in["2"], input);
         }
-        let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
+        let r = circuit.instantiate_part(Named("r", Resistor("10k")));
         let gnd = circuit.add_node();
         circuit.label(gnd, NetLabel::global("GND"));
         if revision == Revision::AutoInserted {
-            let r_new = circuit.instantiate_part(Box::new(Resistor("47k")));
+            let r_new = circuit.instantiate_part(Resistor("47k"));
             circuit.connect(r_new["1"], r["2"]);
             circuit.connect(r_new["2"], gnd);
         }
-        let r_load = circuit.instantiate_part(Box::new(Resistor("22k")));
-        let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
+        let r_load = circuit.instantiate_part(Resistor("22k"));
+        let c = circuit.instantiate_part(Named("c", Capacitor("100n")));
         circuit.connect(input, r["1"]);
         circuit.connect(r["2"], c["1"]);
         circuit.connect(c["1"], r_load["1"]);
@@ -597,7 +598,7 @@ mod tests {
         lines: &mut Vec<u32>,
     ) {
         lines.push(std::panic::Location::caller().line());
-        circuit.instantiate_part(Box::new(part));
+        circuit.instantiate_part(part);
     }
 
     #[test]
@@ -612,7 +613,7 @@ mod tests {
         let mut duplicate_pad = valid().kicad.unwrap();
         duplicate_pad.pins.get_mut("2").unwrap().pad = "1".into();
 
-        add(&mut circuit, *IndependentSource::voltage(5.0), &mut lines);
+        add(&mut circuit, IndependentSource::voltage(5.0), &mut lines);
         add(
             &mut circuit,
             CustomPart {

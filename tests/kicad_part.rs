@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 
 use common::{check_golden, strings};
 use cuprite_wire::{
-    circuit::CircuitBuilder,
-    kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags, PinType},
+    circuit::{CircuitBuilder, Named},
+    kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags},
     kicad_part,
     naming::NetLabel,
-    parts::{Part, PartPins},
+    parts::{Part, PartPins, PinType},
     spice::{ModelSource, SpiceElement, SpicePartInfo},
 };
 
@@ -73,7 +73,7 @@ kicad_part! {
 #[test]
 fn test_resistor() {
     let r = Resistor::new("10k");
-    assert_eq!(r.get_ref_base_name(), "R");
+    assert_eq!(r.ref_prefix(), "R");
     assert_eq!(r.pin_ids(), strings(&["1", "2"]));
     assert_eq!(r.value(), "10k");
     assert!(r.internal_connections().is_empty());
@@ -128,7 +128,7 @@ fn test_dual_amp() {
     );
     assert_eq!(DualAmp::OUT_A, "out_a");
     assert_eq!(amp.value(), "DUAL_AMP");
-    assert_eq!(amp.get_ref_base_name(), "U");
+    assert_eq!(amp.ref_prefix(), "U");
     assert_eq!(amp.internal_connections(), vec![strings(&["4", "ep"])]);
     let info = amp.kicad().unwrap();
     assert_eq!(
@@ -213,9 +213,9 @@ fn test_stacked_pin_notation() {
 #[test]
 fn test_stacked_pin_golden() {
     let mut circuit = CircuitBuilder::new();
-    let amp = circuit.instantiate_part_named("amp", Box::new(StackedAmp));
-    let r1 = circuit.instantiate_part_named("r1", Box::new(Resistor::new("10k")));
-    let r2 = circuit.instantiate_part_named("r2", Box::new(Resistor::new("1k")));
+    let amp = circuit.instantiate_part(Named("amp", StackedAmp));
+    let r1 = circuit.instantiate_part(Named("r1", Resistor::new("10k")));
+    let r2 = circuit.instantiate_part(Named("r2", Resistor::new("1k")));
     circuit.connect(amp["1"], r1["1"]);
     circuit.connect(r1["2"], amp["2"]);
     circuit.connect(amp["2"], r2["1"]);
@@ -247,9 +247,9 @@ fn test_stacked_pin_golden() {
 #[test]
 fn test_export() {
     let mut circuit = CircuitBuilder::new();
-    let amp = circuit.instantiate_part_named("amp", Box::new(DualAmp::new()));
-    let r1 = circuit.instantiate_part_named("r1", Box::new(Resistor::new("10k")));
-    let r2 = circuit.instantiate_part_named("r2", Box::new(Resistor::new("1k")));
+    let amp = circuit.instantiate_part(Named("amp", DualAmp::new()));
+    let r1 = circuit.instantiate_part(Named("r1", Resistor::new("10k")));
+    let r2 = circuit.instantiate_part(Named("r2", Resistor::new("1k")));
     circuit.connect(amp["out_a"], r1["1"]);
     circuit.connect(r1["2"], amp["2"]);
     circuit.connect(amp["2"], r2["1"]);

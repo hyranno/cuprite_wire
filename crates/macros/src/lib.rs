@@ -47,7 +47,7 @@ use quote::{format_ident, quote};
 /// | `symbol` | `"Library:Name"` | |
 /// | `footprint` | `"Library:Name"` or `none` | the symbol's `Footprint` property |
 /// | `value` | `"text"` or `param` (a constructor argument) | the symbol's `Value`; text variables such as `${SIM.PARAMS}` are expanded from the fields |
-/// | `ref_base` | reference prefix | the symbol's `Reference` |
+/// | `ref_prefix` | reference prefix | the symbol's `Reference` |
 /// | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin number | the pin numbers |
 /// | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs | stacked pins |
 /// | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins | none (such pads are an error) |
@@ -106,7 +106,7 @@ pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 /// | `internal_connections` | `[["a", "b"], ...]`: groups of pin IDs | none |
 /// | `params` | `{ "TD" => "1m" }`: parameters of the `.subckt` | the model's defaults |
 /// | `value` | `"text"` or `param` | the model name |
-/// | `ref_base` | reference prefix | `U` for a `.subckt`; `D` or `Q` for a `.model` |
+/// | `ref_prefix` | reference prefix | `U` for a `.subckt`; `D` or `Q` for a `.model` |
 /// | `dialect` | `auto`, `ngspice`, `pspice` or `ltspice` | `auto` (detected from the library) |
 /// | `sim_model` | `include` or `inline` | `include` |
 ///
@@ -135,7 +135,7 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 /// Implements `Interface` for a struct with one type parameter whose fields all have that type,
-/// e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`. The order of the fields is the
+/// e.g. `struct Ports<T = Node> { input: T, output: T }`. The order of the fields is the
 /// order of the interface. `cuprite_wire::subcircuit::Interface` documents it.
 #[proc_macro_derive(Interface)]
 pub fn derive_interface(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -234,7 +234,7 @@ fn generate(
                     Some(quote! {
                         #(
                             if let ::core::result::Result::Err(error) =
-                                #krate::spice::part::spice_value(#devices, &value)
+                                #krate::spice::spice_value(#devices, &value)
                             {
                                 ::core::panic!("{}", error);
                             }
@@ -284,7 +284,7 @@ fn generate(
         }
     });
 
-    let ref_base = &part.ref_base;
+    let ref_prefix = &part.ref_prefix;
     let groups = part
         .internal_connections
         .iter()
@@ -313,8 +313,8 @@ fn generate(
         #default_impl
 
         impl #krate::parts::Part for #name {
-            fn get_ref_base_name(&self) -> ::std::string::String {
-                ::std::string::String::from(#ref_base)
+            fn ref_prefix(&self) -> ::std::string::String {
+                ::std::string::String::from(#ref_prefix)
             }
             fn pin_ids(&self) -> ::std::vec::Vec<::std::string::String> {
                 Self::PINS.iter().copied().map(::std::string::String::from).collect()
@@ -352,7 +352,7 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
         };
         let pin_type = format_ident!("{}", pin.electrical_type.variant_name());
         quote! {
-            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::kicad::PinType::#pin_type))
+            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::parts::PinType::#pin_type))
         }
     });
     let field_entries = kicad
@@ -413,7 +413,7 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
                 "{}{}",
                 #prefix,
                 // Checked by `new`.
-                #krate::spice::part::spice_value(#device, &self.value)
+                #krate::spice::spice_value(#device, &self.value)
                     .unwrap_or_else(|error| ::core::panic!("{}", error))
             )
         },
@@ -599,7 +599,7 @@ mod tests {
                 description: None,
                 datasheet: None,
             }),
-            ref_base: "U".into(),
+            ref_prefix: "U".into(),
             value: Value::Fixed("PART".into()),
             pins: vec![PinDef {
                 id: "a|b".into(),

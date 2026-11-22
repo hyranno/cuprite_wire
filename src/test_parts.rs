@@ -2,13 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use petgraph::graph::NodeIndex;
-
 use crate::{
-    circuit::CircuitBuilder,
-    kicad::{KicadPartInfo, KicadPinInfo, LibId, PinType},
+    circuit::{CircuitBuilder, Named, Node},
+    kicad::{KicadPartInfo, KicadPinInfo, LibId},
     naming::NetLabel,
-    parts::Part,
+    parts::{Part, PinType},
     spice::{ModelSource, SpiceElement, SpiceNetlist, SpicePartInfo},
     subcircuit::SubcircuitGenerator,
 };
@@ -26,8 +24,8 @@ pub fn spice_netlist(circuit: &CircuitBuilder) -> SpiceNetlist {
 /// A 10k / 100n RC low-pass filter between the local nets `IN` and `OUT`, with `GND`.
 pub fn rc_filter() -> CircuitBuilder {
     let mut circuit = CircuitBuilder::new();
-    let r = circuit.instantiate_part_named("r", Box::new(Resistor("10k")));
-    let c = circuit.instantiate_part_named("c", Box::new(Capacitor("100n")));
+    let r = circuit.instantiate_part(Named("r", Resistor("10k")));
+    let c = circuit.instantiate_part(Named("c", Capacitor("100n")));
     circuit.label(r["1"], NetLabel::local("IN"));
     circuit.connect(r["2"], c["1"]);
     circuit.label(c["1"], NetLabel::local("OUT"));
@@ -41,7 +39,7 @@ pub struct RcStage;
 
 impl SubcircuitGenerator for RcStage {
     type Options = ();
-    type Interface = [NodeIndex; 2];
+    type Interface = [Node; 2];
 
     fn construct_subcircuit(
         &self,
@@ -50,8 +48,8 @@ impl SubcircuitGenerator for RcStage {
         interface: Self::Interface,
     ) {
         let [input, output] = interface;
-        let r = circuit.instantiate_part(Box::new(Resistor("1k")));
-        let c = circuit.instantiate_part(Box::new(Capacitor("1u")));
+        let r = circuit.instantiate_part(Resistor("1k"));
+        let c = circuit.instantiate_part(Capacitor("1u"));
         circuit.connect(input, r["1"]);
         circuit.connect(r["2"], output);
         circuit.connect(output, c["1"]);
@@ -86,7 +84,7 @@ fn two_pin_kicad_info(footprint: &str, symbol: &str) -> KicadPartInfo {
 pub struct Resistor(pub &'static str);
 
 impl Part for Resistor {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "R".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -114,7 +112,7 @@ impl Part for Resistor {
 pub struct Capacitor(pub &'static str);
 
 impl Part for Capacitor {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "C".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -143,7 +141,7 @@ impl Part for Capacitor {
 pub struct OpAmp;
 
 impl Part for OpAmp {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -193,7 +191,7 @@ E1 out 0 inp inn 100k
 pub struct MultiGndIc;
 
 impl Part for MultiGndIc {
-    fn get_ref_base_name(&self) -> String {
+    fn ref_prefix(&self) -> String {
         "U".into()
     }
     fn pin_ids(&self) -> Vec<String> {
@@ -231,7 +229,7 @@ impl Part for MultiGndIc {
 /// A part whose information is given directly, for testing invalid definitions.
 #[derive(Debug, Clone)]
 pub struct CustomPart {
-    pub ref_base_name: &'static str,
+    pub ref_prefix: &'static str,
     pub pin_ids: Vec<&'static str>,
     pub internal_connections: Vec<Vec<&'static str>>,
     pub kicad: Option<KicadPartInfo>,
@@ -242,7 +240,7 @@ impl CustomPart {
     /// A two-pin part with valid KiCad information.
     pub fn valid() -> Self {
         CustomPart {
-            ref_base_name: "X",
+            ref_prefix: "X",
             pin_ids: vec!["1", "2"],
             internal_connections: vec![],
             kicad: Some(two_pin_kicad_info("Custom:Footprint", "Custom:Symbol")),
@@ -256,8 +254,8 @@ impl CustomPart {
 }
 
 impl Part for CustomPart {
-    fn get_ref_base_name(&self) -> String {
-        self.ref_base_name.into()
+    fn ref_prefix(&self) -> String {
+        self.ref_prefix.into()
     }
     fn pin_ids(&self) -> Vec<String> {
         self.pin_ids.iter().map(|s| s.to_string()).collect()

@@ -9,13 +9,13 @@ Describe electronic circuits in Rust, test them with ERC and SPICE simulations, 
 the KiCad PCB editor (pcbnew) as a netlist.
 
 ```rust
-use cuprite_wire::{basic::{Capacitor0603, OpAmpSot23, Resistor0603}, circuit::CircuitBuilder};
+use cuprite_wire::{basic::{Capacitor0603, OpAmpSot23, Resistor0603}, circuit::{CircuitBuilder, Named}};
 
 // An RC low-pass filter followed by a voltage follower.
 let mut c: CircuitBuilder = CircuitBuilder::new();
-let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
-let c1 = c.instantiate_part_named("c1", Box::new(Capacitor0603::new("100n")));
-let amp = c.instantiate_part_named("amp", Box::new(OpAmpSot23::new("LMV321")));
+let r1 = c.instantiate_part(Named("r1", Resistor0603::new("10k")));
+let c1 = c.instantiate_part(Named("c1", Capacitor0603::new("100n")));
+let amp = c.instantiate_part(Named("amp", OpAmpSot23::new("LMV321")));
 c.connect(r1["2"], c1["1"]);
 c.connect(r1["2"], amp[OpAmpSot23::IN_P]);
 c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);

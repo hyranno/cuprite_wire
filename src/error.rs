@@ -92,6 +92,9 @@ pub enum CircuitErrorKind {
         /// The duplicated instance name.
         name: String,
     },
+    /// A node created by another [`CircuitBuilder`](crate::circuit::CircuitBuilder) is used, e.g.
+    /// a node of the circuit around a subcircuit inside the subcircuit. The use is ignored.
+    ForeignNode,
     /// A part lists the same pin ID more than once.
     DuplicatePinId {
         /// Reference designator of the part.
@@ -104,6 +107,14 @@ pub enum CircuitErrorKind {
         /// Reference designator of the part.
         ref_name: String,
         /// The pin ID that the part does not have.
+        pin_id: String,
+    },
+    /// A pin of a part has a type both in its KiCad pin information and in
+    /// [`Part::extra_pin_types`](crate::parts::Part::extra_pin_types).
+    DuplicatePinType {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The pin ID with two types.
         pin_id: String,
     },
     /// Two parts get the same reference designator.
@@ -203,11 +214,20 @@ impl fmt::Display for CircuitErrorKind {
                     "instance name {name:?} is used more than once in the same circuit"
                 )
             }
+            CircuitErrorKind::ForeignNode => {
+                write!(f, "a node of another circuit is used in this circuit")
+            }
             CircuitErrorKind::DuplicatePinId { ref_name, pin_id } => {
                 write!(f, "{ref_name}: pin ID {pin_id:?} is listed more than once")
             }
             CircuitErrorKind::UnknownPinId { ref_name, pin_id } => {
                 write!(f, "{ref_name}: unknown pin ID {pin_id:?}")
+            }
+            CircuitErrorKind::DuplicatePinType { ref_name, pin_id } => {
+                write!(
+                    f,
+                    "{ref_name}: pin ID {pin_id:?} has a type in the KiCad information and an extra type"
+                )
             }
             CircuitErrorKind::DuplicateRef { ref_name } => {
                 write!(f, "reference {ref_name:?} is used by more than one part")

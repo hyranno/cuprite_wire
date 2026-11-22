@@ -103,7 +103,7 @@ pub struct SpicePartInput {
 #[derive(Clone, Copy)]
 enum CommonKey {
     Value,
-    RefBase,
+    RefPrefix,
     Pins,
     InternalConnections,
     SimModel,
@@ -154,7 +154,7 @@ const KICAD_KEYS: &[(&str, KicadPartKey)] = &[
     ("symbol", KicadPartKey::Kicad(KicadKey::Symbol)),
     ("footprint", KicadPartKey::Kicad(KicadKey::Footprint)),
     ("value", KicadPartKey::Common(CommonKey::Value)),
-    ("ref_base", KicadPartKey::Common(CommonKey::RefBase)),
+    ("ref_prefix", KicadPartKey::Common(CommonKey::RefPrefix)),
     ("pins", KicadPartKey::Common(CommonKey::Pins)),
     (
         "internal_connections",
@@ -176,7 +176,7 @@ const SPICE_KEYS: &[(&str, SpicePartKey)] = &[
     ("library", SpicePartKey::Model(ModelKey::Library)),
     ("name", SpicePartKey::Model(ModelKey::Name)),
     ("value", SpicePartKey::Common(CommonKey::Value)),
-    ("ref_base", SpicePartKey::Common(CommonKey::RefBase)),
+    ("ref_prefix", SpicePartKey::Common(CommonKey::RefPrefix)),
     ("pins", SpicePartKey::Common(CommonKey::Pins)),
     (
         "internal_connections",
@@ -438,9 +438,9 @@ fn common_key(
             });
             Some(OptionKey::Value)
         }
-        CommonKey::RefBase => {
-            options.ref_base = Some(content.parse::<LitStr>()?.value());
-            Some(OptionKey::RefBase)
+        CommonKey::RefPrefix => {
+            options.ref_prefix = Some(content.parse::<LitStr>()?.value());
+            Some(OptionKey::RefPrefix)
         }
         CommonKey::Pins => {
             options.pins = string_map(content)?;

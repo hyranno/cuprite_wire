@@ -175,7 +175,7 @@ impl Verilator {
         }
         text.push(0);
         text.extend_from_slice(
-            self.run(Command::new(&self.program).arg("--version"), &cwd)?
+            self.run(Command::new(&self.program).arg("--version"), None)?
                 .as_bytes(),
         );
         for arg in &self.args {
@@ -200,7 +200,7 @@ impl Verilator {
         };
         let mut convert = verilator();
         convert.args(&self.args).args(&self.sources);
-        self.run(&mut convert, dir)?;
+        self.run(&mut convert, Some(dir))?;
 
         let header = fs::read_to_string(obj.join(format!("{PREFIX}.h")))?;
         let (inputs, outputs) = read_ports(&header)?;
@@ -225,7 +225,7 @@ impl Verilator {
             .arg(self.shim_dir.join("verilator_shim.cpp"))
             .args(&self.args)
             .args(&self.sources);
-        self.run(&mut compile, dir)?;
+        self.run(&mut compile, Some(dir))?;
 
         let mut link = Command::new("g++");
         link.arg("--shared")
@@ -233,7 +233,7 @@ impl Verilator {
             .arg(obj.join(format!("{PREFIX}__ALL.a")))
             .args(["-pthread", "-lpthread", "-o"])
             .arg(dir.join("libmodel.so"));
-        self.run(&mut link, dir)?;
+        self.run(&mut link, Some(dir))?;
 
         let files = fs::read_to_string(obj.join(format!("{PREFIX}__verFiles.dat")))?;
         fs::write(dir.join(INPUTS), record_inputs(&files)?)?;
@@ -241,8 +241,8 @@ impl Verilator {
     }
 
     /// Runs a command in the current directory; its output, or an error with it that names `dir`
-    /// (the build directory).
-    fn run(&self, command: &mut Command, dir: &Path) -> Result<String, VerilatorError> {
+    /// (the build directory), if any.
+    fn run(&self, command: &mut Command, dir: Option<&Path>) -> Result<String, VerilatorError> {
         let output = command.output().map_err(|e| {
             let note = if e.kind() == io::ErrorKind::NotFound {
                 SUPPORT_NOTE
@@ -263,7 +263,7 @@ impl Verilator {
         } else {
             Err(VerilatorError::Command {
                 command: format!("{command:?}"),
-                dir: dir.to_path_buf(),
+                dir: dir.map(Path::to_path_buf),
                 log,
             })
         }
@@ -466,11 +466,7 @@ impl VerilatedModel {
     /// A [`DCosim`] part of the design, with a pin per bit ([`Port::pins`]), all inputs with
     /// `input` and all outputs with `output`. For pins with other characteristics, add the pins
     /// to `DCosim::new(model.library())` in the same order instead.
-    pub fn part(
-        &self,
-        input: &InputCharacteristics,
-        output: &OutputCharacteristics,
-    ) -> Box<DCosim> {
+    pub fn part(&self, input: &InputCharacteristics, output: &OutputCharacteristics) -> DCosim {
         let mut part = DCosim::new(&self.library);
         for pin in self.inputs.iter().flat_map(Port::pins) {
             part = part.input(&pin, input.clone());
@@ -488,13 +484,13 @@ impl VerilatedModel {
 pub enum VerilatorError {
     /// A file operation failed, or a program of the build cannot be run.
     Io(io::Error),
-    /// A step of the build failed. Its directory is kept (the build directory, or the current
-    /// directory for `verilator --version`); other errors remove it.
+    /// A step of the build failed. Its build directory is kept; other errors remove it.
     Command {
         /// The command line that failed.
         command: String,
-        /// The directory kept for inspection.
-        dir: PathBuf,
+        /// The build directory kept for inspection, or `None` if the step was not part of a
+        /// build (`verilator --version`).
+        dir: Option<PathBuf>,
         /// The output of the command.
         log: String,
     },
@@ -506,11 +502,13 @@ impl fmt::Display for VerilatorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VerilatorError::Io(e) => write!(f, "cannot build with Verilator: {e}"),
-            VerilatorError::Command { command, dir, log } => write!(
-                f,
-                "a step of the Verilator build failed (in {}): {command}\n{log}",
-                dir.display()
-            ),
+            VerilatorError::Command { command, dir, log } => {
+                write!(f, "a step of the Verilator build failed")?;
+                if let Some(dir) = dir {
+                    write!(f, " (in {})", dir.display())?;
+                }
+                write!(f, ": {command}\n{log}")
+            }
             VerilatorError::Ports(reason) => write!(f, "cannot use the design: {reason}"),
         }
     }

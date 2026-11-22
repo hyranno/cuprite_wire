@@ -8,7 +8,7 @@ use dyn_clone::DynClone;
 use petgraph::graph::NodeIndex;
 
 use crate::{
-    circuit::{CircuitBuilder, ExpandedCircuit},
+    circuit::{CircuitBuilder, ExpandedCircuit, Node},
     naming::short_type_name,
     trace::Loc,
 };
@@ -24,10 +24,10 @@ pub use cuprite_wire_macros::Interface;
 /// [`check_subcircuit`](crate::erc::check_subcircuit):
 ///
 /// ```
-/// use cuprite_wire::{circuit::NodeIndex, subcircuit::Interface};
+/// use cuprite_wire::{circuit::Node, subcircuit::Interface};
 ///
 /// #[derive(Interface)]
-/// pub struct FollowerPorts<T = NodeIndex> {
+/// pub struct FollowerPorts<T = Node> {
 ///     pub input: T,
 ///     pub output: T,
 ///     pub vcc: T,
@@ -35,8 +35,8 @@ pub use cuprite_wire_macros::Interface;
 /// }
 /// ```
 ///
-/// It is also implemented for arrays (`[NodeIndex; 2]`) and for `()` (no interface).
-pub trait Interface<T = NodeIndex>: Sized {
+/// It is also implemented for arrays (`[Node; 2]`) and for `()` (no interface).
+pub trait Interface<T = Node>: Sized {
     /// The same interface holding `U`s.
     type With<U>: Interface<U>;
 
@@ -107,11 +107,28 @@ pub trait SubcircuitGenerator: Debug + Clone {
     fn base_name(&self) -> String {
         short_type_name::<Self>()
     }
+
+    /// This generator, for a circuit built with options of another type `B`:
+    /// `options_for_generator` derives its options from them. Pass the result to
+    /// [`CircuitBuilder::instantiate_subcircuit`].
+    fn with_options<B, F>(self, options_for_generator: F) -> WithOptions<Self, F>
+    where
+        F: Fn(&B) -> Self::Options + Clone,
+    {
+        WithOptions {
+            generator: self,
+            options_for_generator,
+        }
+    }
 }
 
 /// The nodes of `interface` in order.
 pub(crate) fn interface_nodes(interface: &impl Interface) -> Vec<NodeIndex> {
-    interface.values().into_iter().copied().collect()
+    interface
+        .values()
+        .into_iter()
+        .map(|node| node.index())
+        .collect()
 }
 
 /// Creates a circuit with the interface nodes of `generator`, traced to `location`, and
@@ -120,10 +137,10 @@ pub(crate) fn construct<G: SubcircuitGenerator>(
     generator: &G,
     options: &G::Options,
     location: Loc,
-) -> (CircuitBuilder<G::Options>, Vec<NodeIndex>) {
+) -> (CircuitBuilder<G::Options>, Vec<Node>) {
     let mut circuit = CircuitBuilder::new();
     let interface = G::Interface::from_fn(|_| circuit.add_node_at(location));
-    let nodes = interface_nodes(&interface);
+    let nodes = interface.values().into_iter().copied().collect();
     generator.construct_subcircuit(options, &mut circuit, interface);
     (circuit, nodes)
 }
@@ -170,21 +187,108 @@ where
     fn generate(&self, options: &B, location: Loc) -> (ExpandedCircuit, Vec<NodeIndex>) {
         let options = (self.options_for_generator)(options);
         let (circuit, interface) = construct(&self.generator, &options, location);
+        let interface = interface.into_iter().map(Node::index).collect();
         (circuit.expand(&options), interface)
+    }
+}
+
+mod bound {
+    use super::ErasedSubcircuitGenerator;
+
+    /// A generator bound to the options of the circuit it is instantiated in (`B`), with its base
+    /// name. Not nameable outside the crate.
+    pub struct BoundGenerator<B> {
+        pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
+        pub(crate) base_name: String,
+    }
+}
+pub(crate) use bound::BoundGenerator;
+
+impl<B> BoundGenerator<B> {
+    fn new<G, F>(generator: G, options_for_generator: F) -> Self
+    where
+        B: 'static,
+        G: SubcircuitGenerator + 'static,
+        F: Fn(&B) -> G::Options + Clone + 'static,
+    {
+        BoundGenerator {
+            base_name: generator.base_name(),
+            generator: Box::new(BoundSubcircuitGenerator {
+                generator,
+                options_for_generator,
+                _builder_options: PhantomData,
+            }),
+        }
+    }
+}
+
+/// What [`CircuitBuilder::instantiate_subcircuit`] takes in a circuit built with options of type
+/// `B`: a [`SubcircuitGenerator`] with the options `B`, one with its own options
+/// ([`SubcircuitGenerator::with_options`]), or either [`Named`](crate::circuit::Named).
+pub trait IntoSubcircuit<B> {
+    /// The interface of the subcircuit.
+    type Interface: Interface;
+
+    /// The explicit instance name, if any, and the bound generator.
+    #[doc(hidden)]
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>);
+}
+
+impl<B, G> IntoSubcircuit<B> for G
+where
+    B: Clone + 'static,
+    G: SubcircuitGenerator<Options = B> + 'static,
+{
+    type Interface = G::Interface;
+
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>) {
+        (None, BoundGenerator::new(self, B::clone))
+    }
+}
+
+/// A [`SubcircuitGenerator`] whose options are derived from the options of the circuit it is
+/// instantiated in, made by [`SubcircuitGenerator::with_options`].
+#[derive(Clone)]
+pub struct WithOptions<G, F> {
+    generator: G,
+    options_for_generator: F,
+}
+
+impl<G: Debug, F> Debug for WithOptions<G, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WithOptions")
+            .field("generator", &self.generator)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<B, G, F> IntoSubcircuit<B> for WithOptions<G, F>
+where
+    B: 'static,
+    G: SubcircuitGenerator + 'static,
+    F: Fn(&B) -> G::Options + Clone + 'static,
+{
+    type Interface = G::Interface;
+
+    fn into_named_subcircuit(self) -> (Option<String>, BoundGenerator<B>) {
+        (
+            None,
+            BoundGenerator::new(self.generator, self.options_for_generator),
+        )
     }
 }
 
 /// A subcircuit instantiated in a [`CircuitBuilder`], expanded when the circuit is built with
 /// options of type `B`.
-pub struct SubcircuitInstance<B = ()> {
+pub(crate) struct SubcircuitInstance<B = ()> {
     pub(crate) generator: Box<dyn ErasedSubcircuitGenerator<B>>,
     /// The nodes in the circuit around the instance, connected to the subcircuit's interface nodes
     /// in order.
-    pub interface: Vec<NodeIndex>,
+    pub(crate) interface: Vec<NodeIndex>,
     /// Explicit or automatic instance name.
-    pub name: String,
+    pub(crate) name: String,
     /// Where the subcircuit was instantiated.
-    pub location: Loc,
+    pub(crate) location: Loc,
 }
 
 impl<B> Clone for SubcircuitInstance<B> {
@@ -208,50 +312,24 @@ impl<B> Debug for SubcircuitInstance<B> {
     }
 }
 
-impl<B> SubcircuitInstance<B> {
-    pub(crate) fn new<G, F>(
-        generator: G,
-        options_for_generator: F,
-        interface: Vec<NodeIndex>,
-        name: String,
-        location: Loc,
-    ) -> Self
-    where
-        B: 'static,
-        G: SubcircuitGenerator + 'static,
-        F: Fn(&B) -> G::Options + Clone + 'static,
-    {
-        Self {
-            generator: Box::new(BoundSubcircuitGenerator {
-                generator,
-                options_for_generator,
-                _builder_options: PhantomData,
-            }),
-            interface,
-            name,
-            location,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[derive(Interface, Debug, PartialEq)]
-    struct Ports<T = NodeIndex> {
+    struct Ports<T = Node> {
         input: T,
         output: T,
     }
 
     #[test]
     fn test_derived_interface() {
-        let ports = <Ports>::from_fn(NodeIndex::new);
+        let ports = Ports::<usize>::from_fn(|index| index);
         assert_eq!(
             ports,
             Ports {
-                input: NodeIndex::new(0),
-                output: NodeIndex::new(1)
+                input: 0,
+                output: 1
             }
         );
         assert_eq!(ports.values(), [&ports.input, &ports.output]);
@@ -264,12 +342,12 @@ mod tests {
 
     #[test]
     fn test_array_and_unit_interfaces() {
-        let nodes = <[NodeIndex; 3]>::from_fn(NodeIndex::new);
-        assert_eq!(nodes, [0, 1, 2].map(NodeIndex::new));
+        let nodes = <[usize; 3]>::from_fn(|index| index);
+        assert_eq!(nodes, [0, 1, 2]);
         assert_eq!(nodes.values(), nodes.iter().collect::<Vec<_>>());
-        assert_eq!(<[NodeIndex; 3] as Interface>::names(), ["0", "1", "2"]);
+        assert_eq!(<[Node; 3] as Interface>::names(), ["0", "1", "2"]);
         <() as Interface>::from_fn(|_| unreachable!());
-        assert!(Interface::<NodeIndex>::values(&()).is_empty());
+        assert!(Interface::<Node>::values(&()).is_empty());
         assert!(<() as Interface>::names().is_empty());
     }
 }

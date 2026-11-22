@@ -2,7 +2,7 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, NodeIndex},
+    circuit::{CircuitBuilder, Named, Node},
     subcircuit::{Interface, SubcircuitGenerator},
 };
 
@@ -15,7 +15,7 @@ pub struct LowPass;
 
 /// The interface of [`LowPass`].
 #[derive(Interface)]
-pub struct LowPassPorts<T = NodeIndex> {
+pub struct LowPassPorts<T = Node> {
     pub input: T,
     pub vref: T,
     pub vcc: T,
@@ -40,14 +40,12 @@ impl SubcircuitGenerator for LowPass {
             gnd,
             output,
         } = interface;
-        let r1 = c.instantiate_part_named("r1", Box::new(Resistor0603::new("10k")));
-        let r2 = c.instantiate_part_named("r2", Box::new(Resistor0603::new("10k")));
-        let c_feedback =
-            c.instantiate_part_named("c_feedback", Box::new(Capacitor0603::new("22n")));
-        let c_ground = c.instantiate_part_named("c_ground", Box::new(Capacitor0603::new("10n")));
-        let decoupling =
-            c.instantiate_part_named("c_decoupling", Box::new(Capacitor0603::new("100n")));
-        let amp = c.instantiate_part_named("amp", Box::new(RrioOpAmp::new()));
+        let r1 = c.instantiate_part(Named("r1", Resistor0603::new("10k")));
+        let r2 = c.instantiate_part(Named("r2", Resistor0603::new("10k")));
+        let c_feedback = c.instantiate_part(Named("c_feedback", Capacitor0603::new("22n")));
+        let c_ground = c.instantiate_part(Named("c_ground", Capacitor0603::new("10n")));
+        let decoupling = c.instantiate_part(Named("c_decoupling", Capacitor0603::new("100n")));
+        let amp = c.instantiate_part(Named("amp", RrioOpAmp::new()));
         c.connect(input, r1["1"]);
         c.connect(r1["2"], r2["1"]);
         c.connect(r2["2"], amp[RrioOpAmp::IN_P]);
@@ -91,7 +89,7 @@ mod tests {
     }
 
     /// The filter on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
-    fn bench(input: Box<IndependentSource>) -> Bench {
+    fn bench(input: IndependentSource) -> Bench {
         Bench::stage(input, |circuit| {
             let LowPassPorts {
                 input,
@@ -99,7 +97,7 @@ mod tests {
                 vcc,
                 gnd,
                 output,
-            } = circuit.instantiate_subcircuit_named("filter", LowPass);
+            } = circuit.instantiate_subcircuit(Named("filter", LowPass));
             StageNodes {
                 input,
                 vref,

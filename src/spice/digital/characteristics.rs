@@ -4,7 +4,7 @@ use super::{DigitalSequence, HIZ_RESISTANCE, Level};
 use crate::spice::{
     SpiceElement,
     netlist::write_element_line,
-    sources::spice_number,
+    spice_number,
     subcircuit::{SUBCIRCUIT_REFERENCE, internal_node},
 };
 

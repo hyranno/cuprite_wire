@@ -29,7 +29,7 @@ impl DeviceModel for Firmware {
 let mcu = CosimDevice::new("mcu")
     .input("button", InputCharacteristics::cmos(3.3))
     .output("led", OutputCharacteristics::cmos(3.3));
-let mcu = bench.instantiate_part_named("mcu", mcu);
+let mcu = bench.instantiate_part(Named("mcu", mcu));
 // ... connect mcu["button"], mcu["led"] and mcu[CosimDevice::GND], add a transient analysis ...
 let mut firmware = Firmware;
 let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
@@ -230,7 +230,7 @@ let counter = DCosim::new("/abs/path/libcounter.so")   // the `simulation` param
     .input("clk", InputCharacteristics::cmos(3.3))      // input port 0
     .output("q0", OutputCharacteristics::cmos(3.3))     // output port 0
     .output("q1", OutputCharacteristics::cmos(3.3));    // output port 1
-let counter = bench.instantiate_part_named("counter", counter);
+let counter = bench.instantiate_part(Named("counter", counter));
 ```
 
 - The ports of the model are the inputs and the outputs in the order they are added; a model

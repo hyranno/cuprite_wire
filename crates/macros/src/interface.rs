@@ -47,7 +47,7 @@ pub fn derive(input: &DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
-/// The one type parameter, without bounds (a default such as `T = NodeIndex` is allowed).
+/// The one type parameter, without bounds (a default such as `T = Node` is allowed).
 fn type_param(input: &DeriveInput) -> syn::Result<&Ident> {
     let generics = &input.generics;
     let mut params = generics.params.iter();
@@ -64,7 +64,7 @@ fn type_param(input: &DeriveInput) -> syn::Result<&Ident> {
                 generics.params.span()
             },
             "an `Interface` must have exactly one type parameter without bounds, \
-             e.g. `struct Ports<T = NodeIndex> { input: T, output: T }`",
+             e.g. `struct Ports<T = Node> { input: T, output: T }`",
         )),
     }
 }

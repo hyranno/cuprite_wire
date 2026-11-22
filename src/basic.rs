@@ -92,7 +92,7 @@ kicad_part! {
 mod tests {
     use super::*;
     use crate::{
-        circuit::CircuitBuilder,
+        circuit::{CircuitBuilder, Named},
         naming::NetLabel,
         parts::{Part, PartPins},
         spice::{IndependentSource, SpicePartInfo},
@@ -133,9 +133,9 @@ mod tests {
     #[test]
     fn test_simulate_dual_opamp() {
         let mut circuit = CircuitBuilder::new();
-        let amp = circuit.instantiate_part(Box::new(DualOpAmpSoic8::new("LM358")));
-        let feedback = circuit.instantiate_part(Box::new(Resistor0603::new("10k")));
-        let ground = circuit.instantiate_part(Box::new(Resistor0603::new("1k")));
+        let amp = circuit.instantiate_part(DualOpAmpSoic8::new("LM358"));
+        let feedback = circuit.instantiate_part(Resistor0603::new("10k"));
+        let ground = circuit.instantiate_part(Resistor0603::new("1k"));
         circuit.connect(amp["out_b"], feedback["1"]);
         circuit.connect(feedback["2"], amp["in_n_b"]);
         circuit.connect(amp["in_n_b"], ground["1"]);
@@ -187,13 +187,13 @@ mod tests {
     #[test]
     fn test_golden() {
         let mut c = CircuitBuilder::new();
-        let single = c.instantiate_part_named("single", Box::new(OpAmpSot23::new("LMV321")));
-        let dual = c.instantiate_part_named("dual", Box::new(DualOpAmpSoic8::new("LM358")));
-        let r = c.instantiate_part_named("r", Box::new(Resistor0603::new("10k")));
-        let cap = c.instantiate_part_named("c", Box::new(Capacitor0603::new("100n")));
-        let l = c.instantiate_part_named("l", Box::new(Inductor0603::new("10u")));
-        let d = c.instantiate_part_named("d", Box::new(DiodeSod123::new("1N4148")));
-        let led = c.instantiate_part_named("led", Box::new(Led0603::new("red")));
+        let single = c.instantiate_part(Named("single", OpAmpSot23::new("LMV321")));
+        let dual = c.instantiate_part(Named("dual", DualOpAmpSoic8::new("LM358")));
+        let r = c.instantiate_part(Named("r", Resistor0603::new("10k")));
+        let cap = c.instantiate_part(Named("c", Capacitor0603::new("100n")));
+        let l = c.instantiate_part(Named("l", Inductor0603::new("10u")));
+        let d = c.instantiate_part(Named("d", DiodeSod123::new("1N4148")));
+        let led = c.instantiate_part(Named("led", Led0603::new("red")));
         let gnd = NetLabel::global("GND");
         let vcc = NetLabel::global("+5V");
         // Single op-amp: a follower of IN driving the LED through R.

@@ -24,7 +24,7 @@ pub trait Part: Debug + DynClone {
     /// It must not be empty, end with a digit (`U1` + `1` would be `U11`), or contain whitespace,
     /// `?`, `#`, `/` or `{`; other prefixes are reported as
     /// [`CircuitErrorKind::InvalidName`](crate::error::CircuitErrorKind::InvalidName).
-    fn get_ref_base_name(&self) -> String;
+    fn ref_prefix(&self) -> String;
     /// IDs of the pins. One pin ID corresponds to one footprint pad, except for duplicate pins
     /// (several pins on one pad, which KiCad 10 allows): they must be connected by
     /// [`Part::internal_connections`], and the KiCad netlist writes the pad once, with the first
@@ -53,17 +53,17 @@ pub trait Part: Debug + DynClone {
     fn cosim_device(&self) -> Option<&crate::spice::cosim::CosimDevice> {
         None
     }
-    /// Electrical types of the pins for ERC, keyed by pin ID. Defaults to those of the KiCad
-    /// information. ERC treats pins without a type as [`PinType::Passive`].
-    fn pin_types(&self) -> BTreeMap<String, PinType> {
-        self.kicad()
-            .map(|info| {
-                info.pins
-                    .into_iter()
-                    .map(|(id, pin)| (id, pin.pin_type))
-                    .collect()
-            })
-            .unwrap_or_default()
+    /// Electrical types for ERC of pins that have no KiCad pin information, keyed by pin ID (e.g.
+    /// the pins of a part without [`Part::kicad`]). ERC uses the types of the KiCad pin information
+    /// and these, and treats pins with neither as [`PinType::Passive`].
+    ///
+    /// A pin with KiCad pin information is reported as
+    /// [`CircuitErrorKind::DuplicatePinType`](crate::error::CircuitErrorKind::DuplicatePinType),
+    /// and a key that is not a pin ID as
+    /// [`CircuitErrorKind::UnknownPinId`](crate::error::CircuitErrorKind::UnknownPinId). Empty by
+    /// default.
+    fn extra_pin_types(&self) -> BTreeMap<String, PinType> {
+        BTreeMap::new()
     }
 }
 dyn_clone::clone_trait_object!(Part);
@@ -185,7 +185,7 @@ impl PartPins {
 pub(crate) struct PartInstance {
     pub part: Box<dyn Part>,
     pub pin_mapping: HashMap<String, NodeIndex>,
-    /// Explicit or automatic (`<ref base name>#<n>`) instance name, unique in its subcircuit instance.
+    /// Explicit or automatic (`<reference prefix>#<n>`) instance name, unique in its subcircuit instance.
     pub name: String,
     /// Path of the subcircuit instance containing the part.
     pub path: HierPath,

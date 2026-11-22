@@ -71,7 +71,7 @@ the subcircuit returns its nodes in the board by name, and the ERC test gives th
 pin types:
 
 ```rust
-let preamp = board.instantiate_subcircuit_named("preamp", Preamp::default());
+let preamp = board.instantiate_subcircuit(Named("preamp", Preamp::default()));
 board.connect(preamp.vref, bias.vref);
 ```
 
