@@ -185,7 +185,9 @@ with an error or prints a line starting with `Error`. Otherwise the directory is
 `ngbehavior` mode (`SpiceNetlist::ngbehavior()`): `ps`, `lt` or `ltps` when the models are included,
 with `a` appended (`psa`, ...) when one is written into the deck, since ngspice translates only
 included files otherwise. `run()` writes `set ngbehavior=<mode>` to `.spiceinit` in the run
-directory, which ngspice reads (`.options ngbehavior=` in the deck has no effect). The deck notes it
+directory, which ngspice reads (`.options ngbehavior=` in the deck has no effect). Without a mode
+it writes `unset ngbehavior`: ngspice reads only one `.spiceinit`, the one in its working
+directory if there is one, so the user's `~/.spiceinit` does not affect the run. The deck notes it
 after the title, `* requires: set ngbehavior=ps (.spiceinit)`, for running it by hand. Decks
 without such models run in the default mode. See `doc/spice_part_macro.md` section 4 for what the
 modes change.
@@ -217,6 +219,10 @@ co-simulation with Rust models; plain runs should keep using the CLI:
 - The compatibility mode is set by `set ngbehavior=<mode>` (or `unset ngbehavior`) before the deck
   is read. A deck without a control block is run with `run` after it is read, so the analyses of
   its dot directives (`.tran`, `.meas`) run as in the CLI.
+- The library reads the user's `.spiceinit` when it is loaded: the one in the working directory of
+  the process, or else `~/.spiceinit`. The CLI does not (see above), so settings there can make the
+  two differ. ngspice cannot be told to skip it on Linux and macOS (`ngSpice_nospiceinit` only
+  works in the Windows build).
 - After an error ngspice cannot recover from (it reports `cannot recover and awaits to be reset`),
   the library is unloaded and loaded again for the next run.
 

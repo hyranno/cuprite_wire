@@ -64,6 +64,9 @@ break the API).
 
 ### Fixed
 
+- `Ngspice::run` always writes a `.spiceinit` into the run directory (`unset ngbehavior` without a
+  compatibility mode), so the user's `~/.spiceinit`, which ngspice read otherwise, no longer
+  affects the run. `SharedNgspice` still reads it; ngspice cannot prevent that on Linux and macOS.
 - `kicad_part!` expands the text variables of the value from the part's fields as KiCad does, e.g.
   `${SIM.PARAMS}`, the value of `Simulation_SPICE:OPAMP`, which was written as is.
 - ERC treated internal connection groups sharing a pin (e.g. `["4", "5"]` and `["4", "ep"]`) as

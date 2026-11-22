@@ -162,7 +162,8 @@ from what the library (and the files it includes) uses, and record it in the ele
   Without `a`, ngspice translates only the included files, so the rest of the deck keeps ngspice's
   own syntax; with it, the whole deck. Other decks run in the default mode.
 - `SpiceDeck::run` sets the mode with a `.spiceinit` file in its run directory (`.options ngbehavior=`
-  in a deck has no effect). The deck notes it after the title, `* requires: set ngbehavior=ps (.spiceinit)`,
+  in a deck has no effect; without a mode the file unsets it, which keeps out the user's
+  `~/.spiceinit`). The deck notes it after the title, `* requires: set ngbehavior=ps (.spiceinit)`,
   for running it by hand.
 - KiCad 9 sets the mode in the simulator settings ("Compatibility mode", e.g. "PSpice" or
   "PSpice and LTSpice"). Its modes are `psa`, `lta`, `ltpsa` and `hsa` (strings of KiCad 9's

@@ -45,8 +45,10 @@ impl Ngspice {
     /// Writes the deck into a new temporary directory and runs it there, so that relative
     /// `wrdata` paths land in that directory.
     ///
-    /// If the models need a compatibility mode ([`SpiceNetlist::ngbehavior`](crate::spice::SpiceNetlist::ngbehavior)),
-    /// it is set with a `.spiceinit` file in that directory.
+    /// The directory also holds a `.spiceinit`, which sets the compatibility mode the models need
+    /// ([`SpiceNetlist::ngbehavior`](crate::spice::SpiceNetlist::ngbehavior)) or unsets it.
+    /// Since ngspice reads only one `.spiceinit` and prefers the one in its working directory,
+    /// the user's `~/.spiceinit` does not affect the run.
     ///
     /// # Errors
     /// [`SimulationError::Io`] if the program cannot be run or the run directory cannot be
@@ -86,16 +88,26 @@ pub trait Simulator {
 /// a run of any backend.
 pub(crate) const DECK_FILE: &str = "deck.cir";
 
-/// Creates a run directory with the deck ([`DECK_FILE`]) and, if the models need a compatibility
-/// mode, a `.spiceinit` setting it (ngspice reads it from its working directory before the deck;
-/// the mode cannot be set from the deck).
+/// Creates a run directory with the deck ([`DECK_FILE`]) and a `.spiceinit` with the
+/// [`ngbehavior_command`] (ngspice reads it from its working directory before the deck; the mode
+/// cannot be set from the deck). The file is always written: without it the CLI would read the
+/// user's `~/.spiceinit` instead.
 pub(crate) fn prepare_run_dir(deck: &SpiceDeck) -> io::Result<RunDir> {
     let dir = RunDir::create()?;
     fs::write(dir.join(DECK_FILE), deck.to_string())?;
-    if let Some(mode) = deck.netlist().ngbehavior() {
-        fs::write(dir.join(".spiceinit"), format!("set ngbehavior={mode}\n"))?;
-    }
+    fs::write(
+        dir.join(".spiceinit"),
+        format!("{}\n", ngbehavior_command(deck)),
+    )?;
     Ok(dir)
+}
+
+/// The front-end command that sets the compatibility mode of `deck`, or unsets it.
+pub(crate) fn ngbehavior_command(deck: &SpiceDeck) -> String {
+    match deck.netlist().ngbehavior() {
+        Some(mode) => format!("set ngbehavior={mode}"),
+        None => "unset ngbehavior".into(),
+    }
 }
 
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.

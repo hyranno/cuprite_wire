@@ -442,6 +442,10 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
         "{}",
         sim.log()
     );
+    assert_eq!(
+        std::fs::read_to_string(sim.dir().join(".spiceinit")).unwrap(),
+        "set ngbehavior=psa\n"
+    );
 
     let ngspice = deck(ModelSource::inline("WINDOW", PSPICE_WINDOW));
     assert_eq!(ngspice.netlist().ngbehavior(), None);
@@ -449,6 +453,18 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
     // The default mode does not read the PSpice syntax.
     let error = simulation_error_message(simulator.run(&ngspice).unwrap_err());
     assert!(error.contains("ngspice reported an error"), "{error}");
+}
+
+#[test]
+fn test_run_dir_always_has_spiceinit() {
+    // Without a `.spiceinit` in the run directory, the CLI would read the user's `~/.spiceinit`.
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)));
+    assert_eq!(deck.netlist().ngbehavior(), None);
+    let dir = crate::spice::simulation::prepare_run_dir(&deck).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.join(".spiceinit")).unwrap(),
+        "unset ngbehavior\n"
+    );
 }
 
 /// A deck that ngspice rejects is reported with its log.
