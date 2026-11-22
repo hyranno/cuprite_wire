@@ -60,6 +60,12 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+impl From<ParseError> for crate::Error {
+    fn from(e: ParseError) -> Self {
+        crate::Error::new(e.to_string())
+    }
+}
+
 impl Sexpr {
     pub fn pos(&self) -> Pos {
         match self {

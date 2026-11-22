@@ -76,8 +76,6 @@ pub struct Definition {
     pub section: Option<String>,
     /// The definition contains an encrypted block, which ngspice cannot read.
     pub encrypted: bool,
-    /// The line where the definition starts (1-based).
-    pub line: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,7 +164,7 @@ impl Statement<'_> {
 struct OpenSubckt<'a> {
     name: String,
     /// `None` for nested subcircuits, which are part of the outer one.
-    top: Option<(DefinitionKind, Vec<&'a str>, bool, usize)>,
+    top: Option<(DefinitionKind, Vec<&'a str>, bool)>,
 }
 
 impl SpiceLib {
@@ -186,7 +184,7 @@ impl SpiceLib {
             let at = |message: String| Error::new(format!("line {}: {message}", statement.line));
             if statement.encrypted {
                 match open.first_mut().and_then(|s| s.top.as_mut()) {
-                    Some((_, lines, encrypted, _)) => {
+                    Some((_, lines, encrypted)) => {
                         lines.extend(statement.own_lines());
                         *encrypted = true;
                     }
@@ -201,7 +199,7 @@ impl SpiceLib {
                 .map(|t| t.to_ascii_lowercase())
                 .unwrap_or_default();
             if let Some(OpenSubckt {
-                top: Some((_, lines, _, _)),
+                top: Some((_, lines, _)),
                 ..
             }) = open.first_mut()
             {
@@ -218,7 +216,6 @@ impl SpiceLib {
                             subckt_header(&tokens[2..]),
                             statement.own_lines().to_vec(),
                             false,
-                            statement.line,
                         )
                     });
                     open.push(OpenSubckt { name, top });
@@ -235,14 +232,13 @@ impl SpiceLib {
                             subckt.name
                         )));
                     }
-                    if let Some((kind, lines, encrypted, line)) = subckt.top {
+                    if let Some((kind, lines, encrypted)) = subckt.top {
                         lib.definitions.push(Definition {
                             name: subckt.name,
                             kind,
                             text: join(&lines),
                             section: section.clone(),
                             encrypted,
-                            line,
                         });
                     }
                 }
@@ -272,7 +268,6 @@ impl SpiceLib {
                                 text: format!(".param {token}\n"),
                                 section: section.clone(),
                                 encrypted: false,
-                                line: statement.line,
                             });
                         }
                     }
@@ -319,8 +314,10 @@ impl SpiceLib {
                     }),
                     _ => return Err(at("expected `.lib file [section]` or `.lib section`".into())),
                 },
-                ".endl" if section.take().is_none() => {
-                    return Err(at("`.endl` outside a section".into()));
+                ".endl" => {
+                    section
+                        .take()
+                        .ok_or_else(|| at("`.endl` outside a section".into()))?;
                 }
                 _ => {}
             }
@@ -347,7 +344,6 @@ impl SpiceLib {
             text: join(statement.own_lines()),
             section,
             encrypted: false,
-            line: statement.line,
         });
     }
 
@@ -384,6 +380,7 @@ impl SpiceLib {
     }
 
     /// The `.subckt` or `.model` named `name` outside any section (case-insensitively, like SPICE).
+    #[cfg(test)]
     pub fn find(&self, name: &str) -> Option<&Definition> {
         self.find_in(name, None)
     }
@@ -703,7 +700,6 @@ R1 a b 1k
         let (ports, _, params) = subckt(amp);
         assert_eq!(ports, ["in+", "in-", "out"]);
         assert_eq!(params, pairs(&[("GAIN", "10"), ("ROUT", "1")]));
-        assert_eq!(amp.line, 2);
         assert!(amp.text.starts_with(".subckt amp"));
         assert!(amp.text.ends_with(".ends amp\n"));
         assert!(amp.text.contains(".ends inner"));
@@ -824,7 +820,13 @@ R1 a b 1k
         .unwrap();
         assert_eq!(lib.sections, ["TT", "FF"]);
         assert!(lib.find("n").is_none());
-        assert_eq!(lib.find_in("N", Some("ff")).unwrap().line, 7);
+        assert!(
+            lib.find_in("N", Some("ff"))
+                .unwrap()
+                .section
+                .as_deref()
+                .is_some_and(|s| s == "FF")
+        );
         assert_eq!(lib.includes(Some("tt")).count(), 1);
         assert_eq!(lib.includes(None).count(), 0);
         assert!(lib.hints.is_empty());

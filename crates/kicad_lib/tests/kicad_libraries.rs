@@ -4,7 +4,7 @@
 use cuprite_wire_kicad_lib::{
     part::{CommonOptions, FootprintOption, PartOptions, load_part},
     resolve::Resolver,
-    sim::{Args, ModelDef, SpiceDef, Value},
+    sim::{Args, Elements, ModelDef, SpiceDef, Value},
 };
 
 fn resolver() -> Resolver {
@@ -31,7 +31,7 @@ fn test_kicad_parts() {
     opts.common.value = Some(Value::Param);
     let part = load_part(&opts, &mut r).unwrap();
     assert!(
-        matches!(part.spice, SpiceDef::Elements { ref elements, .. } if elements[0].device == 'R')
+        matches!(part.spice, SpiceDef::Elements(Elements { ref elements, .. }) if elements[0].device == 'R')
     );
 
     let part = load_part(
@@ -60,7 +60,7 @@ fn test_kicad_parts() {
     );
 
     let part = load_part(&options("Simulation_SPICE:OPAMP", None), &mut r).unwrap();
-    let SpiceDef::Elements { elements, .. } = part.spice else {
+    let SpiceDef::Elements(Elements { elements, .. }) = part.spice else {
         panic!()
     };
     let element = &elements[0];
@@ -81,6 +81,9 @@ fn test_kicad_parts() {
     ] {
         let part = load_part(&options(symbol, None), &mut r)
             .unwrap_or_else(|e| panic!("{symbol}: {}", e.error));
-        assert!(matches!(part.spice, SpiceDef::Elements { .. }), "{symbol}");
+        assert!(
+            matches!(part.spice, SpiceDef::Elements(Elements { .. })),
+            "{symbol}"
+        );
     }
 }

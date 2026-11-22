@@ -60,6 +60,24 @@ impl ElectricalType {
             ElectricalType::NoConnect => "no_connect",
         }
     }
+
+    /// The name of the variant (`PowerIn`), which is also that of `cuprite_wire::kicad::PinType`.
+    pub fn variant_name(self) -> &'static str {
+        match self {
+            ElectricalType::Input => "Input",
+            ElectricalType::Output => "Output",
+            ElectricalType::Bidirectional => "Bidirectional",
+            ElectricalType::TriState => "TriState",
+            ElectricalType::Passive => "Passive",
+            ElectricalType::Free => "Free",
+            ElectricalType::Unspecified => "Unspecified",
+            ElectricalType::PowerIn => "PowerIn",
+            ElectricalType::PowerOut => "PowerOut",
+            ElectricalType::OpenCollector => "OpenCollector",
+            ElectricalType::OpenEmitter => "OpenEmitter",
+            ElectricalType::NoConnect => "NoConnect",
+        }
+    }
 }
 
 /// A pin of a symbol.
@@ -93,7 +111,6 @@ pub struct Symbol {
     /// netlist): by unit, then by position in the unit (left to right, then top to bottom), then
     /// in file order.
     pub pins: Vec<Pin>,
-    pub unit_count: u32,
     pub power: bool,
     pub exclude_from_sim: bool,
     pub in_bom: bool,
@@ -106,6 +123,12 @@ impl Symbol {
             .iter()
             .find(|(key, _)| key == name)
             .map(|(_, value)| value.as_str())
+    }
+
+    /// The pins without duplicates: the first of the pins with the same number, which is the one
+    /// KiCad takes (the others are connected to it).
+    pub fn distinct_pins(&self) -> impl Iterator<Item = &Pin> {
+        crate::unique_by(&self.pins, |pin| pin.number.as_str())
     }
 
     /// Groups of pin numbers placed at the same position in the same unit. KiCad connects such
@@ -142,7 +165,7 @@ pub struct SymbolLib {
 
 impl SymbolLib {
     pub fn parse(text: &str) -> Result<Self, Error> {
-        let root = sexpr::parse(text).map_err(|e| Error::new(e.to_string()))?;
+        let root = sexpr::parse(text)?;
         if root.head() != Some("kicad_symbol_lib") {
             return Err(Error::new("not a KiCad symbol library (kicad_symbol_lib)"));
         }
@@ -154,10 +177,6 @@ impl SymbolLib {
             symbols.insert(name.to_string(), symbol.clone());
         }
         Ok(SymbolLib { symbols })
-    }
-
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.symbols.keys().map(String::as_str)
     }
 
     /// The symbol `name`, with properties and flags of its `extends` chain resolved.
@@ -199,12 +218,10 @@ impl SymbolLib {
         };
 
         let pins = collect_pins(base, base_name)?;
-        let unit_count = pins.iter().map(|pin| pin.unit).max().unwrap_or(0).max(1);
         Ok(Symbol {
             name: name.to_string(),
             properties,
             pins,
-            unit_count,
             power: chain.iter().any(|symbol| symbol.child("power").is_some()),
             exclude_from_sim: flag("exclude_from_sim", false),
             in_bom: flag("in_bom", true),
@@ -394,7 +411,8 @@ mod tests {
         let symbol = lib.symbol("AMP").unwrap();
         let numbers: Vec<_> = symbol.pins.iter().map(|pin| pin.number.as_str()).collect();
         assert_eq!(numbers, ["1", "2", "3", "4", "5", "10"]);
-        assert_eq!(symbol.unit_count, 2);
+        let units: Vec<u32> = symbol.pins.iter().map(|pin| pin.unit).collect();
+        assert_eq!(units.iter().max(), Some(&2));
         assert_eq!(symbol.pins[0].name, None);
         assert_eq!(symbol.pins[2].name.as_deref(), Some("+"));
         assert_eq!(symbol.pins[5].electrical_type, ElectricalType::PowerIn);

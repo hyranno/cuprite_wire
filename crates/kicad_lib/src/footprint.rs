@@ -15,7 +15,7 @@ pub struct Footprint {
 
 impl Footprint {
     pub fn parse(text: &str) -> Result<Self, Error> {
-        let root = sexpr::parse(text).map_err(|e| Error::new(e.to_string()))?;
+        let root = sexpr::parse(text)?;
         // `module` is the head used before KiCad 6.
         if !matches!(root.head(), Some("footprint" | "module")) {
             return Err(Error::new("not a KiCad footprint (footprint)"));

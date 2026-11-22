@@ -22,7 +22,16 @@ mod test_util;
 pub mod text_var;
 pub mod value;
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
+
+/// The first of the items with the same key, in order.
+pub(crate) fn unique_by<'a, T: 'a, K: Ord + 'a>(
+    items: impl IntoIterator<Item = &'a T>,
+    key: impl Fn(&'a T) -> K,
+) -> impl Iterator<Item = &'a T> {
+    let mut seen = BTreeSet::new();
+    items.into_iter().filter(move |item| seen.insert(key(item)))
+}
 
 /// An error with a human-readable message.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -215,9 +215,7 @@ fn check_args(args: &str) -> Option<&'static str> {
 ///
 /// If the value is not such a number.
 pub fn spice_value(device: char, value: &str) -> Result<String, String> {
-    cuprite_wire_kicad_lib::value::to_spice(value, device).ok_or_else(|| {
-        format!("the value {value:?} is not a number (like 10k, 4k7 or 1M for mega)")
-    })
+    cuprite_wire_kicad_lib::value::try_to_spice(value, device).map_err(|e| e.message)
 }
 
 /// A model definition required by an element.
