@@ -50,6 +50,10 @@ break the API).
 - `cuprite_wire_ibis`: `LookupError`, `IbisFile::find_component`, `IbisFile::buffer_model`,
   `IbisFile::series_model` and `Component::find_diff_pin` find what a simulation asks for, with
   the reason when it is missing.
+- `spice::TransmissionLine`: a lossless transmission line (SPICE `T`, as KiCad's
+  `Simulation_SPICE:TLINE`) for test benches, such as the traces between IBIS buffers. The guide
+  `doc/ibis.md` and the example `examples/ibis_signal_integrity/` show the simulation of links
+  between chips with IBIS models.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes

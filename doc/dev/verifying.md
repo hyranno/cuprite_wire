@@ -31,6 +31,15 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands 
   (`crates/ibis/tests/fixtures/buffers.ibs`) covering the keywords the parser reads and skips,
   and, as an ignored test (`cargo test -p cuprite_wire_ibis -- --ignored`), the IBIS file of the
   KiCad demo `simulation/ibis`.
+- **IBIS simulation**: `crates/ibis/tests/spice.rs` simulates the generated subcircuits against
+  hand-calculated results (the I-V tables, clamps, terminations, series models, edges) and checks
+  that the weights solved from recorded waveforms drive another load as the original model does.
+  Its ignored tests (`cargo test -p cuprite_wire_ibis -- --ignored`, run by the KiCad 10 job of CI)
+  compare the drivers with KiCad's own IBIS conversion of the demo `simulation/ibis`: the weights
+  and the pin voltage. `src/spice/ibis/tests.rs` simulates the parts of `spice::ibis`, and the tests
+  of `examples/ibis_signal_integrity/` run the whole path from a `DigitalSequence` through the
+  buffers and traces to `decode`. IBIS files of real devices: `tests/vendor_ibis.rs` (opt-in like
+  the vendor models below; the files and the checks are listed in the test).
 - **Vendor models** (opt-in, not run by CI):
   `CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
   (`doc/spice_part_macro.md` section 7).

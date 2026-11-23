@@ -113,3 +113,9 @@ test = true
 name = "pwm_dac_feedback"
 required-features = ["shared-ngspice"]
 test = true
+
+# Signal integrity with the IBIS models of the I/O buffers; runs ngspice.
+[[example]]
+name = "ibis_signal_integrity"
+required-features = ["ibis"]
+test = true

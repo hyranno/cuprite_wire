@@ -87,8 +87,11 @@ Analyses and stimuli belong to the test, not to the circuit:
     `.with_ac(magnitude)` and `.with_waveform(Waveform::sin(..) | Waveform::Pulse { .. } | Waveform::Pwl(..))`.
   - `Ammeter`: a 0 V source (`VM1`, ...) whose current from `p` to `n` (`Ammeter::P` / `Ammeter::N`)
     is the vector `i(VM1)`.
+  - `TransmissionLine::new(z0, td)`: a lossless line (`T1`, ...) of impedance `z0` and delay `td`
+    between the ports `p1`-`n1` and `p2`-`n2`, for the traces between I/O buffers
+    (`doc/ibis.md` section 6).
   - Digital stimuli in `cuprite_wire::spice::digital` (see below), and drivers and receivers of
-    IBIS models in `cuprite_wire::spice::ibis` (feature `ibis`, see below).
+    IBIS models in `cuprite_wire::spice::ibis` (feature `ibis`, `doc/ibis.md`).
 
   These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
   under test still can.
@@ -140,95 +143,10 @@ let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
 ### IBIS buffers
 
 With the feature `ibis`, `cuprite_wire::spice::ibis` simulates the I/O buffers of a device from its
-IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`: the I-V tables of
-the driver and the clamps, the edges of `[Rising Waveform]` / `[Falling Waveform]` (or `[Ramp]`),
-`C_comp` and the package parasitics of the pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
-`ibis_part!` (`doc/ibis_part_macro.md`) checks the pins a test bench uses at compile time and
-generates functions returning their buffers, in place of the `of_pin` calls below;
-`kicad_part!` makes a part of a KiCad symbol with `Sim.Device IBIS` (`doc/kicad_part_macro.md`
-section 4).
-
-```rust
-use cuprite_wire::{
-    ibis::Corner,
-    spice::{digital::*, ibis::*},
-};
-
-let ibs = read_file("mcu.ibs")?; // or cuprite_wire::ibis::parse(&text)
-let tx = IbisBuffer::of_pin(&ibs, "MCU", "12", Corner::Typ)?;
-let rx = IbisBuffer::of_pin(&ibs, "MCU", "13", Corner::Typ)?;
-let seq = DigitalSequence::new(Level::High).uart(1e-6, 1e6, b"Hi");
-let driver = bench.instantiate_part(IbisDriver::new(tx, seq));
-let receiver = bench.instantiate_part(IbisReceiver::new(rx.clone()));
-// ... connect `driver[IbisDriver::OUT]` / `receiver[IbisReceiver::IN]`, run a transient analysis ...
-let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
-```
-
-- `IbisBuffer::of_pin(&file, component, pin, corner)` takes the `[Model]` of a pin of a
-  `[Component]` with the parasitics of the pin (`R_pin` / `L_pin` / `C_pin`, or else `R_pkg` /
-  `L_pkg` / `C_pkg`); `IbisBuffer::new(&model, &parasitics, corner)` takes any model. For a pin
-  naming a `[Model Selector]`, `of_pin` takes its default (first) model and
-  `IbisBuffer::of_pin_model(&file, component, pin, model, corner)` one of the others
-  (`file.model_selector(name)` lists them with their descriptions). `Corner::Typ` / `Min` / `Max`
-  select the column of the values (a value that is `NA` falls back to typical; in a table, a column
-  takes the rows that have values, and the typical column if it has none). The supported model
-  types are `Input`, `Output`, `I/O`, `3-state`, the open drain, sink and source types, their ECL
-  versions (`Input_ECL`, `Output_ECL`, ...; `[Pulldown]` is relative to the supply, as the
-  specification defines), `Terminator`, and `Series` (see below).
-- The sequence is the level of the pin (the pad), not of the logic inside the device: `Polarity`
-  (`Inverting`) and `Enable` (`Active-Low`) of the model are not applied.
-- `IbisDriver::new(buffer, sequence)` (pins `out`, `gnd`; `XDRV1`) plays a `DigitalSequence`. The
-  model's `[Pullup]` and `[Pulldown]` are weighted by two PWL sources that follow the edges of the
-  model (`buffer.edges()`): the weights that reproduce its `[Rising Waveform]` /
-  `[Falling Waveform]` in their test fixtures, delay included, as in the IBIS specification and
-  KiCad (two waveforms with different `V_fixture` give both weights; one gives them with
-  `ku + kd = 1`). An edge without waveforms switches linearly over the time of `[Ramp]` (its
-  20-80 % time divided by 0.6, as KiCad does). Waveforms with a fixture other than `R_fixture`,
-  `V_fixture` and `C_fixture` (`L_fixture`, `R_dut`, `L_dut`, `C_dut` other than 0) are not used
-  and listed in `buffer.notes()`. `HiZ` turns both weights off. A level the model cannot drive
-  (`HiZ` on an `Output`, `High` on an open drain) panics.
-- `IbisReceiver::new(buffer)` (pins `in`, `gnd`; `XRX1`) is the package, `C_comp` and the clamps;
-  an I/O model is its receiver with the driver off. A `Terminator` model is a receiver with its
-  `[Rgnd]`, `[Rpower]` and `[Rac]` + `[Cac]`.
-- `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` (those of
-  `[Model Spec]` at the corner if given) as the thresholds, to `decode` the voltage of the pin
-  (`None` if the model lacks them).
-- Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
-  model, `cuprite_ibis_<hash>` for the driver); the I-V tables are XSPICE `pwl` code models, which
-  the usual builds of ngspice load. Beyond the voltages of a table, its end segments are extended.
-- Not used: `Series_switch` models, `[Series Current]` / `[Series MOSFET]`, the `*_diff` model
-  types (which need `[External Model]`), `[Package Model]`, `[Receiver Thresholds]` and
-  `[Submodel]`.
-
-Differential pairs (`[Diff Pin]`):
-
-```rust
-let tx = IbisDiffBuffer::of_pin(&ibs, "PHY", "A5", Corner::Typ)?; // either pin of the pair
-let rx = IbisDiffBuffer::of_pin(&ibs, "FPGA", "B7", Corner::Typ)?;
-let driver = bench.instantiate_part(IbisDiffDriver::new(tx, seq));
-let receiver = bench.instantiate_part(IbisDiffReceiver::new(rx.clone()));
-// ... connect `p` to `p` and `n` to `n` (through a differential line), run a transient analysis ...
-let vdiff = rx.vdiff().unwrap(); // high above +vdiff, low below -vdiff
-```
-
-- `IbisDiffBuffer::of_pin(&file, component, pin, corner)` takes the row of `[Diff Pin]` with the
-  pin: the buffers of its non-inverting and inverting pins (`p()`, `n()`, each with its own model
-  and parasitics, as `IbisBuffer::of_pin`), `vdiff()` and `tdelay()` at the corner (0 when `NA`).
-  `of_pin_model` chooses the model of a `[Model Selector]` for both pins;
-  `IbisDiffBuffer::new(p, n, vdiff, tdelay)` pairs any two buffers.
-- `IbisDiffDriver::new(buffer, sequence)` (pins `p`, `n`, `gnd`; `XDRV1`) plays the sequence on
-  `p` and its complement on `n`, `tdelay` later (`HiZ` releases both). A pin whose model cannot
-  drive high (open drain, as in TMDS) or low (open source) is released instead.
-- `IbisDiffReceiver::new(buffer)` (pins `p`, `n`, `gnd`; `XRX1`) puts the receiver of each buffer
-  on its pin. `cuprite_wire` does not decode the difference: compare `v(p) - v(n)` with
-  `vdiff()`.
-- A `Series` model that `[Series Pin Mapping]` puts between the two pins of the pair, such as an
-  on-die 100 ohm termination, is part of both the driver and the receiver (`termination()`;
-  `with_termination` adds one to a pair made with `new`). It connects the pins outside their
-  packages. `IbisSeries::of_pins(&file, component, pin1, pin2, corner)` / `IbisSeries::new(&model,
-  corner)` (pins `a`, `b`; `XSER1`) is such a model as a part of its own: `[R Series]`,
-  `[L Series]` with `[Rl Series]`, and `[C Series]` with `[Lc Series]` and `[Rc Series]`, in
-  parallel.
+IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`: `IbisDriver`
+plays a `DigitalSequence` through the nonlinear driver of the model, and `IbisReceiver` loads the
+line with its clamps, package and `C_comp`, with thresholds to `decode` the levels. See
+`doc/ibis.md`, which also covers differential pairs, corners and `TransmissionLine`.
 
 Which to use:
 

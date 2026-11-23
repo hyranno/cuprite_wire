@@ -10,7 +10,8 @@
 //! ([`IbisBuffer::input`]).
 //!
 //! The subcircuits use the XSPICE code model `pwl` (`analog.cm`), which the usual builds of
-//! ngspice load.
+//! ngspice load. See the guide
+//! [Simulating I/O buffers with IBIS models](https://github.com/hyranno/cuprite_wire/blob/main/doc/ibis.md).
 //!
 //! ```no_run
 //! use cuprite_wire::{

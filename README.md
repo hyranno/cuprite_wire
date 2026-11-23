@@ -106,11 +106,13 @@ program or shim with this note.
 | [`doc/spice_part_macro.md`](doc/spice_part_macro.md) | parts from SPICE models, dialects |
 | [`doc/ibis_part_macro.md`](doc/ibis_part_macro.md) | the pins of IBIS models, checked at compile time |
 | [`doc/spice_netlist_usage.md`](doc/spice_netlist_usage.md) | test benches and simulation with ngspice |
+| [`doc/ibis.md`](doc/ibis.md) | I/O buffers from IBIS models, signal integrity |
 | [`doc/cosimulation.md`](doc/cosimulation.md) | co-simulation with Rust models of microcontrollers |
 | [`doc/erc.md`](doc/erc.md) | the electrical rules check |
 
 The API reference is on [docs.rs](https://docs.rs/cuprite_wire).
-Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`.
+Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`;
+`examples/ibis_signal_integrity/` simulates links between chips with IBIS models.
 The changes in each release are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contributing

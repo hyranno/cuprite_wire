@@ -1,4 +1,5 @@
-//! Simulation-only parts for test benches: independent sources and an ammeter.
+//! Simulation-only parts for test benches: independent sources, an ammeter and a transmission
+//! line.
 //!
 //! They have no KiCad information, so a circuit containing them cannot be exported to KiCad.
 //! Put them in a test bench circuit that instantiates the circuit under test as a subcircuit.
@@ -280,6 +281,78 @@ impl Part for Ammeter {
     }
 }
 
+/// A lossless transmission line (SPICE `T`) with ports `p1`-`n1` and `p2`-`n2`, of characteristic
+/// impedance `z0` ohms and delay `td` seconds, as KiCad's `Simulation_SPICE:TLINE`.
+///
+/// Connect `n1` and `n2` to the reference (ground) of the line. A wave entering a port arrives at
+/// the other `td` later and is reflected there unless the port is terminated with `z0`. A trace on
+/// an FR-4 board delays a signal by roughly 6 to 7 ps per millimetre.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub struct TransmissionLine {
+    /// The characteristic impedance in ohms.
+    pub z0: f64,
+    /// The delay from one port to the other in seconds.
+    pub td: f64,
+}
+
+impl TransmissionLine {
+    /// The positive pin of port 1.
+    pub const P1: &'static str = "p1";
+    /// The reference pin of port 1.
+    pub const N1: &'static str = "n1";
+    /// The positive pin of port 2.
+    pub const P2: &'static str = "p2";
+    /// The reference pin of port 2.
+    pub const N2: &'static str = "n2";
+
+    /// # Panics
+    /// If `z0` or `td` is not a positive finite number.
+    #[track_caller]
+    pub fn new(z0: f64, td: f64) -> Self {
+        let line = TransmissionLine { z0, td };
+        line.validate();
+        line
+    }
+
+    /// Checks the values, also when the netlist is written (the fields are public).
+    #[track_caller]
+    fn validate(&self) {
+        assert!(
+            [self.z0, self.td].iter().all(|v| v.is_finite() && *v > 0.0),
+            "the impedance and the delay of a transmission line must be positive: Z0 {}, TD {}",
+            self.z0,
+            self.td
+        );
+    }
+
+    fn args(&self) -> String {
+        self.validate();
+        format!("Z0={} TD={}", spice_number(self.z0), spice_number(self.td))
+    }
+}
+
+impl Part for TransmissionLine {
+    fn ref_prefix(&self) -> String {
+        "T".into()
+    }
+    fn pin_ids(&self) -> Vec<String> {
+        [Self::P1, Self::N1, Self::P2, Self::N2]
+            .map(String::from)
+            .into()
+    }
+    fn value(&self) -> String {
+        self.args()
+    }
+    fn spice(&self) -> Option<SpicePartInfo> {
+        Some(SpicePartInfo::element(SpiceElement::new(
+            'T',
+            [Self::P1, Self::N1, Self::P2, Self::N2],
+            self.args(),
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,5 +410,20 @@ mod tests {
             "DC 0 PWL( 0 0 0.001 1 )"
         );
         assert_eq!(IndependentSource::current(1e-3).ref_prefix(), "I");
+    }
+
+    #[test]
+    fn test_transmission_line() {
+        let line = TransmissionLine::new(50.0, 1e-9);
+        assert_eq!(line.value(), "Z0=50 TD=1e-9");
+        assert_eq!(line.pin_ids(), ["p1", "n1", "p2", "n2"]);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "the impedance and the delay of a transmission line must be positive"
+    )]
+    fn test_transmission_line_zero_delay() {
+        TransmissionLine::new(50.0, 0.0);
     }
 }
