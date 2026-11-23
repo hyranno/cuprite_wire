@@ -33,8 +33,9 @@ the PR; the user merges it and pushes the tag.
 5. **Check the packages** (see "`cargo package`" below) and the docs.rs rendering:
    `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p cuprite_wire --features shared-ngspice --no-deps`
    (the settings of `[package.metadata.docs.rs]`; nightly is in the devcontainer).
-6. **Run the usual checks**: `cargo fmt --check`, `cargo clippy --workspace --all-targets
-   --all-features`, `cargo test --workspace --all-features`.
+6. **Run the usual checks**: `cargo xtask all` (the checks of CI; the pre-push hook runs it
+   too), and the tests with the vendor models, which CI does not run:
+   `CUPRITE_VENDOR_MODELS_DIR=/workspace/vendor_models.local cargo test --workspace --all-features`.
 7. **Open the PR.** After the user merges it, update local `main` and create the tag locally:
    `git tag vX.Y.Z <merge commit>` (a lightweight tag on the merge commit, like the earlier
    ones). The user pushes it
@@ -78,4 +79,6 @@ Use no features for both, and repeat for the other public crates as needed
   `--title` / `--body` (not `--fill`), so the body has no commit trailers.
 - **Old toolchains** (e.g. checking the MSRV):
   `RUSTUP_HOME=$TMPDIR/rustup rustup toolchain install <ver> --profile minimal`
-  (allowed domain: `static.rust-lang.org`).
+  (allowed domain: `static.rust-lang.org`). It then fails to write `/usr/local/cargo/bin`
+  (read-only), but the toolchain is installed. Check as the msrv job of CI does:
+  `RUSTUP_HOME=$TMPDIR/rustup CARGO_TARGET_DIR=$TMPDIR/target-msrv cargo +<ver> xtask check`.

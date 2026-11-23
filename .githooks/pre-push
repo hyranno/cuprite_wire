@@ -1,0 +1,49 @@
+#!/bin/sh
+# Runs the checks of CI before pushing a branch: `cargo xtask all` (enabled by
+# `git config core.hooksPath .githooks`; see CONTRIBUTING.md). SKIP_TESTS=1 skips the tests,
+# `git push --no-verify` all the checks.
+#
+# The checks run on the working tree, so the pushed commit must be the one checked out, without
+# changes that are not committed.
+set -eu
+
+head=$(git rev-parse HEAD)
+pushed=0
+while read -r local_ref local_oid _remote_ref _remote_oid; do
+    case "$local_ref" in
+    # Tags are pushed for commits checked already.
+    refs/tags/*) continue ;;
+    esac
+    case "$local_oid" in
+    *[!0]*) ;;
+    # A deleted branch.
+    *) continue ;;
+    esac
+    if [ "$local_oid" != "$head" ]; then
+        echo "pre-push: $local_ref is not the checked-out commit, and the checks run on the working tree." >&2
+        echo "pre-push: check it out and push again, or skip the checks with git push --no-verify." >&2
+        exit 1
+    fi
+    pushed=1
+done
+[ "$pushed" = 1 ] || exit 0
+
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "pre-push: changes that are not committed would be checked instead of the pushed commit:" >&2
+    git status --short --untracked-files=no >&2
+    echo "pre-push: commit or stash them, or skip the checks with git push --no-verify." >&2
+    exit 1
+fi
+# Files that cargo may build or the tests may read, but the pushed commit does not have.
+untracked=$(git ls-files --others --exclude-standard -- src crates tests examples libs xtask)
+if [ -n "$untracked" ]; then
+    echo "pre-push: files that are not committed would be checked:" >&2
+    echo "$untracked" >&2
+    echo "pre-push: commit or remove them, or skip the checks with git push --no-verify." >&2
+    exit 1
+fi
+
+if [ "${SKIP_TESTS:-}" = 1 ]; then
+    exec cargo xtask fmt lint deny
+fi
+exec cargo xtask all

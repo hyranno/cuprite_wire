@@ -54,12 +54,14 @@ RUN \
 # Refactoring aids (not run by CI): duplicate detection, unused dependencies and the public API.
 # cargo-public-api builds rustdoc JSON, which needs a nightly toolchain.
 # cargo-sweep prunes stale artifacts from target/ (see postStartCommand in devcontainer.json).
+# cargo-deny checks the dependencies (`cargo xtask deny`); the same version as the CI workflows.
 RUN \
   cargo install --locked \
     similarity-rs@0.5.0 \
     cargo-sweep@0.8.0 \
     cargo-shear@1.14.1 \
     cargo-public-api@0.52.0 \
+    cargo-deny@0.22.0 \
   && \
   rustup toolchain install nightly --profile minimal && \
   rm -rf "$CARGO_HOME/registry"

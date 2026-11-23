@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/embedded_hal", "crates/ibis", "crates/kicad_lib", "crates/macros"]
+members = ["crates/embedded_hal", "crates/ibis", "crates/kicad_lib", "crates/macros", "xtask"]
 
 [workspace.package]
 # The crates are released together, with the same version (see .github/workflows/release.yml).
@@ -31,11 +31,14 @@ categories = ["simulation", "science"]
 # Development environment, repository tooling, tests and examples; not needed to build or use the
 # crate. The tests and examples need files outside the package and are read in the repository.
 exclude = [
+    ".cargo/",
     ".claude/",
     ".devcontainer/",
+    ".githooks/",
     ".github/",
     ".gitattributes",
     ".gitignore",
+    "deny.toml",
     "examples/",
     "tests/",
     "tools/",

@@ -1,0 +1,27 @@
+# cargo-deny (https://embarkstudios.github.io/cargo-deny/) checks the dependencies of the
+# workspace: `cargo xtask deny` the licenses, bans and sources (CI and the pre-push hook), and
+# `cargo xtask advisories` the security advisories (the audit workflow).
+
+[graph]
+# The optional dependencies too, whatever features a user enables.
+all-features = true
+
+[licenses]
+# Licenses compatible with the MIT License of the crates (see CONTRIBUTING.md). Add another one
+# only after checking that it is compatible.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+wildcards = "deny"
+
+[sources]
+# crates.io only.
+unknown-registry = "deny"
+unknown-git = "deny"

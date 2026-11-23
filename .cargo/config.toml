@@ -1,0 +1,3 @@
+[alias]
+# Development tasks of the workspace (xtask/src/main.rs): `cargo xtask help`.
+xtask = "run --quiet --package xtask --"
