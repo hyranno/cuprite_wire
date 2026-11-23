@@ -4,6 +4,7 @@
 //! `cuprite_wire::spice_part!`, `#[derive(cuprite_wire::subcircuit::Interface)]`), which documents
 //! them.
 
+mod ibis;
 mod input;
 mod interface;
 
@@ -132,6 +133,36 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &resolver,
     )
     .into()
+}
+
+/// Generates a type whose functions return the IBIS buffers of the pins of a component.
+///
+/// ```ignore
+/// cuprite_wire::ibis_part! {
+///     /// The I/O of a microcontroller.
+///     pub struct Mcu {
+///         library: "models/mcu.ibs",
+///         component: "MCU",
+///         pins: { tx => "12", io => { pin: "14", model: "IO_8MA" } },
+///         diff_pins: { usb => "20" },
+///         series: { odt => ["30", "31"] },
+///     }
+/// }
+/// let tx = Mcu::tx(Corner::Typ)?; // an `IbisBuffer`
+/// ```
+///
+/// The file is read at compile time to check the component, the pins, the models and that they
+/// can be simulated at every corner; the generated code reads it again at run time.
+///
+/// See the guide [Parts from IBIS models](https://github.com/hyranno/cuprite_wire/blob/main/doc/ibis_part_macro.md) for details.
+#[proc_macro]
+pub fn ibis_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = syn::parse_macro_input!(input as ibis::IbisPartInput);
+    let mut resolver = match resolver(None) {
+        Ok(resolver) => resolver,
+        Err(error) => return error.to_compile_error().into(),
+    };
+    ibis::expand(&input, &mut resolver).into()
 }
 
 /// Implements `Interface` for a struct with one type parameter whose fields all have that type,

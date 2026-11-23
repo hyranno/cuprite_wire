@@ -48,7 +48,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-shear]
 # Compile-fail cases for trybuild (tests/kicad_part_errors.rs), not modules.
-ignored-paths = ["tests/ui/*.rs"]
+ignored-paths = ["tests/ui/*.rs", "tests/ui/ibis/*.rs"]
 
 [dependencies]
 cuprite_wire_ibis = { workspace = true, optional = true }
@@ -89,6 +89,14 @@ required-features = ["vendor-models"]
 [[test]]
 name = "vendor_ibis"
 required-features = ["vendor-models", "ibis"]
+
+[[test]]
+name = "ibis_part"
+required-features = ["ibis"]
+
+[[test]]
+name = "ibis_part_errors"
+required-features = ["ibis"]
 
 # Runs the tests of the example's subcircuits with `cargo test` (they need ngspice, like the
 # simulation tests of the library).

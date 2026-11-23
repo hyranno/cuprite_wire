@@ -45,6 +45,9 @@ version = "0.3.0"
 [[package]]
 name = "cuprite_wire_kicad_lib"
 version = "0.3.0"
+dependencies = [
+ "cuprite_wire_ibis",
+]
 
 [[package]]
 name = "cuprite_wire_macros"

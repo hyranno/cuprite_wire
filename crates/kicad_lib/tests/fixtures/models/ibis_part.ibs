@@ -1,0 +1,77 @@
+| A hand-written IBIS file for the tests of ibis_part!. The values do not describe a real
+| device.
+[IBIS Ver]      5.0
+[File Name]     ibis_part.ibs
+[File Rev]      1.2
+[Component]     Chip
+[Manufacturer]  Example Corp.
+[Package]
+R_pkg       0.2     0.1     0.3
+L_pkg       5nH     4nH     6nH
+C_pkg       1.0pF   NA      NA
+[Pin]  signal_name  model_name
+1      RXP          in_cmos
+2      RXN          in_cmos
+3      TX           out_3s
+4      IO           io_sel
+5      VCC          POWER
+6      BAD          broken
+7      SA           in_cmos
+8      SB           in_cmos
+[Diff Pin]  inv_pin  vdiff  tdelay_typ  tdelay_min  tdelay_max
+1           2        0.1V   NA          NA          NA
+[Series Pin Mapping] pin_2 model_name
+2 1 term
+7 8 term
+
+[Component]     Other
+[Pin]  signal_name  model_name
+1      A            in_cmos
+
+[Model Selector] io_sel
+out_3s    3-state output
+in_cmos   CMOS input
+
+[Model]         in_cmos
+Model_type      Input
+Vinl = 0.8V
+Vinh = 2.0V
+C_comp          2.0pF   1.5pF   2.5pF
+[Voltage Range]  3.3V  3.0V  3.6V
+[GND Clamp]
+  -3.3   -100m    -80m     -120m
+   0      0        0        0
+
+[Model]         out_3s
+Model_type      3-state
+C_comp          2p      1.5p    2.5p
+[Voltage Range]  3.3V  3.0V  3.6V
+[Pulldown]
+  -3.3   -40m    NA   NA
+   0      0      NA   NA
+   3.3    40m    NA   NA
+[Pullup]
+  -3.3    40m    NA   NA
+   0      0      NA   NA
+   3.3   -40m    NA   NA
+[Ramp]
+dV/dt_r   1.98/0.5n   1.8/0.6n   2.16/0.4n
+dV/dt_f   1.98/0.4n   1.8/0.5n   2.16/0.3n
+R_load = 50
+
+| An output without [Pullup] cannot be simulated.
+[Model]         broken
+Model_type      Output
+C_comp          2p      NA      NA
+[Voltage Range]  3.3V  3.0V  3.6V
+[Pulldown]
+  -3.3   -40m    NA   NA
+   3.3    40m    NA   NA
+[Ramp]
+dV/dt_r   1.98/0.5n   NA   NA
+dV/dt_f   1.98/0.4n   NA   NA
+
+[Model]         term
+Model_type      Series
+[R Series] 100 95 105
+[END]

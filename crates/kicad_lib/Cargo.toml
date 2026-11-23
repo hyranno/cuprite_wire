@@ -10,3 +10,4 @@ categories = ["simulation", "science", "parser-implementations"]
 description = "Reads KiCad symbol and footprint libraries and SPICE model libraries for cuprite_wire"
 
 [dependencies]
+cuprite_wire_ibis.workspace = true

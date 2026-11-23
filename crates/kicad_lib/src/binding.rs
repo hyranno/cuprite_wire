@@ -16,6 +16,7 @@ mod diagnostics;
 mod library;
 
 pub use devices::{ModelDevice, model_device};
+pub(crate) use diagnostics::similar_names;
 use diagnostics::{describe_pin, not_found, pin_table, suggestions};
 use library::{LibFile, dependencies, read_library};
 #[cfg(test)]

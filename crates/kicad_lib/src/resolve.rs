@@ -8,6 +8,8 @@ use std::{
     time::SystemTime,
 };
 
+use cuprite_wire_ibis::IbisFile;
+
 use crate::{
     Error,
     footprint::Footprint,
@@ -120,6 +122,16 @@ impl Resolver {
 
     pub fn spice_lib(&mut self, path: &Path) -> Result<Arc<SpiceLib>, Error> {
         self.load(path, |bytes| Ok(spice_lib::decode(bytes)), SpiceLib::parse)
+    }
+
+    /// Reads an IBIS file. Bytes that are not UTF-8 (in the comments of some vendor files) are
+    /// replaced, as `cuprite_wire::spice::ibis::read_file` does at run time.
+    pub fn ibis_file(&mut self, path: &Path) -> Result<Arc<IbisFile>, Error> {
+        self.load(
+            path,
+            |bytes| Ok(String::from_utf8_lossy(&bytes).into_owned()),
+            |text| cuprite_wire_ibis::parse(text).map_err(|e| Error::new(e.to_string())),
+        )
     }
 
     /// Resolves a `Sim.Library` value: expands `${VAR}` and makes relative paths absolute.

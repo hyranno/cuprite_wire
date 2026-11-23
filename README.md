@@ -104,6 +104,7 @@ program or shim with this note.
 | [`doc/kicad_netlist_usage.md`](doc/kicad_netlist_usage.md) | exporting a KiCad netlist for pcbnew |
 | [`doc/kicad_part_macro.md`](doc/kicad_part_macro.md) | generating parts from KiCad symbols and footprints |
 | [`doc/spice_part_macro.md`](doc/spice_part_macro.md) | parts from SPICE models, dialects |
+| [`doc/ibis_part_macro.md`](doc/ibis_part_macro.md) | the pins of IBIS models, checked at compile time |
 | [`doc/spice_netlist_usage.md`](doc/spice_netlist_usage.md) | test benches and simulation with ngspice |
 | [`doc/cosimulation.md`](doc/cosimulation.md) | co-simulation with Rust models of microcontrollers |
 | [`doc/erc.md`](doc/erc.md) | the electrical rules check |

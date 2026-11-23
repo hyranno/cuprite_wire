@@ -73,12 +73,14 @@
 #![warn(missing_docs, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 mod lex;
+mod lookup;
 mod number;
 mod parse;
 pub mod spice;
 
 use std::fmt;
 
+pub use lookup::LookupError;
 pub use parse::parse;
 
 /// The contents of an IBIS file.

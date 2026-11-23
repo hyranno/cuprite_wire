@@ -1,0 +1,67 @@
+error: the file has several components; choose one with `component`: Chip, Other
+ --> tests/ui/ibis/ibis_part.rs:5:12
+  |
+5 |     struct NoComponent {
+  |            ^^^^^^^^^^^
+
+error: no [Component] `chip`; the components of the file: Chip, Other; similar names: Chip
+  --> tests/ui/ibis/ibis_part.rs:14:20
+   |
+14 |         component: "chip",
+   |                    ^^^^^^
+
+error: component `Chip` has no pin `TX`; pins are named by number: the signal `TX` is on the pin `3`
+  --> tests/ui/ibis/ibis_part.rs:23:23
+   |
+23 |         pins: { tx => "TX" },
+   |                       ^^^^
+
+error: pin `4` has no model: `fast` is not a model of `io_sel`; the models of [Model Selector] `io_sel`:
+         out_3s  (3-state output)
+         in_cmos  (CMOS input)
+  --> tests/ui/ibis/ibis_part.rs:32:42
+   |
+32 |         pins: { io => { pin: "4", model: "fast" } },
+   |                                          ^^^^^^
+
+error: pin `6`: model `broken` cannot be simulated at the typ corner: model `broken`: a `Output` model needs [Pullup]
+  --> tests/ui/ibis/ibis_part.rs:40:24
+   |
+40 |         pins: { bad => "6" },
+   |                        ^^^
+
+error: pin `3` of component `Chip` is not in [Diff Pin]; the pairs: 1/2
+  --> tests/ui/ibis/ibis_part.rs:48:28
+   |
+48 |         diff_pins: { tx => "3" },
+   |                            ^^^
+
+error: component `Chip` has no pin `9`
+  --> tests/ui/ibis/ibis_part.rs:56:33
+   |
+56 |         series: { term => ["7", "9"] },
+   |                                 ^^^
+
+error: the function `tx` is defined twice
+  --> tests/ui/ibis/ibis_part.rs:65:22
+   |
+65 |         diff_pins: { tx => "1" },
+   |                      ^^
+
+error: first defined here
+  --> tests/ui/ibis/ibis_part.rs:64:17
+   |
+64 |         pins: { tx => "3" },
+   |                 ^^
+
+error: IBIS file not found ($DIR/crates/kicad_lib/tests/fixtures/models/none.ibs)
+  --> tests/ui/ibis/ibis_part.rs:71:18
+   |
+71 |         library: "${TEST_MODELS}/none.ibs",
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: `library: "path/to/file.ibs"` is required
+  --> tests/ui/ibis/ibis_part.rs:76:12
+   |
+76 |     struct NoLibrary {
+   |            ^^^^^^^^^
