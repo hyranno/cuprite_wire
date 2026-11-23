@@ -74,6 +74,10 @@ review, not rules.
   toolchain for rustdoc JSON by itself). Use it to spot items that should not be public. To compare
   with a release, save the list for both versions and diff the files; its own `diff` subcommand
   checks out each commit in the working tree.
+- `cargo semver-checks --workspace --exclude cuprite_wire_kicad_lib` compares the public API with
+  the latest release on crates.io and reports breaking changes (before 1.0, "major" means the
+  minor version). `cuprite_wire_kicad_lib` is exempt from semver; exclude a crate that has never
+  been published, too. It checks with all the features enabled.
 
 ## Developer documentation
 
