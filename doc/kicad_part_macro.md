@@ -47,10 +47,11 @@ once.
 | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins of the part | none |
 | `spice` | `auto`, `none` (`spice()` returns `None`) or `excluded` (excluded from the simulation) | `auto` |
 | `sim` | a library model mapped to the pins by hand, replacing the symbol's `Sim.*` fields (section 4) | the `Sim.*` fields |
+| `ibis` | an IBIS model replacing the symbol's `Sim.*` fields: `{ library, component, pin, model, diff, driver }` (feature `ibis`, section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
-| `fields` | `{ "MPN" => "..." }`: fields written to the footprint; not `Sim.*`, which come from the symbol or `sim` | none |
+| `fields` | `{ "MPN" => "..." }`: fields written to the footprint; not `Sim.*`, which come from the symbol, `sim` or `ibis` | none |
 | `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD10_SYMBOL_DIR`, else `$KICAD9_SYMBOL_DIR`, else `/usr/share/kicad/symbols` (and `FOOTPRINT` / `footprints`) |
-| `sim_library_dir` | base of relative `Sim.Library` / `sim` library paths, relative to the crate | the crate |
+| `sim_library_dir` | base of relative `Sim.Library` / `sim` / `ibis` library paths, relative to the crate | the crate |
 
 A library nickname is the file name: `Library:Name` is the symbol `Name` in
 `<symbol dir>/Library.kicad_sym`, and the footprint `<footprint dir>/Library.pretty/Name.kicad_mod`.
@@ -133,6 +134,7 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
 | `Sim.Device` `V` `I` with `Sim.Type` `DC` | `DC <value>`, or `Sim.Params` `dc=` |
 | `Sim.Device` `D`, `NPN` `PNP` (Gummel-Poon), `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges) | a built-in model `.model __<TypeName> <type> <Sim.Params>`, or the `.model` `Sim.Name` of `Sim.Library` |
 | `Sim.Device` `SUBCKT` with `Sim.Library` and `Sim.Name` | `X` element with the `.subckt` and `Sim.Params` as parameters |
+| `Sim.Device` `IBIS` (KiCad 10) | the driver or receiver of a pin of an IBIS file (feature `ibis`; see "IBIS models" below) |
 
 - Values (the `Value`, and `Sim.Params` `r=` / `c=` / `l=` / `dc=`) are numbers in KiCad's notation,
   converted to SPICE's as KiCad does: SI prefixes with `M` for mega (`1M` -> `1Meg`; SPICE reads `M`
@@ -156,7 +158,7 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   `sim_model: inline` copies the definition, and the top-level definitions it refers to by name,
   into the generated code, so the deck does not depend on the library file. **Check the license of
   the model library before inlining it** (section 6): vendor models often restrict redistribution.
-- Anything else (other `Sim.Device` / `Sim.Type`, `Sim.Params` with expressions, IBIS, XSPICE
+- Anything else (other `Sim.Device` / `Sim.Type`, `Sim.Params` with expressions, XSPICE
   code models as `Sim.Device`) is a compile error. Choose `spice: none` (not simulated) or
   `spice: excluded` explicitly. A `.subckt` built from XSPICE code models is a `SUBCKT` like any
   other; files its code models read are handled as in `doc/spice_part_macro.md` section 5.
@@ -188,6 +190,63 @@ Unlike `Sim.Pins`, every pin must be mapped, listed in `unused`, or connected in
 mapped pin. A list of models with suffixes (`sim: [{ ..., suffix: "A" }, ...]`) uses a
 single-amplifier model for each unit. See `doc/spice_part_macro.md` for the keys, the checks and
 the dialects, and for `spice_part!`, which makes a part from a model alone.
+
+**IBIS models** (feature `ibis`). A symbol with `Sim.Device IBIS` is a pin (or a differential
+pair) of an IBIS file, as KiCad 10 simulates it, and the generated type holds the part of
+`cuprite_wire::spice::ibis` that simulates it (`doc/spice_netlist_usage.md`, "IBIS buffers"):
+
+| `Sim.Type` | `Sim.Ibis.Diff` | Simulated by | Constructor |
+|---|---|---|---|
+| `DEVICE` | | `IbisReceiver` | `new(corner)` |
+| `DCDRIVER`, `RECTDRIVER`, `PRBSDRIVER` | | `IbisDriver` | `new(corner, sequence)` |
+| `DEVICE` | `1` | `IbisDiffReceiver` | `new(corner)` |
+| `DCDRIVER`, `RECTDRIVER`, `PRBSDRIVER` | `1` | `IbisDiffDriver` | `new(corner, sequence)` |
+
+- `Sim.Library` is the file (paths as above), `Sim.Name` the `[Component]` (it may be empty when
+  the file has one), `Sim.Ibis.Pin` the pin (either pin of a pair), and `Sim.Ibis.Model` the model
+  chosen from its `[Model Selector]` (the first one without it). They are checked at compile time
+  as by `ibis_part!` (`doc/ibis_part_macro.md` section 3); a driver's model must drive.
+- The model pins are `GND` and `IN/OUT`, or `GND`, `+` and `-` for a pair (`+` is the
+  non-inverting pin of `[Diff Pin]`), mapped by `Sim.Pins` by name or by number (`1=1 2=2`, as in
+  KiCad's library symbols).
+- `new` reads the file again at run time (once, `file()`), so it returns
+  `Result<Self, IbisBufferError>`; a driver panics if the sequence has a level its model cannot
+  drive. `buffer()` and `sequence()` return what it simulates, and the constants `LIBRARY`,
+  `COMPONENT` and `IBIS_PIN` name the model. The type is `Clone` and `PartialEq` only, and
+  `value: param` is not supported.
+- **The stimulus is not simulated**: the driver plays the `DigitalSequence` given to `new`, not
+  `Sim.Params` (`dc`, `ton` `toff` `td` `n`, `f0` `n`). For `DCDRIVER`, and `RECTDRIVER` with `ton`
+  and `toff`, `kicad_sequence()` returns the symbol's stimulus as a sequence
+  (`Tx::new(corner, Tx::kicad_sequence())`); KiCad's PRBS is not reproduced.
+- **One corner** is used for the whole model: the corner given to `new`. KiCad's corners per
+  parameter (`Sim.Params` `vcc`, `rpin`, `lpin`, `cpin`) are not supported yet; when the symbol has
+  them, the first `new` warns through the `log` crate.
+- KiCad 10 knows only the `Sim.Type`s above. The IBIS symbols of KiCad's library
+  (`Simulation_SPICE:IBIS_DRIVER`, `IBIS_DEVICE` and their `_DIFF` variants) have an older type
+  (`IBISDRIVERDC`, `IBISDEVICE`) and no file, which KiCad 10 replaces once the symbol is edited in
+  a schematic; with the macro, give the model with the `ibis` block:
+
+```rust
+kicad_part! {
+    pub struct McuTx {
+        symbol: "Simulation_SPICE:IBIS_DRIVER",
+        footprint: none,
+        ibis: {
+            library: "models/mcu.ibs",
+            component: "MCU",   // optional when the file has one
+            pin: "12",
+            model: "out_8ma",   // from the pin's [Model Selector]; optional
+            driver: true,       // false (default): a receiver
+            // diff: true,      // a pair of [Diff Pin]
+        },
+    }
+}
+
+let tx = McuTx::new(Corner::Typ, DigitalSequence::new(Level::Low).at(5e-9, Level::High))?;
+```
+
+  The block replaces the symbol's `Sim.*` fields, and the part's KiCad fields carry the model as
+  KiCad 10 writes it (`Sim.Device IBIS`, `Sim.Type` `DCDRIVER` or `DEVICE`, `Sim.Library`, ...).
 
 ## 5. Rebuilds and errors
 

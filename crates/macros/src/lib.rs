@@ -7,6 +7,7 @@
 mod ibis;
 mod input;
 mod interface;
+mod kicad_ibis;
 
 use std::path::PathBuf;
 
@@ -21,7 +22,8 @@ use quote::{format_ident, quote};
 
 /// Generates a part type (a struct implementing `Part`) from a KiCad symbol and footprint.
 ///
-/// The libraries are read at compile time; the generated code does not read them at run time.
+/// The libraries are read at compile time; the generated code does not read them at run time,
+/// except an IBIS file (`Sim.Device IBIS` or the `ibis` block), which `new` reads again.
 ///
 /// ```ignore
 /// cuprite_wire::kicad_part! {
@@ -54,10 +56,11 @@ use quote::{format_ident, quote};
 /// | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins | none (such pads are an error) |
 /// | `spice` | `auto`, `none` (not simulated) or `excluded` (`exclude_from_sim`) | `auto` (from `Sim.*`) |
 /// | `sim` | a library model replacing the symbol's `Sim.*` fields: `{ library, name, pins: { "1" => "PORT" }, unused, params, dialect }`, or a list of them with `suffix` | the `Sim.*` fields |
+/// | `ibis` | an IBIS model replacing the symbol's `Sim.*` fields (feature `ibis`): `{ library, component, pin, model, diff: bool, driver: bool }` | the `Sim.*` fields |
 /// | `sim_model` | `include` or `inline` (copy model definitions into the code) | `include` |
 /// | `fields` | `{ "MPN" => "..." }`: fields of the footprint | none |
 /// | `symbol_dir`, `footprint_dir` | library directories, relative to the crate | `$KICAD10_SYMBOL_DIR`, `$KICAD9_SYMBOL_DIR` (and `FOOTPRINT`), else `/usr/share/kicad/...` |
-/// | `sim_library_dir` | base of relative `Sim.Library` / `sim.library` paths, relative to the crate | the crate |
+/// | `sim_library_dir` | base of relative `Sim.Library` / `sim.library` / `ibis.library` paths, relative to the crate | the crate |
 ///
 /// See the guide [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) for details.
 #[proc_macro]
@@ -245,7 +248,7 @@ fn generate(
             quote! { #[doc = #doc] pub const #ident: &'static str = #id; }
         });
 
-    let (fields, constructor, value_fn) = match &part.value {
+    let (mut fields, mut constructor, value_fn) = match &part.value {
         Value::Param => {
             // The devices that write the value, which must be a number they read.
             let mut devices: Vec<char> = match &part.spice {
@@ -305,7 +308,7 @@ fn generate(
             quote!(::std::string::String::from(#value)),
         ),
     };
-    let default_impl = matches!(part.value, Value::Fixed(_)).then(|| {
+    let mut default_impl = matches!(part.value, Value::Fixed(_)).then(|| {
         quote! {
             impl ::core::default::Default for #name {
                 fn default() -> Self {
@@ -321,7 +324,17 @@ fn generate(
         .iter()
         .map(|group| quote!(::std::vec![#(::std::string::String::from(#group)),*]));
     let kicad_fn = kicad_fn(part, &krate);
-    let spice_fn = spice_fn(part, &krate);
+    let mut spice_fn = spice_fn(part, &krate);
+    let mut eq = Some(quote!(::core::cmp::Eq,));
+    if let SpiceDef::Ibis(def) = &part.spice {
+        // The part holds the driver or receiver it is simulated with.
+        let items = kicad_ibis::items(def, name, &krate);
+        fields = items.fields;
+        constructor = items.items;
+        spice_fn = Some(items.spice_fn);
+        default_impl = None;
+        eq = None;
+    }
 
     quote! {
         #(#attrs)*
@@ -330,7 +343,7 @@ fn generate(
             ::core::fmt::Debug,
             ::core::clone::Clone,
             ::core::cmp::PartialEq,
-            ::core::cmp::Eq,
+            #eq
         )]
         #vis struct #name #fields
 
@@ -410,7 +423,7 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
 
 fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let body = match &part.spice {
-        SpiceDef::Unsupported => return None,
+        SpiceDef::Unsupported | SpiceDef::Ibis(_) => return None,
         SpiceDef::Excluded => quote!(#krate::spice::SpicePartInfo::Excluded),
         SpiceDef::Elements(Elements {
             elements,
@@ -476,8 +489,21 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
         _ => &[],
     };
     let models: Vec<&ElementDef> = elements.iter().filter(|e| e.info.is_some()).collect();
+    let ibis = match &part.spice {
+        SpiceDef::Ibis(def) => Some(def.as_ref()),
+        _ => None,
+    };
     // The port of each pin in each model.
     let ports_of = |id: &str| -> String {
+        if let Some(def) = ibis {
+            let ports = def.source.kicad_pins();
+            return def
+                .nodes
+                .iter()
+                .position(|node| node == id)
+                .map(|i| format!("`{}`", ports[i]))
+                .unwrap_or_default();
+        }
         let ports: Vec<String> = models
             .iter()
             .filter_map(|element| {
@@ -514,7 +540,7 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 lines.push(format!("Datasheet: <{datasheet}>"));
             }
             lines.push(String::new());
-            let port_column = !models.is_empty();
+            let port_column = !models.is_empty() || ibis.is_some();
             lines.push(format!(
                 "| Pin ID | Pad | Name | Type | Unit |{}",
                 if port_column { " SPICE port |" } else { "" }
@@ -558,6 +584,21 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 lines.push(format!("| `{}` | {} |", escape(&pin.id), ports_of(&pin.id)));
             }
         }
+    }
+    if let Some(def) = ibis {
+        let source = &def.source;
+        let inner = kicad_ibis::Inner::of(source);
+        lines.push(String::new());
+        lines.push(format!(
+            "IBIS model: {} of the pin `{}` of the component `{}` in `{}` (IBIS {}), \
+             simulated by `{}`. The file is read again by `new`.",
+            inner.description,
+            source.pin,
+            def.part.component,
+            def.part.path.display(),
+            def.part.ibis_ver,
+            inner.name,
+        ));
     }
     for element in &models {
         let info = element.info.as_ref().unwrap();

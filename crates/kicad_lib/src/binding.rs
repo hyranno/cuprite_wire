@@ -524,7 +524,8 @@ fn check_encrypted(
 }
 
 /// Maps the pins of a part to the ports of a model (`what`, for messages): `mapping` is pin =>
-/// port, ports are matched case-insensitively, and every port needs a pin. Not `strict`, an empty
+/// port, ports are matched case-insensitively or else by number (from 1), and every port needs a
+/// pin. Not `strict`, an empty
 /// mapping connects the pins in order (KiCad without `Sim.Pins`).
 ///
 /// Returns the pins in port order and, not `strict`, the pins neither mapped nor in `unused`.
@@ -563,9 +564,16 @@ pub(crate) fn map_ports(
         if !seen_pins.insert(pin) {
             return Err(fail(Pins, format!("pin {pin:?} is mapped twice")));
         }
+        // A port by name, or by its number (from 1) as KiCad also reads `Sim.Pins`.
         let index = ports
             .iter()
             .position(|p| p.eq_ignore_ascii_case(port))
+            .or_else(|| {
+                port.parse::<usize>()
+                    .ok()
+                    .filter(|n| (1..=ports.len()).contains(n))
+                    .map(|n| n - 1)
+            })
             .ok_or_else(|| {
                 fail(
                     Pins,

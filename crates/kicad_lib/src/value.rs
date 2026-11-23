@@ -149,6 +149,28 @@ pub fn param_to_spice(text: &str) -> String {
     to_spice(text, ' ').unwrap_or_else(|| text.to_string())
 }
 
+/// The value of a number in KiCad's notation ([`to_spice`], without a unit), or `None`.
+pub fn to_f64(text: &str) -> Option<f64> {
+    let spice = to_spice(text, ' ')?;
+    let end = spice
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .unwrap_or(spice.len());
+    let (number, suffix) = spice.split_at(end);
+    let power = match suffix {
+        "" => 0,
+        "Meg" => 6,
+        _ if suffix.starts_with('e') => suffix[1..].parse().ok()?,
+        _ => {
+            let letter = suffix.chars().next()?;
+            PREFIXES
+                .iter()
+                .find(|(l, _, spice)| *l == letter && spice.is_some())?
+                .1
+        }
+    };
+    format!("{number}e{power}").parse().ok()
+}
+
 fn take_digits<'a>(rest: &mut &'a str) -> &'a str {
     let end = rest
         .find(|c: char| !c.is_ascii_digit())
@@ -161,6 +183,25 @@ fn take_digits<'a>(rest: &mut &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_to_f64() {
+        for (text, value) in [
+            ("100n", 100e-9),
+            ("1M", 1e6),
+            ("1Meg", 1e6),
+            ("4k7", 4.7e3),
+            ("-2.5u", -2.5e-6),
+            ("1.5e-9", 1.5e-9),
+            ("3a", 3e-18),
+            ("50", 50.0),
+        ] {
+            let got = to_f64(text).unwrap();
+            assert!((got - value).abs() <= value.abs() * 1e-12, "{text}: {got}");
+        }
+        assert_eq!(to_f64("x"), None);
+        assert_eq!(to_f64("10V"), None);
+    }
 
     #[test]
     fn test_to_spice() {

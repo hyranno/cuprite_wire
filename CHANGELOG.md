@@ -39,6 +39,14 @@ break the API).
   component, the pins, the models chosen from `[Model Selector]`s, the pairs and that every model
   can be simulated at every corner, with errors listing what the file has; only its path is
   written into the code, and it is read again at run time (`spice::ibis::read_file`).
+- `kicad_part!` (feature `ibis`): symbols with KiCad 10's `Sim.Device IBIS` become parts holding
+  the `IbisDriver`, `IbisReceiver`, `IbisDiffDriver` or `IbisDiffReceiver` of their pin, on the
+  symbol's pins, checked at compile time as by `ibis_part!`. `new(corner)` / `new(corner,
+  sequence)` read the file at run time; the driver plays the given sequence, and
+  `kicad_sequence()` returns the symbol's DC or rectangular stimulus as one. KiCad's corners per
+  parameter are not supported yet (a warning). The `ibis` block gives the model for KiCad's
+  library symbols (`Simulation_SPICE:IBIS_DRIVER`, ...), which have none.
+- `kicad_part!`: `Sim.Pins` may name the model pins by number (`1=1 2=2`), as KiCad reads it.
 - `cuprite_wire_ibis`: `LookupError`, `IbisFile::find_component`, `IbisFile::buffer_model`,
   `IbisFile::series_model` and `Component::find_diff_pin` find what a simulation asks for, with
   the reason when it is missing.

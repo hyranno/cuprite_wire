@@ -7,9 +7,12 @@
 //! - `Sim.Device` `R` `C` `L`, `V` `I` (`Sim.Type DC`), `D`, `NPN` `PNP` (Gummel-Poon),
 //!   `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges), with built-in model
 //!   parameters (`Sim.Params`) or a library model (`Sim.Library` + `Sim.Name`);
-//! - `Sim.Device SUBCKT` with `Sim.Library` + `Sim.Name` (+ `Sim.Params`).
+//! - `Sim.Device SUBCKT` with `Sim.Library` + `Sim.Name` (+ `Sim.Params`);
+//! - `Sim.Device IBIS` (KiCad 10, [`ibis`]).
 //!
 //! Anything else is an error: the macro user decides with `spice: none` / `spice: excluded`.
+
+pub mod ibis;
 
 use std::path::PathBuf;
 
@@ -33,12 +36,14 @@ pub enum Value {
 }
 
 /// The SPICE description of a part, with pins identified by their numbers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SpiceDef {
     /// The symbol has no simulation model.
     Unsupported,
     Excluded,
     Elements(Elements),
+    /// A buffer of an IBIS file, simulated by the part the macro generates.
+    Ibis(Box<ibis::IbisDef>),
 }
 
 /// The elements of a part, with pins in node order, and the pins not connected to any element.
@@ -122,6 +127,11 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
         library: symbol.property("Sim.Library").filter(|l| !l.is_empty()),
         model_name: symbol.property("Sim.Name").filter(|n| !n.is_empty()),
     };
+    if fields.device == "IBIS" {
+        return Ok(SpiceDef::Ibis(Box::new(ibis::from_fields(
+            symbol, &fields, resolver,
+        )?)));
+    }
     let elements = match fields.device.as_str() {
         "R" | "C" | "L" | "V" | "I" => passive_or_source(input, &fields)?,
         "D" | "NPN" | "PNP" | "NMOS" | "PMOS" | "NJFET" | "PJFET" => {
@@ -482,7 +492,7 @@ mod tests {
         test_util::{fixture_resolver, strings},
     };
 
-    fn symbol(fields: &str, pins: &[(&str, &str)]) -> Symbol {
+    pub(super) fn symbol(fields: &str, pins: &[(&str, &str)]) -> Symbol {
         let pins: String = pins
             .iter()
             .enumerate()
@@ -494,14 +504,14 @@ mod tests {
         SymbolLib::parse(&text).unwrap().symbol("S").unwrap()
     }
 
-    fn props(props: &[(&str, &str)]) -> String {
+    pub(super) fn props(props: &[(&str, &str)]) -> String {
         props
             .iter()
             .map(|(k, v)| format!("(property \"{k}\" \"{v}\")"))
             .collect()
     }
 
-    fn convert(
+    pub(super) fn convert(
         symbol: &Symbol,
         prefix: &str,
         value: Value,

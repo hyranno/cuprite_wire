@@ -108,6 +108,8 @@ pub struct BufferDef {
     pub model_type: String,
     /// The `[Model Selector]` the pin names, if any.
     pub selector: Option<String>,
+    /// Whether the model drives the pin (an output or I/O type), not only receives.
+    pub driver: bool,
 }
 
 const CORNERS: [Corner; 3] = [Corner::Typ, Corner::Min, Corner::Max];
@@ -268,9 +270,11 @@ fn check_buffer(
     let (p, model) = file
         .buffer_model(component, pin, choice)
         .map_err(Checked::Lookup)?;
+    let mut driver = false;
     for corner in CORNERS {
-        subcircuit("", model, &Parasitics::of_pin(component, p, corner), corner)
-            .map_err(|e| Checked::Simulation(cannot_simulate(pin, model, corner, e)))?;
+        driver = subcircuit("", model, &Parasitics::of_pin(component, p, corner), corner)
+            .map_err(|e| Checked::Simulation(cannot_simulate(pin, model, corner, e)))?
+            .is_driver();
     }
     let selector = match &p.model {
         PinModel::Named(name) if file.model_selector(name).is_some() => Some(name.clone()),
@@ -282,6 +286,7 @@ fn check_buffer(
         model: model.name.clone(),
         model_type: model.model_type.name().to_string(),
         selector,
+        driver,
     })
 }
 

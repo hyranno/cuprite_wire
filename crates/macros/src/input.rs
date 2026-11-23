@@ -3,7 +3,10 @@
 use cuprite_wire_kicad_lib::{
     binding::{BindingField, DialectOption, ModelBinding},
     part::{CommonOptions, FootprintOption, OptionKey, PartOptions, SpiceOption, SpicePartOptions},
-    sim::{ModelMode, Value},
+    sim::{
+        ModelMode, Value,
+        ibis::{IbisField, IbisSource},
+    },
     spice_lib::Dialect,
 };
 use proc_macro2::Span;
@@ -50,6 +53,8 @@ impl Spans {
         };
         let model = match key {
             OptionKey::Model { element, .. } => self.models.get(element).copied(),
+            // An option of the `ibis` block that is not written: the block.
+            OptionKey::Ibis(_) => find(OptionKey::IbisBlock),
             _ => None,
         };
         find(key)
@@ -129,6 +134,7 @@ enum KicadKey {
     ExtraPads,
     Spice,
     Sim,
+    Ibis,
     Fields,
     SymbolDir,
     FootprintDir,
@@ -163,6 +169,7 @@ const KICAD_KEYS: &[(&str, KicadPartKey)] = &[
     ("extra_pads", KicadPartKey::Kicad(KicadKey::ExtraPads)),
     ("spice", KicadPartKey::Kicad(KicadKey::Spice)),
     ("sim", KicadPartKey::Kicad(KicadKey::Sim)),
+    ("ibis", KicadPartKey::Kicad(KicadKey::Ibis)),
     ("sim_model", KicadPartKey::Common(CommonKey::SimModel)),
     ("fields", KicadPartKey::Kicad(KicadKey::Fields)),
     ("symbol_dir", KicadPartKey::Kicad(KicadKey::SymbolDir)),
@@ -252,6 +259,10 @@ impl Parse for PartInput {
                     KicadPartKey::Kicad(KicadKey::Sim) => {
                         options.sim = sim_block(content, &mut sim_spans)?;
                         None
+                    }
+                    KicadPartKey::Kicad(KicadKey::Ibis) => {
+                        options.ibis = Some(ibis_block(content, span, &mut sim_spans)?);
+                        Some(OptionKey::IbisBlock)
                     }
                     KicadPartKey::Kicad(KicadKey::SymbolDir) => {
                         symbol_dir = Some(content.parse()?);
@@ -368,6 +379,78 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
     }
     Ok(bindings)
 }
+
+/// `ibis: { library: "...", pin: "...", ... }`.
+fn ibis_block(input: ParseStream, block: Span, spans: &mut Spans) -> syn::Result<IbisSource> {
+    let mut source = IbisSource::default();
+    let (mut has_library, mut has_pin) = (false, false);
+    let content;
+    braced!(content in input);
+    parse_keys(
+        &content,
+        IBIS_KEYS,
+        |key, content, span| {
+            let field = match key {
+                IbisKey::Library => {
+                    source.library = content.parse::<LitStr>()?.value();
+                    has_library = true;
+                    IbisField::Library
+                }
+                IbisKey::Component => {
+                    source.component = Some(content.parse::<LitStr>()?.value());
+                    IbisField::Component
+                }
+                IbisKey::Pin => {
+                    source.pin = content.parse::<LitStr>()?.value();
+                    has_pin = true;
+                    IbisField::Pin
+                }
+                IbisKey::Model => {
+                    source.model = Some(content.parse::<LitStr>()?.value());
+                    IbisField::Model
+                }
+                IbisKey::Diff => {
+                    source.diff = content.parse::<syn::LitBool>()?.value;
+                    return Ok(None);
+                }
+                IbisKey::Driver => {
+                    source.driver = content.parse::<syn::LitBool>()?.value;
+                    IbisField::Driver
+                }
+            };
+            Ok(Some((OptionKey::Ibis(field), span)))
+        },
+        spans,
+    )?;
+    for (has, key) in [(has_library, "library"), (has_pin, "pin")] {
+        if !has {
+            return Err(syn::Error::new(
+                block,
+                format!("`{key}` is required in `ibis`"),
+            ));
+        }
+    }
+    Ok(source)
+}
+
+#[derive(Clone, Copy)]
+enum IbisKey {
+    Library,
+    Component,
+    Pin,
+    Model,
+    Diff,
+    Driver,
+}
+
+const IBIS_KEYS: &[(&str, IbisKey)] = &[
+    ("library", IbisKey::Library),
+    ("component", IbisKey::Component),
+    ("pin", IbisKey::Pin),
+    ("model", IbisKey::Model),
+    ("diff", IbisKey::Diff),
+    ("driver", IbisKey::Driver),
+];
 
 /// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` parses the
 /// value and returns the option it sets, if errors should point at it, with its span.
