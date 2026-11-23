@@ -144,7 +144,9 @@ IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`:
 the driver and the clamps, the edges of `[Rising Waveform]` / `[Falling Waveform]` (or `[Ramp]`),
 `C_comp` and the package parasitics of the pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
 `ibis_part!` (`doc/ibis_part_macro.md`) checks the pins a test bench uses at compile time and
-generates functions returning their buffers, in place of the `of_pin` calls below.
+generates functions returning their buffers, in place of the `of_pin` calls below;
+`kicad_part!` makes a part of a KiCad symbol with `Sim.Device IBIS` (`doc/kicad_part_macro.md`
+section 4).
 
 ```rust
 use cuprite_wire::{

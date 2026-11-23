@@ -1,0 +1,58 @@
+error: cannot simulate test:IBIS_LEGACY (use `spice: none` or `spice: excluded` to skip): Sim.Type "IBISDRIVERDC" of Sim.Device IBIS is not supported; KiCad 10 has DEVICE, DCDRIVER, RECTDRIVER and PRBSDRIVER (the IBIS symbols of KiCad's library have an older type and no file: give the model with the `ibis` block)
+ --> tests/ui/ibis_sim.rs:9:17
+  |
+9 |         symbol: "test:IBIS_LEGACY",
+  |                 ^^^^^^^^^^^^^^^^^^
+
+error: `pin` is required in `ibis`
+  --> tests/ui/ibis_sim.rs:18:15
+   |
+18 |         ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs" },
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: component `Board` has no pin `9`
+  --> tests/ui/ibis_sim.rs:26:64
+   |
+26 |         ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs", pin: "9" },
+   |                                                                ^^^
+
+error: no [Component] `board`; the components of the file: Board; similar names: Board
+  --> tests/ui/ibis_sim.rs:34:70
+   |
+34 |         ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs", component: "board", pin: "1" },
+   |                                                                      ^^^^^^^
+
+error: pin `5` has no model: `out_pp` is not a model of `io_sel`; the models of [Model Selector] `io_sel`:
+         out_3s  (3-state output)
+         in_cmos  (CMOS input)
+  --> tests/ui/ibis_sim.rs:42:76
+   |
+42 |         ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs", pin: "5", model: "out_pp" },
+   |                                                                            ^^^^^^^^
+
+error: pin `2` has the model `in_cmos` (Input), which does not drive; receive it instead
+  --> tests/ui/ibis_sim.rs:51:77
+   |
+51 |         ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs", pin: "2", driver: true },
+   |                                                                             ^^^^
+
+error: no pin is mapped to the ports - of the model
+       pins and ports:
+         1 (REF)          => GND
+         2                => +
+  --> tests/ui/ibis_sim.rs:58:17
+   |
+58 |         symbol: "test:IBIS_LEGACY",
+   |                 ^^^^^^^^^^^^^^^^^^
+
+error: an IBIS part has no value to give: `value: param` is not supported
+  --> tests/ui/ibis_sim.rs:68:16
+   |
+68 |         value: param,
+   |                ^^^^^
+
+error: `ibis` gives a model, so the part cannot be `spice: none` or `spice: excluded`
+  --> tests/ui/ibis_sim.rs:77:16
+   |
+77 |         spice: none,
+   |                ^^^^

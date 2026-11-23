@@ -866,5 +866,47 @@ impl Part for IbisDiffReceiver {
     }
 }
 
+/// Used by the parts `kicad_part!` generates from `Sim.Device IBIS`.
+#[doc(hidden)]
+pub mod __kicad {
+    use crate::{
+        parts::Part,
+        spice::{SpicePartInfo, digital::DigitalSequence, digital::Level},
+    };
+
+    /// The SPICE information of `inner` with its pins renamed by `pins` (from, to).
+    pub fn renamed_spice(inner: &dyn Part, pins: &[(&str, &str)]) -> Option<SpicePartInfo> {
+        let mut info = inner.spice()?;
+        if let SpicePartInfo::Elements { elements, .. } = &mut info {
+            for node in elements.iter_mut().flat_map(|e| e.nodes.iter_mut()) {
+                if let Some((_, to)) = pins.iter().find(|(from, _)| from == node) {
+                    *node = to.to_string();
+                }
+            }
+        }
+        Some(info)
+    }
+
+    /// Warns that the `Sim.Params` choosing corners per parameter are not simulated.
+    pub fn warn_corners(type_name: &str, params: &str) {
+        log::warn!(
+            "{type_name}: the Sim.Params {params} choose the corner of each parameter, which is \
+             not supported yet; the corner given to `{type_name}::new` is used for the whole model"
+        );
+    }
+
+    /// KiCad's rectangular stimulus: low, then `n` periods of high for `ton` and low for
+    /// `toff`, starting at `td`.
+    pub fn rect_sequence(ton: f64, toff: f64, td: f64, n: u32) -> DigitalSequence {
+        let mut sequence = DigitalSequence::new(Level::Low);
+        for i in 0..n {
+            let start = td + f64::from(i) * (ton + toff);
+            sequence.push(start, Level::High);
+            sequence.push(start + ton, Level::Low);
+        }
+        sequence
+    }
+}
+
 #[cfg(test)]
 mod tests;

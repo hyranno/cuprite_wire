@@ -98,6 +98,10 @@ required-features = ["ibis"]
 name = "ibis_part_errors"
 required-features = ["ibis"]
 
+[[test]]
+name = "kicad_part_ibis"
+required-features = ["ibis"]
+
 # Runs the tests of the example's subcircuits with `cargo test` (they need ngspice, like the
 # simulation tests of the library).
 [[example]]

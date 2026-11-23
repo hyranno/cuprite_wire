@@ -230,8 +230,7 @@ fn generate(
     let vis = &header.vis;
     let name = &header.name;
     let doc = doc_lines(part);
-    let path = part.path.to_string_lossy();
-    let component = &part.component;
+    let file_items = file_items(part, &krate);
     let functions = part
         .pins
         .iter()
@@ -251,6 +250,20 @@ fn generate(
         #vis struct #name;
 
         impl #name {
+            #file_items
+
+            #(#functions)*
+        }
+
+        #tracking
+    }
+}
+
+/// The constants `LIBRARY` and `COMPONENT`, and the function `file` reading the file once.
+pub(crate) fn file_items(part: &IbisPartDef, krate: &TokenStream) -> TokenStream {
+    let path = part.path.to_string_lossy();
+    let component = &part.component;
+    quote! {
             /// The IBIS file (absolute), read at run time.
             pub const LIBRARY: &'static str = #path;
             /// The `[Component]` of the file.
@@ -274,11 +287,6 @@ fn generate(
                     .as_ref()
                     .map_err(::core::clone::Clone::clone)
             }
-
-            #(#functions)*
-        }
-
-        #tracking
     }
 }
 
@@ -351,7 +359,7 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
 }
 
 /// `signal TX, model out_3s (3-state)`, with the selector if any.
-fn describe(buffer: &cuprite_wire_kicad_lib::ibis_part::BufferDef) -> String {
+pub(crate) fn describe(buffer: &cuprite_wire_kicad_lib::ibis_part::BufferDef) -> String {
     let selector = buffer
         .selector
         .as_ref()

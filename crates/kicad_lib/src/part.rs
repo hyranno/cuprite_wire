@@ -8,7 +8,10 @@ use crate::{
     binding::{self, BindOptions, BindingField, ModelBinding, PartPins},
     naming::LibId,
     resolve::Resolver,
-    sim::{self, Elements, ModelMode, SimInput, SpiceDef, Value},
+    sim::{
+        self, Elements, ModelMode, SimInput, SpiceDef, Value,
+        ibis::{IbisDef, IbisField, IbisSource, ibis_def},
+    },
     symbol::{ElectricalType, Symbol},
     text_var,
 };
@@ -17,9 +20,7 @@ mod pins;
 mod spice;
 
 use pins::{PinIds, PinKeys, check_internal_connections, default_pin_ids, rename_pins};
-#[cfg(test)]
-use spice::library_field;
-use spice::{sim_block, sim_fields};
+use spice::{library_field, sim_block, sim_fields};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FootprintOption {
@@ -70,6 +71,8 @@ pub struct PartOptions {
     pub fields: Vec<(String, String)>,
     /// Library models replacing the symbol's `Sim.*` fields (the `sim` block), with pin numbers.
     pub sim: Vec<ModelBinding>,
+    /// An IBIS model replacing the symbol's `Sim.*` fields (the `ibis` block).
+    pub ibis: Option<IbisSource>,
 }
 
 /// The options of `spice_part!`: the model (its `pins` are not used) and the common options,
@@ -96,6 +99,10 @@ pub enum OptionKey {
         element: usize,
         field: BindingField,
     },
+    /// The `ibis` block.
+    IbisBlock,
+    /// An option of the `ibis` block (not [`IbisField::Symbol`]).
+    Ibis(IbisField),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,7 +145,7 @@ pub struct PinDef {
 }
 
 /// Everything the macros need to generate a part.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PartDef {
     /// `None` for parts made from a SPICE model, which cannot be exported to KiCad.
     pub kicad: Option<KicadDef>,
@@ -186,11 +193,13 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     };
     check_ref_prefix(&ref_prefix)?;
     let footprint = footprint(options, &symbol, &symbol_id, resolver)?;
+    // The `sim` or `ibis` block replaces the symbol's `Sim.*` fields.
+    let replaces_sim = !options.sim.is_empty() || options.ibis.is_some();
     // The value with its text variables expanded from the fields (`fields` of the part).
     let value_with = |fields: &[(String, String)]| match &common.value {
         Some(sim::Value::Param) => Ok(sim::Value::Param),
         Some(sim::Value::Fixed(value)) => {
-            expand_value(value, fields, &symbol, footprint.as_ref(), &options.sim)
+            expand_value(value, fields, &symbol, footprint.as_ref(), replaces_sim)
                 .map_err(at(Value))
         }
         None => expand_value(
@@ -198,7 +207,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             fields,
             &symbol,
             footprint.as_ref(),
-            &options.sim,
+            replaces_sim,
         )
         .map_err(at(Symbol)),
     };
@@ -254,68 +263,106 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     )?);
 
     let mut fields = options.fields.clone();
-    let spice = match (options.spice, options.sim.is_empty()) {
-        (SpiceOption::None | SpiceOption::Excluded, false) => {
+    // The unused pads of a model connecting symbol pins (with `unused_pins` not connected): the
+    // other pads of a stacked pin notation and extra pads are not part of it. (Duplicate pins are
+    // connected to the first, which the model connects.)
+    let unused_pads = |unused_pins: &[String]| {
+        let other_pads = symbol
+            .distinct_pins()
+            .filter(|pin| !unused_pins.contains(&pin.number))
+            .flat_map(|pin| pin.pads[1..].iter().cloned());
+        let mut pads: Vec<String> = ids
+            .symbol_pin_pads(unused_pins)
+            .into_iter()
+            .chain(other_pads)
+            .collect();
+        pads.extend(options.extra_pads.iter().cloned());
+        pads
+    };
+    // An IBIS model with symbol pin numbers, with pin IDs.
+    let ibis_part = |mut def: IbisDef| {
+        def.unused_pins = ids.of(&unused_pads(&def.unused_pins));
+        def.nodes = ids.of_pins(&def.nodes);
+        SpiceDef::Ibis(Box::new(def))
+    };
+    let spice = if let Some(source) = &options.ibis {
+        if !options.sim.is_empty() {
+            return err(IbisBlock, "give either `sim` or `ibis`, not both");
+        }
+        if options.spice != SpiceOption::Auto {
             return err(
                 Spice,
-                "`sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
+                "`ibis` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
             );
         }
-        (SpiceOption::None, true) => SpiceDef::Unsupported,
-        (SpiceOption::Excluded, true) => SpiceDef::Excluded,
-        (SpiceOption::Auto, false) => {
-            let elements = sim_block(
-                &options.sim,
-                common.sim_model,
-                &pins,
-                &internal_connections,
-                resolver,
-            )?;
-            fields.extend(sim_fields(&options.sim, &elements.elements));
-            ids.elements(elements)
-        }
-        (SpiceOption::Auto, true) => {
-            let input = SimInput {
-                symbol: &symbol,
-                ref_prefix: &ref_prefix,
-                value: &value_with(&fields)?,
-                builtin_model_name: &format!("__{}", common.type_name),
-                model_mode: common.sim_model,
-            };
-            let def = sim::spice_def(&input, resolver).map_err(|e| PartError {
+        let def =
+            ibis_def(&symbol, source.clone(), resolver).map_err(|(field, error)| PartError {
+                key: match field {
+                    IbisField::Symbol => Symbol,
+                    field => Ibis(field),
+                },
+                error,
+            })?;
+        fields.extend(ibis_fields(&def));
+        ibis_part(def)
+    } else {
+        match (options.spice, options.sim.is_empty()) {
+            (SpiceOption::None | SpiceOption::Excluded, false) => {
+                return err(
+                    Spice,
+                    "`sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
+                );
+            }
+            (SpiceOption::None, true) => SpiceDef::Unsupported,
+            (SpiceOption::Excluded, true) => SpiceDef::Excluded,
+            (SpiceOption::Auto, false) => {
+                let elements = sim_block(
+                    &options.sim,
+                    common.sim_model,
+                    &pins,
+                    &internal_connections,
+                    resolver,
+                )?;
+                fields.extend(sim_fields(&options.sim, &elements.elements));
+                ids.elements(elements)
+            }
+            (SpiceOption::Auto, true) => {
+                let input = SimInput {
+                    symbol: &symbol,
+                    ref_prefix: &ref_prefix,
+                    value: &value_with(&fields)?,
+                    builtin_model_name: &format!("__{}", common.type_name),
+                    model_mode: common.sim_model,
+                };
+                let def = sim::spice_def(&input, resolver).map_err(|e| {
+                    PartError {
                 key: Spice,
                 error: e.context(format!(
                     "cannot simulate {symbol_id} (use `spice: none` or `spice: excluded` to skip)"
                 )),
-            })?;
-            match def {
-                SpiceDef::Elements(Elements {
-                    elements,
-                    unused_pins,
-                }) => {
-                    // The model connects symbol pins: the other pads of a stacked pin notation
-                    // and extra pads are not part of it.
-                    // (Duplicate pins are connected to the first, which the model connects.)
-                    let other_pads = symbol
-                        .distinct_pins()
-                        .filter(|pin| !unused_pins.contains(&pin.number))
-                        .flat_map(|pin| pin.pads[1..].iter().cloned());
-                    let mut unused_pins: Vec<String> = ids
-                        .symbol_pin_pads(&unused_pins)
-                        .into_iter()
-                        .chain(other_pads)
-                        .collect();
-                    unused_pins.extend(options.extra_pads.iter().cloned());
-                    ids.elements(Elements {
-                        elements: ids.with_first_pads(elements),
+            }
+                })?;
+                match def {
+                    SpiceDef::Elements(Elements {
+                        elements,
                         unused_pins,
-                    })
+                    }) => ids.elements(Elements {
+                        elements: ids.with_first_pads(elements),
+                        unused_pins: unused_pads(&unused_pins),
+                    }),
+                    SpiceDef::Ibis(def) => ibis_part(*def),
+                    other => other,
                 }
-                other => other,
             }
         }
     };
 
+    if matches!(spice, SpiceDef::Ibis(_)) && common.value == Some(sim::Value::Param) {
+        return err(
+            Value,
+            "an IBIS part has no value to give: `value: param` is not supported",
+        );
+    }
     let value = value_with(&fields)?;
     let non_empty = |name: &str| {
         symbol
@@ -341,16 +388,49 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     })
 }
 
+/// The `Sim.*` fields KiCad 10 has for the model of the `ibis` block, so that the netlist carries
+/// it as KiCad writes it.
+fn ibis_fields(def: &IbisDef) -> Vec<(String, String)> {
+    let source = &def.source;
+    let pins: Vec<String> = def
+        .nodes
+        .iter()
+        .zip(source.kicad_pins())
+        .map(|(pin, port)| format!("{pin}={port}"))
+        .collect();
+    let mut fields = vec![
+        ("Sim.Device", "IBIS".to_string()),
+        (
+            "Sim.Type",
+            if source.driver { "DCDRIVER" } else { "DEVICE" }.to_string(),
+        ),
+        ("Sim.Library", library_field(&def.part.path)),
+        ("Sim.Name", def.part.component.clone()),
+        ("Sim.Ibis.Pin", source.pin.clone()),
+    ];
+    if let Some(model) = &source.model {
+        fields.push(("Sim.Ibis.Model", model.clone()));
+    }
+    if source.diff {
+        fields.push(("Sim.Ibis.Diff", "1".to_string()));
+    }
+    fields.push(("Sim.Pins", pins.join(" ")));
+    fields
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect()
+}
+
 /// Expands the text variables of a value (e.g. `${SIM.PARAMS}`) as KiCad does from the fields of
 /// the symbol in the schematic: `fields` of the part, the footprint, and the symbol's properties,
-/// whose `Sim.*` fields are replaced by the `sim` block. (`Reference` is assigned when the circuit is
+/// whose `Sim.*` fields are replaced by the `sim` or `ibis` block. (`Reference` is assigned when the circuit is
 /// built, so `${REFERENCE}` is left as it is.)
 fn expand_value(
     value: &str,
     fields: &[(String, String)],
     symbol: &Symbol,
     footprint: Option<&LibId>,
-    sim: &[ModelBinding],
+    replaces_sim: bool,
 ) -> Result<sim::Value, Error> {
     let footprint = footprint.map(LibId::to_string).unwrap_or_default();
     let properties = symbol.properties.iter().filter(|(name, _)| {
@@ -358,7 +438,7 @@ fn expand_value(
             || name == "Value"
             || name == "Footprint"
             || name.starts_with("ki_")
-            || (!sim.is_empty() && name.starts_with("Sim.")))
+            || (replaces_sim && name.starts_with("Sim.")))
     });
     let all = fields
         .iter()

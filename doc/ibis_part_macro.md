@@ -38,6 +38,11 @@ the option concerned, and only the path of the file is written into the code. Th
 who reads the file at run time: ngspice reads a SPICE library itself, while an IBIS file is read
 by `cuprite_wire`, which writes the subcircuits (`doc/spice_netlist_usage.md`, "IBIS buffers").
 
+For a KiCad symbol simulating an IBIS pin (`Sim.Device IBIS`, or KiCad's
+`Simulation_SPICE:IBIS_DRIVER` with the model given in the macro), `kicad_part!` generates a part
+with the symbol's pins instead (`doc/kicad_part_macro.md` section 4, "IBIS models"); it shares the
+checks of `ibis_part!`.
+
 ## 1. Options
 
 | Key | Value | Default |

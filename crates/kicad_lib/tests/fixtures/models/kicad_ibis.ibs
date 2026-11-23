@@ -1,0 +1,73 @@
+| A hand-written IBIS file for the tests of kicad_part! with Sim.Device IBIS. The values do not
+| describe a real device.
+[IBIS Ver]      5.0
+[File Name]     kicad_ibis.ibs
+[File Rev]      1.0
+[Component]     Board
+[Manufacturer]  Example Corp.
+[Package]
+R_pkg       0.2     0.1     0.3
+L_pkg       5nH     4nH     6nH
+C_pkg       1.0pF   NA      NA
+[Pin]  signal_name  model_name
+1      TX           out_3s
+2      RX           in_cmos
+3      TXP          out_3s
+4      TXN          out_3s
+5      IO           io_sel
+6      VCC          POWER
+7      GND          GND
+8      DRV          out_pp
+[Diff Pin]  inv_pin  vdiff  tdelay_typ  tdelay_min  tdelay_max
+3           4        0.1V   NA          NA          NA
+
+[Model Selector] io_sel
+out_3s    3-state output
+in_cmos   CMOS input
+
+[Model]         in_cmos
+Model_type      Input
+Vinl = 0.8V
+Vinh = 2.0V
+C_comp          2.0pF   1.5pF   2.5pF
+[Voltage Range]  3.3V  3.0V  3.6V
+[GND Clamp]
+  -3.3   -100m    -80m     -120m
+   0      0        0        0
+   3.3    0        0        0
+
+[Model]         out_3s
+Model_type      3-state
+C_comp          2p      1.5p    2.5p
+[Voltage Range]  3.3V  3.0V  3.6V
+[Pulldown]
+  -3.3   -40m    NA   NA
+   0      0      NA   NA
+   3.3    40m    NA   NA
+[Pullup]
+  -3.3    40m    NA   NA
+   0      0      NA   NA
+   3.3   -40m    NA   NA
+[Ramp]
+dV/dt_r   1.98/0.5n   1.8/0.6n   2.16/0.4n
+dV/dt_f   1.98/0.4n   1.8/0.5n   2.16/0.3n
+R_load = 50
+
+| An output that cannot release the pin.
+[Model]         out_pp
+Model_type      Output
+C_comp          2p      1.5p    2.5p
+[Voltage Range]  3.3V  3.0V  3.6V
+[Pulldown]
+  -3.3   -40m    NA   NA
+   0      0      NA   NA
+   3.3    40m    NA   NA
+[Pullup]
+  -3.3    40m    NA   NA
+   0      0      NA   NA
+   3.3   -40m    NA   NA
+[Ramp]
+dV/dt_r   1.98/0.5n   1.8/0.6n   2.16/0.4n
+dV/dt_f   1.98/0.4n   1.8/0.5n   2.16/0.3n
+R_load = 50
+[END]
