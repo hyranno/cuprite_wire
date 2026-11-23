@@ -16,8 +16,8 @@ the PR; the user merges it and pushes the tag.
 
 1. **Review `[Unreleased]` in `CHANGELOG.md`.** Read it through. Compare the public API with the
    previous release and check that every removed or changed item is under a Breaking/Changed
-   entry (see "Public API diff" below). Pick the version: before 1.0, a breaking change bumps
-   the minor version.
+   entry (see "Public API diff" and "Semver checks" below). Pick the version: before 1.0, a
+   breaking change bumps the minor version.
 2. **Bump the version** in the root `Cargo.toml`: `workspace.package.version` and the three
    `workspace.dependencies` entries (`cuprite_wire`, `cuprite_wire_kicad_lib`,
    `cuprite_wire_macros`). Then `cargo update --workspace` to update `Cargo.lock`.
@@ -57,6 +57,21 @@ diff $TMPDIR/api-prev.txt $TMPDIR/api-new.txt
 
 Use no features for both, and repeat for the other public crates as needed
 (`cuprite_wire_kicad_lib` is exempt from semver; see its crate docs).
+
+## Semver checks
+
+`cargo semver-checks` is on PATH. It compares with the latest release on crates.io and lists the
+breaking changes, which the text diff above can miss (e.g. a removed derive, a new variant of an
+exhaustive enum). In the sandbox, `/usr/local/cargo/config` cannot be read, so give it another
+`CARGO_HOME` (it downloads the baseline there, about 20 seconds):
+
+```bash
+CARGO_HOME=$TMPDIR/cargo-home cargo semver-checks --workspace --exclude cuprite_wire_kicad_lib
+```
+
+Exclude a crate that has never been published (`--exclude <crate>`; otherwise it fails with
+"not found in registry"). Proc-macro crates are skipped. Before 1.0, "requires new major
+version" means a minor bump.
 
 ## Gotchas
 
