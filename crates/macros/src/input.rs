@@ -371,7 +371,7 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
 
 /// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` parses the
 /// value and returns the option it sets, if errors should point at it, with its span.
-fn parse_keys<K: Copy>(
+pub(crate) fn parse_keys<K: Copy>(
     content: ParseStream,
     keys: &[(&str, K)],
     mut handle: impl FnMut(K, ParseStream, Span) -> syn::Result<Option<(OptionKey, Span)>>,
@@ -408,7 +408,7 @@ fn parse_keys<K: Copy>(
 
 /// Calls `item` for each item of the comma-separated list filling `input`; a trailing comma is
 /// allowed.
-fn comma_separated(
+pub(crate) fn comma_separated(
     input: ParseStream,
     mut item: impl FnMut(ParseStream) -> syn::Result<()>,
 ) -> syn::Result<()> {
@@ -509,7 +509,7 @@ fn model_key(
     })
 }
 
-fn end(input: ParseStream) -> syn::Result<()> {
+pub(crate) fn end(input: ParseStream) -> syn::Result<()> {
     if input.is_empty() {
         Ok(())
     } else {

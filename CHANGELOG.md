@@ -33,6 +33,15 @@ break the API).
   inverting pin driven with the complement of the sequence after `tdelay`, with the series
   termination that `[Series Pin Mapping]` puts between the pins; `IbisSeries` is a `Series`
   model as a part.
+- `ibis_part!` (feature `ibis`): names the pins of an IBIS file a test bench uses and generates a
+  type with a function per pin returning its `IbisBuffer` (`IbisDiffBuffer` for a pair,
+  `IbisSeries` for a series model) at a corner. The file is read at compile time to check the
+  component, the pins, the models chosen from `[Model Selector]`s, the pairs and that every model
+  can be simulated at every corner, with errors listing what the file has; only its path is
+  written into the code, and it is read again at run time (`spice::ibis::read_file`).
+- `cuprite_wire_ibis`: `LookupError`, `IbisFile::find_component`, `IbisFile::buffer_model`,
+  `IbisFile::series_model` and `Component::find_diff_pin` find what a simulation asks for, with
+  the reason when it is missing.
 - XSPICE code models inside a `.subckt` are supported by `spice_part!` and `kicad_part!`: files
   named by code model parameters (`d_state`'s `state_file`, `filesource`'s `file`, ...) are
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes

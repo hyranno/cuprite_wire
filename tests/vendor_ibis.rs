@@ -29,16 +29,34 @@ use common::deck_of;
 use cuprite_wire::{
     circuit::CircuitBuilder,
     ibis::{Corner, IbisFile, Model, ModelType, PinModel, TypMinMax},
+    ibis_part,
     naming::NetLabel,
     spice::{
         digital::{DigitalLoad, DigitalSequence, InputCharacteristics, Level, Pull},
         ibis::{
             IbisBuffer, IbisBufferError, IbisDiffBuffer, IbisDiffDriver, IbisDiffReceiver,
-            IbisDriver, IbisReceiver,
+            IbisDriver, IbisReceiver, read_file,
         },
         simulation::{Ngspice, Table},
     },
 };
+
+ibis_part! {
+    /// Pins of a switch: a `[Model Selector]` with a model chosen and with its default.
+    struct Ksz9567s {
+        library: "${CUPRITE_VENDOR_MODELS_DIR}/ibis/FloMaetschke_CM4CB__ksz9567s.ibs",
+        pins: { col6 => { pin: "51", model: "IO8_3V3" }, tx_clk => "48" },
+    }
+}
+
+ibis_part! {
+    /// A TMDS pair of an HDMI transmitter, given by its inverting pin.
+    struct Adv7511 {
+        library: "${CUPRITE_VENDOR_MODELS_DIR}/ibis/HasanTheSyrian_ALTAIR__adv7511.ibs",
+        component: "ADV7511",
+        diff_pins: { tmds => "32" },
+    }
+}
 
 const LINE: &str = r#"v("/LINE")"#;
 
@@ -62,9 +80,8 @@ fn files() -> Vec<(String, IbisFile)> {
         .into_iter()
         .map(|path| {
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            // Some files are Latin-1 in their comments.
-            let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).into_owned();
-            let ibs = cuprite_wire::ibis::parse(&text).unwrap_or_else(|e| panic!("{name}: {e}"));
+            // Some files are Latin-1 in their comments, which `read_file` replaces.
+            let ibs = read_file(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
             (name, ibs)
         })
         .collect()
@@ -344,4 +361,29 @@ fn vendor_ibis_models() {
     for entry in unsupported {
         println!("not supported: {entry}");
     }
+}
+
+/// `ibis_part!` reads real files at compile time and returns what the run-time API returns.
+#[test]
+fn vendor_ibis_part() {
+    let switch = read_file(Ksz9567s::LIBRARY).unwrap();
+    let hdmi = read_file(Adv7511::LIBRARY).unwrap();
+    for corner in [Corner::Typ, Corner::Min, Corner::Max] {
+        assert_eq!(
+            Ksz9567s::col6(corner).unwrap(),
+            IbisBuffer::of_pin_model(&switch, "KSZ9567S", "51", "IO8_3V3", corner).unwrap()
+        );
+        assert_eq!(
+            Ksz9567s::tx_clk(corner).unwrap(),
+            IbisBuffer::of_pin(&switch, "KSZ9567S", "48", corner).unwrap()
+        );
+        assert_eq!(
+            Adv7511::tmds(corner).unwrap(),
+            IbisDiffBuffer::of_pin(&hdmi, "ADV7511", "33", corner).unwrap()
+        );
+    }
+    assert_eq!(
+        Ksz9567s::tx_clk(Corner::Typ).unwrap().model_name(),
+        "IO8_1V8"
+    );
 }

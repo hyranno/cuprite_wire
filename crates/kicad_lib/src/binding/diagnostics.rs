@@ -27,18 +27,7 @@ pub(super) fn not_found(name: &str, path: &Path, libs: &[LibFile]) -> Error {
         })
         .collect();
     let mut message = format!("no .subckt or .model named {name:?} in {}", path.display());
-    let wanted = normalize(name);
-    let similar: Vec<&str> = definitions
-        .iter()
-        .map(|d| d.name.as_str())
-        .filter(|candidate| {
-            let candidate = normalize(candidate);
-            candidate.contains(&wanted)
-                || wanted.contains(&candidate)
-                || edit_distance(&candidate, &wanted) <= 2
-        })
-        .take(8)
-        .collect();
+    let similar = similar_names(name, definitions.iter().map(|d| d.name.as_str()));
     if !similar.is_empty() {
         message.push_str(&format!("; similar names: {}", similar.join(", ")));
     }
@@ -145,6 +134,25 @@ pub(super) fn suggestions(pins: &[&PartPin], ports: &[&str]) -> String {
 
 /// A name for matching pins and ports: uppercase, without `~{}/#` and a trailing `_N` / `_B` / `N` / `B`
 /// (active-low markers); `+` and `-` are kept.
+/// Up to 8 of `candidates` that look like `name`: one contains the other, or they differ in at
+/// most 2 characters, after [`normalize`].
+pub(crate) fn similar_names<'a>(
+    name: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Vec<&'a str> {
+    let wanted = normalize(name);
+    candidates
+        .into_iter()
+        .filter(|candidate| {
+            let candidate = normalize(candidate);
+            candidate.contains(&wanted)
+                || wanted.contains(&candidate)
+                || edit_distance(&candidate, &wanted) <= 2
+        })
+        .take(8)
+        .collect()
+}
+
 pub(super) fn normalize(name: &str) -> String {
     let upper: String = name
         .chars()

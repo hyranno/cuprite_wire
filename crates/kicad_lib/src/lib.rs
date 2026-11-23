@@ -1,7 +1,9 @@
 //! Reads KiCad symbol and footprint libraries and SPICE model libraries, and turns a symbol
 //! into the description of a cuprite_wire part ([`part::PartDef`]).
 //!
-//! This crate is used by the `kicad_part!` and `spice_part!` macros of `cuprite_wire` at compile
+//! It also checks the pins of an IBIS file for `ibis_part!` ([`ibis_part`]).
+//!
+//! This crate is used by the `kicad_part!`, `spice_part!` and `ibis_part!` macros of `cuprite_wire` at compile
 //! time. It does not depend on `proc_macro`, so it can be tested on its own.
 //!
 //! It is an implementation detail of `cuprite_wire`, published only because the macros depend on
@@ -10,6 +12,7 @@
 
 pub mod binding;
 pub mod footprint;
+pub mod ibis_part;
 pub mod naming;
 pub mod part;
 pub mod resolve;

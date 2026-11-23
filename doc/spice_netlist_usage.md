@@ -143,6 +143,8 @@ With the feature `ibis`, `cuprite_wire::spice::ibis` simulates the I/O buffers o
 IBIS model (`.ibs`) instead of `OutputCharacteristics` / `InputCharacteristics`: the I-V tables of
 the driver and the clamps, the edges of `[Rising Waveform]` / `[Falling Waveform]` (or `[Ramp]`),
 `C_comp` and the package parasitics of the pin. The file is read with `cuprite_wire::ibis` (the crate `cuprite_wire_ibis`).
+`ibis_part!` (`doc/ibis_part_macro.md`) checks the pins a test bench uses at compile time and
+generates functions returning their buffers, in place of the `of_pin` calls below.
 
 ```rust
 use cuprite_wire::{
@@ -150,7 +152,7 @@ use cuprite_wire::{
     spice::{digital::*, ibis::*},
 };
 
-let ibs = cuprite_wire::ibis::parse(&std::fs::read_to_string("mcu.ibs")?)?;
+let ibs = read_file("mcu.ibs")?; // or cuprite_wire::ibis::parse(&text)
 let tx = IbisBuffer::of_pin(&ibs, "MCU", "12", Corner::Typ)?;
 let rx = IbisBuffer::of_pin(&ibs, "MCU", "13", Corner::Typ)?;
 let seq = DigitalSequence::new(Level::High).uart(1e-6, 1e6, b"Hi");

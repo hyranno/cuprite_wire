@@ -208,9 +208,10 @@ library. For digital models built by your crate, `spice::xspice::DCosim` is simp
   model has them only for its supply, a copy with the optional ports made regular can be used.
 - **Model bodies are not checked**: syntax ngspice cannot read even in its compatibility mode is
   reported when the deck runs (`SimulationError::Ngspice` with the log).
-- IBIS, Verilog-A, the `.model` of an XSPICE code model as a part by itself (wrap it in a
+- Verilog-A, the `.model` of an XSPICE code model as a part by itself (wrap it in a
   `.subckt`, section 5) and TINA-TI's own formats.
 - Parameters as constructor arguments (`params` are fixed values).
+- IBIS models are not SPICE libraries: use `ibis_part!` (`doc/ibis_part_macro.md`).
 - Mappings taken from vendor symbol files (`.olb`) or from header comments
   (`* PINOUT ORDER ...`), which follow no common format.
 

@@ -17,11 +17,11 @@
 //!     ibis::Corner,
 //!     spice::{
 //!         digital::{DigitalSequence, Level},
-//!         ibis::{IbisBuffer, IbisDriver, IbisReceiver},
+//!         ibis::{IbisBuffer, IbisDriver, IbisReceiver, read_file},
 //!     },
 //! };
 //!
-//! let ibs = cuprite_wire::ibis::parse(&std::fs::read_to_string("models/mcu.ibs")?)?;
+//! let ibs = read_file("models/mcu.ibs")?;
 //! let tx = IbisBuffer::of_pin(&ibs, "MCU", "12", Corner::Typ)?;
 //! let rx = IbisBuffer::of_pin(&ibs, "MCU", "13", Corner::Typ)?;
 //! let driver = IbisDriver::new(tx, DigitalSequence::new(Level::High).uart(1e-6, 1e6, b"Hi"));
@@ -29,6 +29,9 @@
 //! // ... connect them, simulate, and read the line with `rx.input().unwrap().decode(...)`.
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
+//!
+//! [`ibis_part!`](crate::ibis_part) checks the pins at compile time and generates functions
+//! returning their buffers in place of the `of_pin` calls.
 //!
 //! # Differential pairs
 //!
@@ -43,10 +46,13 @@
 //! `Polarity` and `Enable` of the models are ignored: the sequence is the level of the pad (of
 //! the non-inverting pin of a pair).
 
-use std::fmt;
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 
 use cuprite_wire_ibis::{
-    Corner, IbisFile, Model, ModelType, PinModel,
+    Corner, IbisFile, LookupError, Model, ModelType,
     spice::{Drive, Edges, Parasitics, SubcircuitError, series_subcircuit, subcircuit},
 };
 
@@ -59,43 +65,19 @@ use crate::{
     },
 };
 
-/// The reason [`IbisBuffer::of_pin`] has no buffer.
+/// The reason [`IbisBuffer::of_pin`] (or [`read_file`]) has no buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IbisBufferError {
-    /// The file has no `[Component]` of the name.
-    NoComponent(String),
-    /// The component has no pin of the name.
-    NoPin {
-        /// The component.
-        component: String,
-        /// The pin.
-        pin: String,
+    /// The file cannot be read or is not a valid IBIS file.
+    Read {
+        /// The file.
+        path: PathBuf,
+        /// Why it cannot be read.
+        message: String,
     },
-    /// The pin is a supply, ground or unconnected pin, names a model the file does not have, or
-    /// the model asked for is not one of its `[Model Selector]`.
-    NoModel {
-        /// The pin.
-        pin: String,
-        /// What the pin has instead.
-        reason: String,
-    },
-    /// The pin is in no row of `[Diff Pin]`.
-    NoDiffPin {
-        /// The component.
-        component: String,
-        /// The pin.
-        pin: String,
-    },
-    /// No row of `[Series Pin Mapping]` joins the pins.
-    NoSeriesPinMapping {
-        /// The component.
-        component: String,
-        /// The first pin.
-        pin1: String,
-        /// The second pin.
-        pin2: String,
-    },
+    /// The file has no such component, pin, model or pair.
+    Lookup(LookupError),
     /// The model cannot be simulated.
     Subcircuit(SubcircuitError),
 }
@@ -103,27 +85,10 @@ pub enum IbisBufferError {
 impl fmt::Display for IbisBufferError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IbisBufferError::NoComponent(name) => write!(f, "no [Component] `{name}`"),
-            IbisBufferError::NoPin { component, pin } => {
-                write!(f, "component `{component}` has no pin `{pin}`")
+            IbisBufferError::Read { path, message } => {
+                write!(f, "cannot read {}: {message}", path.display())
             }
-            IbisBufferError::NoModel { pin, reason } => {
-                write!(f, "pin `{pin}` has no model: {reason}")
-            }
-            IbisBufferError::NoDiffPin { component, pin } => {
-                write!(
-                    f,
-                    "pin `{pin}` of component `{component}` is not in [Diff Pin]"
-                )
-            }
-            IbisBufferError::NoSeriesPinMapping {
-                component,
-                pin1,
-                pin2,
-            } => write!(
-                f,
-                "component `{component}` has no [Series Pin Mapping] between pins `{pin1}` and `{pin2}`"
-            ),
+            IbisBufferError::Lookup(error) => error.fmt(f),
             IbisBufferError::Subcircuit(error) => error.fmt(f),
         }
     }
@@ -132,9 +97,16 @@ impl fmt::Display for IbisBufferError {
 impl std::error::Error for IbisBufferError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            IbisBufferError::Read { .. } => None,
+            IbisBufferError::Lookup(error) => Some(error),
             IbisBufferError::Subcircuit(error) => Some(error),
-            _ => None,
         }
+    }
+}
+
+impl From<LookupError> for IbisBufferError {
+    fn from(error: LookupError) -> Self {
+        IbisBufferError::Lookup(error)
     }
 }
 
@@ -142,6 +114,21 @@ impl From<SubcircuitError> for IbisBufferError {
     fn from(error: SubcircuitError) -> Self {
         IbisBufferError::Subcircuit(error)
     }
+}
+
+/// Reads and parses the IBIS file at `path`. Bytes that are not UTF-8 (in the comments of some
+/// vendor files) are replaced.
+///
+/// # Errors
+/// [`IbisBufferError::Read`] if the file cannot be read or parsed.
+pub fn read_file(path: impl AsRef<Path>) -> Result<IbisFile, IbisBufferError> {
+    let path = path.as_ref();
+    let error = |message: String| IbisBufferError::Read {
+        path: path.to_path_buf(),
+        message,
+    };
+    let bytes = std::fs::read(path).map_err(|e| error(e.to_string()))?;
+    cuprite_wire_ibis::parse(&String::from_utf8_lossy(&bytes)).map_err(|e| error(e.to_string()))
 }
 
 /// An IBIS `[Model]` with the package parasitics of a pin, at a corner, ready to simulate.
@@ -236,23 +223,8 @@ impl IbisBuffer {
         choice: Option<&str>,
         corner: Corner,
     ) -> Result<Self, IbisBufferError> {
-        let c = find_component(file, component)?;
-        let p = c.pin(pin).ok_or_else(|| IbisBufferError::NoPin {
-            component: component.to_string(),
-            pin: pin.to_string(),
-        })?;
-        let no_model = |reason: String| IbisBufferError::NoModel {
-            pin: pin.to_string(),
-            reason,
-        };
-        let model = match &p.model {
-            PinModel::Power => return Err(no_model("it is a POWER pin".into())),
-            PinModel::Gnd => return Err(no_model("it is a GND pin".into())),
-            PinModel::Nc => return Err(no_model("it is an NC pin".into())),
-            PinModel::Named(name) => file
-                .pin_model(name, choice)
-                .map_err(|e| no_model(e.to_string()))?,
-        };
+        let c = file.find_component(component)?;
+        let (p, model) = file.buffer_model(c, pin, choice)?;
         Ok(Self::new(model, &Parasitics::of_pin(c, p, corner), corner)?)
     }
 
@@ -389,14 +361,6 @@ impl IbisBuffer {
     }
 }
 
-fn find_component<'a>(
-    file: &'a IbisFile,
-    component: &str,
-) -> Result<&'a cuprite_wire_ibis::Component, IbisBufferError> {
-    file.component(component)
-        .ok_or_else(|| IbisBufferError::NoComponent(component.to_string()))
-}
-
 /// A `Series` model of an IBIS file, at a corner, as a part with pins `a` and `b`: its passive
 /// elements between them ([`series_subcircuit`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -444,13 +408,14 @@ impl IbisSeries {
         pin2: &str,
         corner: Corner,
     ) -> Result<Self, IbisBufferError> {
-        let c = find_component(file, component)?;
+        let c = file.find_component(component)?;
         Self::of_component(file, c, pin1, pin2, corner)?.ok_or_else(|| {
-            IbisBufferError::NoSeriesPinMapping {
+            LookupError::NoSeriesPinMapping {
                 component: component.to_string(),
                 pin1: pin1.to_string(),
                 pin2: pin2.to_string(),
             }
+            .into()
         })
     }
 
@@ -462,15 +427,9 @@ impl IbisSeries {
         pin2: &str,
         corner: Corner,
     ) -> Result<Option<Self>, IbisBufferError> {
-        let Some(mapping) = component.series_pin_mapping(pin1, pin2) else {
+        let Some(model) = file.series_model(component, pin1, pin2)? else {
             return Ok(None);
         };
-        let model = file
-            .pin_model(&mapping.model, None)
-            .map_err(|e| IbisBufferError::NoModel {
-                pin: mapping.pin1.clone(),
-                reason: e.to_string(),
-            })?;
         Ok(Some(Self::new(model, corner)?))
     }
 
@@ -579,11 +538,8 @@ impl IbisDiffBuffer {
         choice: Option<&str>,
         corner: Corner,
     ) -> Result<Self, IbisBufferError> {
-        let c = find_component(file, component)?;
-        let diff = c.diff_pin(pin).ok_or_else(|| IbisBufferError::NoDiffPin {
-            component: component.to_string(),
-            pin: pin.to_string(),
-        })?;
+        let c = file.find_component(component)?;
+        let diff = c.find_diff_pin(pin)?;
         let buffer = |pin| IbisBuffer::pin_buffer(file, component, pin, choice, corner);
         Ok(IbisDiffBuffer {
             p: buffer(&diff.pin)?,
