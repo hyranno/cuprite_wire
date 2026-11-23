@@ -1,0 +1,39 @@
+name: Security audit
+
+# The security advisories of the dependencies (cargo-deny, deny.toml). Kept out of CI, so that an
+# advisory published for a dependency does not fail unrelated pull requests: this runs when the
+# dependencies change, and weekly for new advisories.
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.lock, deny.toml, .github/workflows/audit.yml]
+  pull_request:
+    paths: [Cargo.lock, deny.toml, .github/workflows/audit.yml]
+  schedule:
+    - cron: "23 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  advisories:
+    name: security advisories
+    runs-on: ubuntu-latest
+    container: rust:trixie
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same version as the devcontainer.
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-deny@0.22.0
+      - run: cargo xtask advisories
