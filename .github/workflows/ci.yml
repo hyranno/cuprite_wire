@@ -18,6 +18,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# The checks are tasks of xtask (xtask/src/main.rs, `cargo xtask help`), which the git hooks run
+# locally too.
 jobs:
   lint:
     name: rustfmt and clippy
@@ -30,15 +32,15 @@ jobs:
           persist-credentials: false
       - run: rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets --features ibis,shared-ngspice -- -D warnings
-      # cuprite_wire_embedded_hal turns shared-ngspice on for the whole workspace build;
-      # check cuprite_wire without it too.
-      - run: cargo clippy -p cuprite_wire --all-targets -- -D warnings
-      # Broken intra-doc links and other rustdoc warnings.
-      - run: cargo doc --workspace --no-deps --features ibis,shared-ngspice
-        env:
-          RUSTDOCFLAGS: -D warnings
+      # The same version as the devcontainer. After the cache, which could restore another version.
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2.90.8
+        with:
+          tool: cargo-deny@0.22.0
+      - run: cargo xtask fmt
+      # Clippy with and without the optional features, and rustdoc warnings.
+      - run: cargo xtask lint
+      # The licenses and sources of the dependencies (deny.toml); audit.yml checks the advisories.
+      - run: cargo xtask deny
 
   msrv:
     name: minimum supported Rust version
@@ -57,7 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: msrv
-      - run: cargo "+${MSRV}" check --workspace --all-targets --features ibis,shared-ngspice
+      - run: cargo "+${MSRV}" xtask check
 
   test:
     name: test (KiCad ${{ matrix.kicad }})
@@ -70,10 +72,13 @@ jobs:
           - kicad: 9
             image: rust:trixie
             packages: kicad-symbols kicad-footprints
+            # The KiCad demos are in the kicad/kicad image, not in the packages of Debian trixie.
+            test-options: --no-kicad-demos
           # The base image of the devcontainer, with the KiCad 10 libraries; Rust is installed below.
           - kicad: 10
             image: kicad/kicad:10.0
             packages: build-essential ca-certificates curl
+            test-options: ""
     container:
       image: ${{ matrix.image }}
       # kicad/kicad runs as the user `kicad` by default.
@@ -96,13 +101,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: kicad${{ matrix.kicad }}
-      - run: cargo test --workspace --features ibis,kicad-libraries,shared-ngspice
-      - name: Tests reading the KiCad libraries
-        run: cargo test -p cuprite_wire_kicad_lib -- --ignored
-      # The KiCad demos are in the kicad/kicad image, not in the packages of Debian trixie above.
-      - name: Tests reading the KiCad demos
-        if: matrix.kicad == 10
-        run: cargo test -p cuprite_wire_ibis -- --ignored
+      # Including the ignored tests reading the KiCad libraries and demos.
+      - run: cargo xtask test ${{ matrix.test-options }}
 
   test-other-os:
     name: test (${{ matrix.os }})
@@ -142,4 +142,4 @@ jobs:
           Select-String -Path $spinit -Pattern 'codemodel'
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # Without the KiCad libraries; the XSPICE tests building code models are Linux-only.
-      - run: cargo test --workspace --features ibis,shared-ngspice
+      - run: cargo xtask test --no-kicad
