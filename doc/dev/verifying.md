@@ -1,8 +1,8 @@
 # Verifying the Output
 
 This document describes how cuprite_wire's output is checked against KiCad and ngspice: the tests
-run by `cargo test`, and the scripts in `tools/` that drive KiCad. The commands CI runs are in
-`CONTRIBUTING.md`.
+run by `cargo test`, and the scripts in `tools/` that drive KiCad. CI runs the checks of
+`cargo xtask` (see `CONTRIBUTING.md`).
 
 ## 1. Tests
 

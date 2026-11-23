@@ -1,0 +1,8 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Development tasks of the workspace: the checks CI runs (`cargo xtask help`)"
+publish = false

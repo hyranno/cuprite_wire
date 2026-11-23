@@ -18,8 +18,9 @@ redistribution (see [Licenses](#licenses)). Refer to them by name and where to d
 
 Using the devcontainer in `.devcontainer/` is recommended. It has everything needed to build and
 test: Rust, KiCad 10 (its libraries, `kicad-cli` and pcbnew), ngspice (the CLI and the shared
-library), gcc/g++ and Verilator for the XSPICE tests, and Xvfb for the pcbnew import check
-(`doc/dev/verifying.md`). It is based on the `kicad/kicad:10.0` image. CI runs the tests with
+library), gcc/g++ and Verilator for the XSPICE tests, Xvfb for the pcbnew import check
+(`doc/dev/verifying.md`), and cargo-deny for the dependency checks. It is based on the
+`kicad/kicad:10.0` image. CI runs the tests with
 KiCad 10 on the same image and with KiCad 9 on `rust:trixie` (Debian's KiCad libraries). You may use your own environment or a customized
 devcontainer instead, as long as the checks below pass.
 
@@ -37,18 +38,25 @@ others get the same environment.
 3. Run the same checks as CI before opening the pull request:
 
    ```sh
-   cargo fmt --all --check
-   cargo clippy --workspace --all-targets --features shared-ngspice -- -D warnings
-   cargo clippy -p cuprite_wire --all-targets -- -D warnings
-   RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --features shared-ngspice
-   cargo test --workspace --features kicad-libraries,shared-ngspice
-   cargo test -p cuprite_wire_kicad_lib -p cuprite_wire_ibis -- --ignored
+   cargo xtask all
    ```
+
+   It checks the formatting (the default rustfmt settings), runs clippy and rustdoc with warnings
+   denied, checks the licenses and sources of the dependencies with
+   [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`deny.toml`), and runs the tests,
+   including the ignored tests reading the KiCad libraries and demos. `cargo xtask help` lists
+   the tasks and their options (e.g. `cargo xtask test --no-kicad` without a KiCad
+   installation). The commands are in `xtask/src/main.rs`; the CI workflow runs the same tasks.
+
+   The git hooks in `.githooks/` run these checks for you: `pre-commit` checks the formatting and
+   `pre-push` runs `cargo xtask all` (`SKIP_TESTS=1 git push` skips the tests,
+   `git push --no-verify` all the checks). Enable them with
+   `git config core.hooksPath .githooks`; the devcontainer does this when it is created. Since the
+   checks run on the working tree, `pre-push` refuses to push a branch that is not checked out or
+   has changes that are not committed.
 
    The XSPICE tests building code models run on Linux only (see the platform notes in
    `README.md`); see `.github/workflows/ci.yml` for how CI installs ngspice on Windows and macOS.
-
-   The code is formatted with the default rustfmt settings.
 
 4. If a change intentionally alters output, regenerate the expected files (golden netlists and
    compile-error messages) and review the diff. The commands, and the opt-in tests with real
@@ -123,6 +131,7 @@ Respect the licenses of everything the project touches. In particular:
   structure of a file format) in your own words, and list the sources you used, with their licenses,
   in the references of the document, as in `doc/dev/kicad_netlist_format.md`.
 - **New dependencies** must have licenses compatible with MIT (e.g. MIT, Apache-2.0, BSD).
+  `cargo xtask deny` checks them against the licenses allowed in `deny.toml`.
 - **AI-generated content** is subject to the same rules. Make sure it does not reproduce code or
   text from sources with incompatible licenses.
 

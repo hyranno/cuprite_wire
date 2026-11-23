@@ -1,0 +1,4 @@
+#!/bin/sh
+# Checks the formatting before a commit (enabled by `git config core.hooksPath .githooks`; see
+# CONTRIBUTING.md). Fix it with `cargo fmt --all`; skip the check with `git commit --no-verify`.
+exec cargo xtask fmt
