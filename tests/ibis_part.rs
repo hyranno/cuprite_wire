@@ -39,7 +39,11 @@ const PATH: &str = concat!(
 
 #[test]
 fn test_constants() {
-    assert_eq!(Chip::LIBRARY, PATH);
+    // Compared as paths: on Windows, the crate directory is joined with `\`.
+    assert_eq!(
+        std::path::Path::new(Chip::LIBRARY),
+        std::path::Path::new(PATH)
+    );
     assert_eq!(Chip::COMPONENT, "Chip");
     assert_eq!(Other::COMPONENT, "Other");
     // Read once.
