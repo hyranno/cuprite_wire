@@ -25,7 +25,7 @@ pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProb
 #[cfg(feature = "shared-ngspice")]
 pub use shared::SharedNgspice;
 pub use simulation::{Ngspice, Simulation, SimulationError, Simulator, Table};
-pub use sources::{Ammeter, IndependentSource, SourceKind, Waveform};
+pub use sources::{Ammeter, IndependentSource, SourceKind, TransmissionLine, Waveform};
 pub use value::{spice_number, spice_value};
 
 #[cfg(test)]

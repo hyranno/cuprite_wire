@@ -36,7 +36,7 @@ let usb = bench.instantiate_part(IbisDiffReceiver::new(Mcu::usb(Corner::Typ)?));
 to the crate, absolute, or with `${VAR}`), files read are tracked for rebuilds, errors point at
 the option concerned, and only the path of the file is written into the code. The difference is
 who reads the file at run time: ngspice reads a SPICE library itself, while an IBIS file is read
-by `cuprite_wire`, which writes the subcircuits (`doc/spice_netlist_usage.md`, "IBIS buffers").
+by `cuprite_wire`, which writes the subcircuits (`doc/ibis.md`).
 
 For a KiCad symbol simulating an IBIS pin (`Sim.Device IBIS`, or KiCad's
 `Simulation_SPICE:IBIS_DRIVER` with the model given in the macro), `kicad_part!` generates a part

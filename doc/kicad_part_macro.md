@@ -193,7 +193,7 @@ the dialects, and for `spice_part!`, which makes a part from a model alone.
 
 **IBIS models** (feature `ibis`). A symbol with `Sim.Device IBIS` is a pin (or a differential
 pair) of an IBIS file, as KiCad 10 simulates it, and the generated type holds the part of
-`cuprite_wire::spice::ibis` that simulates it (`doc/spice_netlist_usage.md`, "IBIS buffers"):
+`cuprite_wire::spice::ibis` that simulates it (`doc/ibis.md`):
 
 | `Sim.Type` | `Sim.Ibis.Diff` | Simulated by | Constructor |
 |---|---|---|---|

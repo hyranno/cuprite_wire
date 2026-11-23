@@ -1,0 +1,285 @@
+|******************************************************************************
+| A made-up device for the example `examples/ibis_signal_integrity`: a 3.3 V
+| LVCMOS output and input, and an LVDS-like differential output and input with
+| an on-die 100 ohm termination. The values do not describe a real device:
+| the tables follow simple formulas (a driver saturating like a transistor,
+| clamp diodes with 2 ohms in series), not measurements. The edges are given by
+| [Ramp] only; files from vendors usually have [Rising Waveform] and
+| [Falling Waveform] tables as well, which cuprite_wire uses when present.
+|******************************************************************************
+[IBIS Ver]      5.0
+[File Name]     demo_io.ibs
+[File Rev]      1.0
+[Date]          2026-11-23
+[Source]        Written by hand for the examples of cuprite_wire.
+[Disclaimer]    Not a real device.
+
+[Component]     DEMO-IO
+[Manufacturer]  None (a made-up device)
+[Package]
+| variable  typ       min       max
+R_pkg       0.2       0.15      0.3
+L_pkg       2.5nH     2.0nH     3.0nH
+C_pkg       0.6pF     0.5pF     0.7pF
+[Pin]  signal_name  model_name
+1      CLK_OUT      LVCMOS33_OUT
+2      CLK_IN       LVCMOS33_IN
+3      TX_P         LVDS_OUT
+4      TX_N         LVDS_OUT
+5      RX_P         LVDS_IN
+6      RX_N         LVDS_IN
+7      VDD33        POWER
+8      VDD25        POWER
+9      GND          GND
+[Diff Pin]  inv_pin  vdiff  tdelay_typ  tdelay_min  tdelay_max
+3           4        NA     0ns         NA          NA
+5           6        100mV  NA          NA          NA
+| The receiver's termination between its pins.
+[Series Pin Mapping]  pin_2  model_name
+5                     6      ODT100
+
+|******************************************************************************
+| 3.3 V LVCMOS output: about 16 ohms low and 19 ohms high, saturating at 75 mA
+| and 65 mA (typical).
+|******************************************************************************
+[Model]         LVCMOS33_OUT
+Model_type      Output
+C_comp          2.5pF     2.0pF     3.0pF
+[Voltage Range] 3.3V      3.0V      3.6V
+[Pulldown]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    -74.39m     -55.85m     -93.22m
+  -2      -69.83m     -52.68m     -88.54m
+  -1      -51.17m     -39.01m     -66.64m
+  -0.5    -29.56m     -22.67m     -39.12m
+  0       0           0           0
+  0.25    15.4m       11.84m      20.5m
+  0.5     29.56m      22.67m      39.12m
+  0.75    41.59m      31.81m      54.64m
+  1       51.17m      39.01m      66.64m
+  1.5     63.62m      48.21m      81.57m
+  2       69.83m      52.68m      88.54m
+  2.5     72.71m      54.7m       91.57m
+  3.3     74.39m      55.85m      93.22m
+  4.5     74.92m      56.2m       93.69m
+  6.6     75m         56.25m      93.75m
+[Pullup]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    64.38m      48.35m      80.71m
+  -2      60.1m       45.35m      76.27m
+  -1      43.51m      33.19m      56.73m
+  -0.5    24.97m      19.15m      33.06m
+  0       0           0           0
+  0.25    -12.98m     -9.978m     -17.28m
+  0.5     -24.97m     -19.15m     -33.06m
+  0.75    -35.24m     -26.96m     -46.33m
+  1       -43.51m     -33.19m     -56.73m
+  1.5     -54.47m     -41.3m      -69.92m
+  2       -60.1m      -45.35m     -76.27m
+  2.5     -62.77m     -47.24m     -79.11m
+  3.3     -64.38m     -48.35m     -80.71m
+  4.5     -64.91m     -48.69m     -81.18m
+  6.6     -65m        -48.75m     -81.25m
+[GND Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    -1231m      -1222m      -1240m
+  -2      -590.2m     -581.4m     -598.9m
+  -1.5    -347m       -338.4m     -355.7m
+  -1.2    -203.9m     -195.5m     -212.3m
+  -1      -111.7m     -103.7m     -119.7m
+  -0.9    -68.08m     -60.62m     -75.67m
+  -0.8    -29.07m     -23.09m     -35.47m
+  -0.7    -4.171m     -2.393m     -6.804m
+  -0.6    -119.2u     -59.88u     -236.3u
+  -0.5    -2.513u     -1.257u     -5.025u
+  0       0           0           0
+  3.3     0           0           0
+  6.6     0           0           0
+[POWER Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    1231m       1222m       1240m
+  -2      590.2m      581.4m      598.9m
+  -1.5    347m        338.4m      355.7m
+  -1.2    203.9m      195.5m      212.3m
+  -1      111.7m      103.7m      119.7m
+  -0.9    68.08m      60.62m      75.67m
+  -0.8    29.07m      23.09m      35.47m
+  -0.7    4.171m      2.393m      6.804m
+  -0.6    119.2u      59.88u      236.3u
+  -0.5    2.513u      1.257u      5.025u
+  0       0           0           0
+  3.3     0           0           0
+  6.6     0           0           0
+[Ramp]
+| variable  typ          min          max
+dV/dt_r     1.35/0.50n   1.18/0.75n   1.49/0.35n
+dV/dt_f     1.44/0.45n   1.28/0.70n   1.56/0.30n
+R_load = 50
+
+|******************************************************************************
+| 3.3 V LVCMOS input.
+|******************************************************************************
+[Model]         LVCMOS33_IN
+Model_type      Input
+Vinl = 0.8V
+Vinh = 2.0V
+C_comp          3.0pF     2.5pF     3.5pF
+[Voltage Range] 3.3V      3.0V      3.6V
+[GND Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    -1231m      -1222m      -1240m
+  -2      -590.2m     -581.4m     -598.9m
+  -1.5    -347m       -338.4m     -355.7m
+  -1.2    -203.9m     -195.5m     -212.3m
+  -1      -111.7m     -103.7m     -119.7m
+  -0.9    -68.08m     -60.62m     -75.67m
+  -0.8    -29.07m     -23.09m     -35.47m
+  -0.7    -4.171m     -2.393m     -6.804m
+  -0.6    -119.2u     -59.88u     -236.3u
+  -0.5    -2.513u     -1.257u     -5.025u
+  0       0           0           0
+  3.3     0           0           0
+  6.6     0           0           0
+[POWER Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -3.3    1231m       1222m       1240m
+  -2      590.2m      581.4m      598.9m
+  -1.5    347m        338.4m      355.7m
+  -1.2    203.9m      195.5m      212.3m
+  -1      111.7m      103.7m      119.7m
+  -0.9    68.08m      60.62m      75.67m
+  -0.8    29.07m      23.09m      35.47m
+  -0.7    4.171m      2.393m      6.804m
+  -0.6    119.2u      59.88u      236.3u
+  -0.5    2.513u      1.257u      5.025u
+  0       0           0           0
+  3.3     0           0           0
+  6.6     0           0           0
+
+|******************************************************************************
+| One pin of the LVDS-like output on 2.5 V: 1.55 V (high) or 0.85 V (low)
+| through about 50 ohms, limited to 12 mA (typical). Into a 100 ohm
+| termination, the pair swings by +-350 mV around 1.2 V.
+|******************************************************************************
+[Model]         LVDS_OUT
+Model_type      Output
+C_comp          1.0pF     0.8pF     1.2pF
+[Voltage Range] 2.5V      2.375V    2.625V
+[Pulldown]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    -12m        -9m         -15m
+  -1      -11.95m     -8.968m     -14.96m
+  0       -10.67m     -8.067m     -13.61m
+  0.25    -9.139m     -6.949m     -11.82m
+  0.5     -6.301m     -4.822m     -8.29m
+  0.75    -1.982m     -1.524m     -2.639m
+  0.85    0           0           0
+  0.95    1.982m      1.524m      2.639m
+  1.2     6.301m      4.822m      8.29m
+  1.45    9.139m      6.949m      11.82m
+  1.7     10.67m      8.067m      13.61m
+  2       11.49m      8.654m      14.51m
+  2.5     11.9m       8.936m      14.92m
+  3.5     12m         8.998m      15m
+  5       12m         9m          15m
+[Pullup]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    12m         9m          15m
+  -1      11.96m      8.977m      14.97m
+  0       11.03m      8.327m      14.01m
+  0.5     7.622m      5.818m      9.961m
+  0.8     2.939m      2.258m      3.908m
+  0.95    0           0           0
+  1.05    -1.982m     -1.524m     -2.639m
+  1.3     -6.301m     -4.822m     -8.29m
+  1.55    -9.139m     -6.949m     -11.82m
+  1.8     -10.67m     -8.067m     -13.61m
+  2       -11.3m      -8.516m     -14.3m
+  2.5     -11.86m     -8.911m     -14.88m
+  3.5     -12m        -8.997m     -15m
+  5       -12m        -9m         -15m
+[GND Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    -835.7m     -826.8m     -844.5m
+  -2      -590.2m     -581.4m     -598.9m
+  -1.5    -347m       -338.4m     -355.7m
+  -1.2    -203.9m     -195.5m     -212.3m
+  -1      -111.7m     -103.7m     -119.7m
+  -0.9    -68.08m     -60.62m     -75.67m
+  -0.8    -29.07m     -23.09m     -35.47m
+  -0.7    -4.171m     -2.393m     -6.804m
+  -0.6    -119.2u     -59.88u     -236.3u
+  -0.5    -2.513u     -1.257u     -5.025u
+  0       0           0           0
+  2.5     0           0           0
+  5       0           0           0
+[POWER Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    835.7m      826.8m      844.5m
+  -2      590.2m      581.4m      598.9m
+  -1.5    347m        338.4m      355.7m
+  -1.2    203.9m      195.5m      212.3m
+  -1      111.7m      103.7m      119.7m
+  -0.9    68.08m      60.62m      75.67m
+  -0.8    29.07m      23.09m      35.47m
+  -0.7    4.171m      2.393m      6.804m
+  -0.6    119.2u      59.88u      236.3u
+  -0.5    2.513u      1.257u      5.025u
+  0       0           0           0
+  2.5     0           0           0
+  5       0           0           0
+[Ramp]
+| variable  typ          min          max
+dV/dt_r     0.47/150p    0.42/200p    0.51/110p
+dV/dt_f     0.50/150p    0.45/200p    0.54/110p
+R_load = 50
+
+|******************************************************************************
+| One pin of the LVDS-like input. The pair is read with vdiff of [Diff Pin];
+| Vinl and Vinh are the thresholds of a pin alone.
+|******************************************************************************
+[Model]         LVDS_IN
+Model_type      Input
+Vinl = 1.1V
+Vinh = 1.3V
+C_comp          1.5pF     1.2pF     1.8pF
+[Voltage Range] 2.5V      2.375V    2.625V
+[GND Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    -835.7m     -826.8m     -844.5m
+  -2      -590.2m     -581.4m     -598.9m
+  -1.5    -347m       -338.4m     -355.7m
+  -1.2    -203.9m     -195.5m     -212.3m
+  -1      -111.7m     -103.7m     -119.7m
+  -0.9    -68.08m     -60.62m     -75.67m
+  -0.8    -29.07m     -23.09m     -35.47m
+  -0.7    -4.171m     -2.393m     -6.804m
+  -0.6    -119.2u     -59.88u     -236.3u
+  -0.5    -2.513u     -1.257u     -5.025u
+  0       0           0           0
+  2.5     0           0           0
+  5       0           0           0
+[POWER Clamp]
+| voltage   I(typ)      I(min)      I(max)
+  -2.5    835.7m      826.8m      844.5m
+  -2      590.2m      581.4m      598.9m
+  -1.5    347m        338.4m      355.7m
+  -1.2    203.9m      195.5m      212.3m
+  -1      111.7m      103.7m      119.7m
+  -0.9    68.08m      60.62m      75.67m
+  -0.8    29.07m      23.09m      35.47m
+  -0.7    4.171m      2.393m      6.804m
+  -0.6    119.2u      59.88u      236.3u
+  -0.5    2.513u      1.257u      5.025u
+  0       0           0           0
+  2.5     0           0           0
+  5       0           0           0
+
+|******************************************************************************
+| The on-die termination of the LVDS-like input.
+|******************************************************************************
+[Model]         ODT100
+Model_type      Series
+[R Series]      100       90        110
+
+[END]
