@@ -164,6 +164,7 @@ impl Netlist {
 
         CircuitErrors::into_result(
             errors,
+            &self.warnings,
             KicadNetlist {
                 source: None,
                 components,
@@ -715,7 +716,7 @@ mod tests {
 
         // Parts without KiCad information do not prevent creating the netlist.
         let netlist = circuit.build(&()).to_netlist().unwrap();
-        let errors = netlist.to_kicad().unwrap_err().0;
+        let errors = netlist.to_kicad().unwrap_err().errors;
         let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
         assert_eq!(
             kinds,
@@ -746,7 +747,9 @@ mod tests {
             .collect();
         // Components are sorted by reference: V1, X1, X2, X3, X4.
         assert_eq!(error_lines, lines);
-        let message = CircuitErrors(errors).to_string();
+        let message = CircuitErrors::into_result(errors, &[], ())
+            .unwrap_err()
+            .to_string();
         assert!(message.contains(&format!(
             "error: V1: the part cannot be exported to KiCad\n  at {}:{}:",
             file!(),

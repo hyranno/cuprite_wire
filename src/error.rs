@@ -322,24 +322,47 @@ impl fmt::Display for CircuitError {
 
 impl std::error::Error for CircuitError {}
 
-/// All errors found in a circuit.
+/// All errors found in a circuit, with the warnings found until the conversion stopped.
+///
+/// There is always at least one error. The warnings may explain an error (e.g. a net with several
+/// names, [`CircuitWarningKind::MultipleNetNames`], next to [`CircuitErrorKind::DuplicateNetName`]);
+/// they are also reported through the `log` crate as they are found.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CircuitErrors(pub Vec<CircuitError>);
+#[non_exhaustive]
+pub struct CircuitErrors {
+    /// The errors, at least one.
+    pub errors: Vec<CircuitError>,
+    /// The warnings of the conversion.
+    pub warnings: Vec<CircuitWarning>,
+}
 
 impl CircuitErrors {
-    /// `Ok(value)` if there is no error.
-    pub(crate) fn into_result<T>(errors: Vec<CircuitError>, value: T) -> Result<T, CircuitErrors> {
+    /// `Ok(value)` if there is no error, else the errors with `warnings`.
+    pub(crate) fn into_result<T>(
+        errors: Vec<CircuitError>,
+        warnings: &[CircuitWarning],
+        value: T,
+    ) -> Result<T, CircuitErrors> {
         if errors.is_empty() {
             Ok(value)
         } else {
-            Err(CircuitErrors(errors))
+            Err(CircuitErrors {
+                errors,
+                warnings: warnings.to_vec(),
+            })
         }
     }
 }
 
 impl fmt::Display for CircuitErrors {
+    /// The errors, then the warnings, one per line.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write_lines(f, &self.0)
+        write_lines(f, &self.errors)?;
+        if !self.warnings.is_empty() {
+            writeln!(f)?;
+            write_lines(f, &self.warnings)?;
+        }
+        Ok(())
     }
 }
 

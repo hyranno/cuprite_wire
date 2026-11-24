@@ -99,6 +99,10 @@ break the API).
 
 ### Changed
 
+- **Breaking:** `CircuitErrors` has the fields `errors` and `warnings` (it was a tuple struct;
+  `.0` becomes `.errors`) and is `#[non_exhaustive]`. A failed `to_netlist`, `to_kicad` or
+  `to_spice` keeps the warnings found so far, which were lost without a logger, and its
+  `Display` prints them after the errors.
 - **Breaking:** `KicadPartInfo` has the fields `datasheet` and `description`; struct literals
   without `..Default::default()` must set them.
 - The KiCad netlist of parts from `kicad_part!` (and `cuprite_wire::basic`) has the `description`

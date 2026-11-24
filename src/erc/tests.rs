@@ -576,7 +576,11 @@ fn test_extra_pin_types() {
     let mut circuit = CircuitBuilder::new();
     circuit.instantiate_part(both);
     let errors = circuit.build(&()).to_netlist().unwrap_err();
-    let kinds: Vec<_> = errors.0.iter().map(|error| error.kind.clone()).collect();
+    let kinds: Vec<_> = errors
+        .errors
+        .iter()
+        .map(|error| error.kind.clone())
+        .collect();
     assert_eq!(
         kinds,
         [
