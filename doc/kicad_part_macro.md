@@ -132,12 +132,30 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
 | no `Sim.*` fields, reference `R`, `C` or `L`, two pins | inferred: the value (`value` must be a number, or `param`) |
 | no `Sim.*` fields, other references | no model: `spice()` returns `None` |
 | `Sim.Device` `R` `C` `L` | the value, or `Sim.Params` `r=` / `c=` / `l=` |
-| `Sim.Device` `V` `I` with `Sim.Type` `DC` | `DC <value>`, or `Sim.Params` `dc=` |
+| `Sim.Device` `V` `I` with `Sim.Type` `DC` (or none) | `DC <value>`, or `Sim.Params` `dc=`; `AC <ac> <ph>` with `ac=` / `ph=` |
+| `Sim.Device` `V` `I` with `Sim.Type` `SIN` `PULSE` `EXP` `AM` `SFFM` `PWL` | the waveform of `Sim.Params` (`SIN( 0 1 1k )`), as KiCad writes it (see below) |
 | `Sim.Device` `D`, `NPN` `PNP` (Gummel-Poon), `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges) | a built-in model `.model __<TypeName> <type> <Sim.Params>`, or the `.model` `Sim.Name` of `Sim.Library` |
 | `Sim.Device` `SUBCKT` with `Sim.Library` and `Sim.Name` | `X` element with the `.subckt` and `Sim.Params` as parameters |
 | `Sim.Device` `IBIS` (KiCad 10) | the driver or receiver of a pin of an IBIS file (feature `ibis`; see "IBIS models" below) |
 
-- Values (the `Value`, and `Sim.Params` `r=` / `c=` / `l=` / `dc=`) are numbers in KiCad's notation,
+- Sources take the `Sim.Params` of KiCad's source symbols (`Simulation_SPICE:VSIN`, `VPULSE`, ...),
+  in this order, each followed by `ac` and `ph`:
+
+  | `Sim.Type` | `Sim.Params` | Written |
+  |---|---|---|
+  | `SIN` | `dc ampl f td theta phase` | `DC <dc> SIN( ... )` (`dc` is also the offset) |
+  | `PULSE` | `y1 y2 td tr tf tw per np` | `PULSE( ... )` |
+  | `EXP` | `y1 y2 td1 tau1 td2 tau2` | `EXP( ... )` |
+  | `AM` | `vo vmo vma fm fc td phasem phasec` | `AM( ... )` |
+  | `SFFM` | `vo va fm mdi fc phasem phasec` | `SFFM( ... )` |
+  | `PWL` | `pwl="t1 v1 t2 v2 ..."` | `PWL( ... )` |
+
+  As in KiCad, the parameters before the last one given are written as `0` (which ngspice reads as
+  its default for times such as `tr` and `per`), and the ones after it are left out; `ac=1` writes
+  every parameter of the waveform. A `PULSE` without `per` and `np` is a single pulse
+  (`per` 0 and `np` 1), as KiCad means it (`doc/dev/spice_netlist_format.md` section 3.3). The noise
+  and random sources (`WHITENOISE`, `RANDUNIFORM`, ...) are not supported.
+- Values (the `Value`, and `Sim.Params` `r=` / `c=` / `l=` and the numbers of sources) are numbers in KiCad's notation,
   converted to SPICE's as KiCad does: SI prefixes with `M` for mega (`1M` -> `1Meg`; SPICE reads `M`
   as milli), the RKM code (`4k7` -> `4.7k`, `2R2` -> `2.2`), and an optional unit (`100nF`, `1kΩ`).
   Other text is an error (at compile time, or in `new` for `value: param`). The parameters of

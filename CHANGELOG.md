@@ -12,6 +12,9 @@ break the API).
 
 ### Added
 
+- `kicad_part!` converts the sources `Sim.Device` `V` / `I` with `Sim.Type` `SIN`, `PULSE`, `EXP`,
+  `AM`, `SFFM` and `PWL` (the symbols `Simulation_SPICE:VSIN`, `VPULSE`, ...), and `ac` / `ph` of
+  any source, as KiCad 10 writes them. A `PULSE` without `per` and `np` is a single pulse.
 - `KicadPartInfo::datasheet` and `description`, which `kicad_part!` takes from the symbol's
   `Datasheet` and `Description` fields. The KiCad netlist writes them as the `datasheet` and
   `description` of a component when set (a `~` datasheet is left out, as Eeschema does).
