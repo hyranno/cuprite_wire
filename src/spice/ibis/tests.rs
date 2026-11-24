@@ -147,6 +147,25 @@ fn test_model_selector() {
     assert_eq!(io, buffer("1"));
 }
 
+/// An input without `Vinl` and `Vinh` takes the defaults of the specification, noted; `[Model
+/// Spec]` still overrides one of them.
+#[test]
+fn test_default_thresholds() {
+    let ibs = parse(
+        "[IBIS Ver] 5.0\n[File Name] t.ibs\n\
+         [Model] in\nModel_type Input\nC_comp 1p NA NA\n[Voltage Range] 3.3 NA NA\n\
+         [Model Spec]\nVinh 1.7 NA NA\n[END]\n",
+    )
+    .unwrap();
+    let buffer = IbisBuffer::new(ibs.model("in").unwrap(), &Parasitics::NONE, Corner::Typ).unwrap();
+    let input = buffer.input().unwrap();
+    assert_eq!((input.threshold_low, input.threshold_high), (0.8, 1.7));
+    assert_eq!(
+        buffer.notes(),
+        ["the model lacks Vinl: the default 0.8 V of the specification is assumed"]
+    );
+}
+
 #[test]
 fn test_buffer() {
     let io = buffer("1");

@@ -172,6 +172,19 @@ impl IbisBuffer {
                 pull: None,
                 leakage: 0.0,
             });
+        let mut notes = subckt.notes;
+        if let Some((low, high)) = model.model_type.default_thresholds() {
+            for (name, spec, value, default) in [
+                ("Vinl", model.model_spec.vinl, model.vinl, low),
+                ("Vinh", model.model_spec.vinh, model.vinh, high),
+            ] {
+                if spec.is_none() && value.is_none() {
+                    notes.push(format!(
+                        "the model lacks {name}: the default {default} V of the specification is assumed"
+                    ));
+                }
+            }
+        }
         Ok(IbisBuffer {
             model_name: model.name.clone(),
             model_type: model.model_type,
@@ -179,7 +192,7 @@ impl IbisBuffer {
             name,
             text: subckt.text,
             edges: subckt.edges,
-            notes: subckt.notes,
+            notes,
             input,
         })
     }
@@ -257,15 +270,17 @@ impl IbisBuffer {
     }
 
     /// What of the model was left out, such as waveforms with an unsupported fixture
-    /// ([`cuprite_wire_ibis::spice::Subcircuit::notes`]).
+    /// ([`cuprite_wire_ibis::spice::Subcircuit::notes`]), or assumed, such as the default `Vinl`
+    /// and `Vinh` of an input without them.
     pub fn notes(&self) -> &[String] {
         &self.notes
     }
 
     /// The input thresholds of the model, to read levels from the voltage of the pin
     /// ([`InputCharacteristics::decode`]): `Vinl` and `Vinh` (of `[Model Spec]` at the corner if
-    /// given, [`Model::thresholds`]), with `C_comp` as the capacitance and no pull or leakage.
-    /// `None` if the model lacks `Vinl` or `Vinh`.
+    /// given, or else the defaults of the specification: [`Model::thresholds`], noted in
+    /// [`IbisBuffer::notes`]), with `C_comp` as the capacitance and no pull or leakage. `None` if
+    /// the model lacks `Vinl` or `Vinh` and its type has no default (outputs, ECL, differential).
     pub fn input(&self) -> Option<&InputCharacteristics> {
         self.input.as_ref()
     }

@@ -32,8 +32,9 @@ break the API).
   and `[Falling Waveform]`s (the weights solved from two waveforms into different fixtures, or
   from one with `ku + kd = 1`, as KiCad does), or else are linear from its `[Ramp]`.
   `[Model Selector]`s are read (`IbisFile::pin_model` takes the default or a chosen model),
-  `[Model Spec]` gives `Vinl`/`Vinh` by corner, and `Terminator` models (`[Rgnd]`, `[Rpower]`,
-  `[Rac]`, `[Cac]`) are written as receivers. ECL models are written as their single-ended
+  `[Model Spec]` gives `Vinl`/`Vinh` by corner (`Input`, `I/O` and `I/O_open_*` models without
+  them take the defaults of the specification, 0.8 V and 2.0 V), and `Terminator` models
+  (`[Rgnd]`, `[Rpower]`, `[Rac]`, `[Cac]`) are written as receivers. ECL models are written as their single-ended
   counterparts, `[Diff Pin]` and `[Series Pin Mapping]` are read, and
   `cuprite_wire_ibis::spice::series_subcircuit` writes the passive elements of a `Series` model.
   Checked against 20 IBIS files of real devices.

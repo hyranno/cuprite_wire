@@ -96,6 +96,14 @@ compared with KiCad's in the tests.
 - **`C_fixture`.** The current into the fixture is that of `R_fixture` to `V_fixture` plus
   `C_fixture * dV/dt`. Waveforms with `L_fixture`, `R_dut`, `L_dut` or `C_dut` other than 0 are not
   used and listed in `notes()`.
+- **Default `Vinl` / `Vinh`.** The specification (checked in versions 4.2, 5.0 and 8.0, the table
+  of the `[Model]` types) requires `Vinl` and `Vinh` of `Input`, `I/O` and `I/O_open_*` models and
+  assumes 0.8 V and 2.0 V, with a warning of the parser, when they are missing.
+  `Model::thresholds` falls back to them (`ModelType::default_thresholds`) and `IbisBuffer::notes()`
+  lists each default used. `[Model Spec]` `Vinl` / `Vinh` override those of `[Model]`, so they take
+  precedence over the defaults too. `Input_ECL` and `I/O_ECL` get no default: versions 4.2 and 5.0
+  give -1.475 V and -1.165 V, while 8.0 repeats 0.8 V and 2.0 V, which looks like a copying error.
+  Differential types get none either (`vdiff` of `[Diff Pin]` replaces the thresholds).
 - **XSPICE file references are absolute.** A file parameter of a code model in a copied `.subckt`
   (`sim_model: inline`) is made absolute, because ngspice opens it relative to its working directory (`doc/dev/spice_netlist_format.md`
   section 5).
@@ -106,7 +114,7 @@ compared with KiCad's in the tests.
 |---|---|---|---|
 | 1 | Actual output of KiCad 10.0 `kicad-cli sch export netlist --format spice` on copies of `demos/simulation/ibis` | Section 1 | The output itself is not reproduced. |
 | 2 | ngspice 44.2, runs of decks written for this project | Section 3 | The tests and results are this project's own. |
-| 3 | IBIS Specification (up to version 7), IBIS Open Forum <https://ibis.org/> | Keywords, the weights of the waveforms | IBIS Open Forum; text is not reproduced |
+| 3 | IBIS Specification (up to version 8.0), IBIS Open Forum <https://ibis.org/> | Keywords, the weights of the waveforms, the default thresholds | IBIS Open Forum; text is not reproduced |
 | 4 | eda-ibis-parser (Python) | Read for reference only | MIT |
 
 ### License notes

@@ -450,10 +450,16 @@ pub struct SeriesElements {
 
 impl Model {
     /// The input thresholds (low, high) at the corner: `Vinl` and `Vinh` of `[Model Spec]`, or
-    /// else of the model. `None` if either is missing.
+    /// else of the model, or else the defaults of the specification for the model type
+    /// ([`ModelType::default_thresholds`]). `None` if one is still missing.
     pub fn thresholds(&self, corner: Corner) -> Option<(f64, f64)> {
-        let low = self.model_spec.vinl.map(|v| v.get(corner)).or(self.vinl)?;
-        let high = self.model_spec.vinh.map(|v| v.get(corner)).or(self.vinh)?;
+        let default = self.model_type.default_thresholds();
+        let low = (self.model_spec.vinl.map(|v| v.get(corner)))
+            .or(self.vinl)
+            .or(default.map(|d| d.0))?;
+        let high = (self.model_spec.vinh.map(|v| v.get(corner)))
+            .or(self.vinh)
+            .or(default.map(|d| d.1))?;
         Some((low, high))
     }
 }
@@ -517,6 +523,18 @@ pub enum ModelType {
 }
 
 impl ModelType {
+    /// The thresholds (`Vinl`, `Vinh`) that the specification assumes when a model of the type
+    /// lacks them: 0.8 V and 2.0 V for `Input`, `I/O` and `I/O_open_*` (which must have them, so
+    /// a parser warns). `None` for the other types, including `Input_ECL` and `I/O_ECL`, whose
+    /// defaults differ between versions of the specification.
+    pub fn default_thresholds(self) -> Option<(f64, f64)> {
+        use ModelType::*;
+        match self {
+            Input | Io | IoOpenDrain | IoOpenSink | IoOpenSource => Some((0.8, 2.0)),
+            _ => None,
+        }
+    }
+
     const NAMES: [(&str, ModelType); 21] = [
         ("Input", ModelType::Input),
         ("Output", ModelType::Output),
