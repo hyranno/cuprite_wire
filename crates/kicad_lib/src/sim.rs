@@ -4,7 +4,8 @@
 //! - no `Sim.*` fields: R, C and L inferred from the reference prefix, with the value as is;
 //!   other symbols are not simulated (unsupported, not an error);
 //! - `exclude_from_sim` / `Sim.Enable 0`: excluded from the simulation;
-//! - `Sim.Device` `R` `C` `L`, `V` `I` (`Sim.Type DC`), `D`, `NPN` `PNP` (Gummel-Poon),
+//! - `Sim.Device` `R` `C` `L`, `V` `I` (`Sim.Type` `DC` `SIN` `PULSE` `EXP` `AM` `SFFM` `PWL`),
+//!   `D`, `NPN` `PNP` (Gummel-Poon),
 //!   `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges), with built-in model
 //!   parameters (`Sim.Params`) or a library model (`Sim.Library` + `Sim.Name`);
 //! - `Sim.Device SUBCKT` with `Sim.Library` + `Sim.Name` (+ `Sim.Params`);
@@ -73,9 +74,10 @@ pub struct ElementDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Args {
     Fixed(String),
-    /// `prefix` followed by the value given when the part is created.
+    /// The value given when the part is created, between `prefix` and `suffix`.
     Value {
         prefix: String,
+        suffix: String,
     },
 }
 
@@ -127,13 +129,20 @@ pub fn spice_def(input: &SimInput, resolver: &mut Resolver) -> Result<SpiceDef, 
         library: symbol.property("Sim.Library").filter(|l| !l.is_empty()),
         model_name: symbol.property("Sim.Name").filter(|n| !n.is_empty()),
     };
+    for (name, value) in &fields.params {
+        // `pwl` of the sources is a list of numbers, each checked by `pwl_points`.
+        if !(matches!(fields.device.as_str(), "V" | "I") && name.eq_ignore_ascii_case("pwl")) {
+            check_param_value(name, value)?;
+        }
+    }
     if fields.device == "IBIS" {
         return Ok(SpiceDef::Ibis(Box::new(ibis::from_fields(
             symbol, &fields, resolver,
         )?)));
     }
     let elements = match fields.device.as_str() {
-        "R" | "C" | "L" | "V" | "I" => passive_or_source(input, &fields)?,
+        "R" | "C" | "L" => passive(input, &fields)?,
+        "V" | "I" => source(input, &fields)?,
         "D" | "NPN" | "PNP" | "NMOS" | "PMOS" | "NJFET" | "PJFET" => {
             semiconductor(input, &fields, resolver)?
         }
@@ -164,33 +173,23 @@ impl SimFields<'_> {
     }
 }
 
-/// `Sim.Device` `R` `C` `L`, and `V` `I` with `Sim.Type DC`: the value, or the one parameter.
-fn passive_or_source(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
+/// `Sim.Device` `R` `C` `L`: the value, or the one parameter.
+fn passive(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
     let device = &fields.device;
     let letter = device.chars().next().unwrap();
-    let source = matches!(letter, 'V' | 'I');
     if fields.library.is_some() {
         return Err(Error::new(format!(
             "Sim.Library for Sim.Device {device} is not supported"
         )));
     }
-    match fields.sim_type.as_deref() {
-        None => {}
-        Some("DC") if source => {}
-        Some(_) => return Err(fields.unsupported_type()),
+    if fields.sim_type.is_some() {
+        return Err(fields.unsupported_type());
     }
-    let key = if source {
-        "dc"
-    } else {
-        &device.to_ascii_lowercase()
-    };
-    let prefix = if source { "DC " } else { "" };
+    let key = device.to_ascii_lowercase();
     let args = match fields.params.as_slice() {
-        [] => value_args(input.value, letter, prefix)?,
-        [(name, value)] if name.eq_ignore_ascii_case(key) => {
-            let value = value::to_spice(value, letter)
-                .ok_or_else(|| Error::new(format!("Sim.Params {name}={value} is not a number")))?;
-            Args::Fixed(format!("{prefix}{value}"))
+        [] => value_args(input.value, letter, "", "")?,
+        [(name, value)] if name.eq_ignore_ascii_case(&key) => {
+            Args::Fixed(param_value(name, value, letter)?)
         }
         _ => {
             return Err(Error::new(format!(
@@ -201,6 +200,143 @@ fn passive_or_source(input: &SimInput, fields: &SimFields) -> Result<Elements, E
     };
     let (nodes, unused) = map_pins(input.symbol, &["+", "-"])?;
     Ok(element(letter, nodes, args, Vec::new(), unused))
+}
+
+/// The `Sim.Type`s of the sources `V` and `I`: the SPICE function and its parameters in order.
+/// All of them are followed by `ac` and `ph` (the AC magnitude and phase).
+const SOURCE_TYPES: &[(&str, &str, &[&str])] = &[
+    ("DC", "", &["dc"]),
+    ("SIN", "SIN", &["dc", "ampl", "f", "td", "theta", "phase"]),
+    (
+        "PULSE",
+        "PULSE",
+        &["y1", "y2", "td", "tr", "tf", "tw", "per", "np"],
+    ),
+    ("EXP", "EXP", &["y1", "y2", "td1", "tau1", "td2", "tau2"]),
+    (
+        "AM",
+        "AM",
+        &["vo", "vmo", "vma", "fm", "fc", "td", "phasem", "phasec"],
+    ),
+    (
+        "SFFM",
+        "SFFM",
+        &["vo", "va", "fm", "mdi", "fc", "phasem", "phasec"],
+    ),
+    ("PWL", "PWL", &["pwl"]),
+];
+
+/// The parameters in volts or amperes, which may have the unit `V` or `A`.
+const SOURCE_LEVELS: &[&str] = &["dc", "ampl", "y1", "y2", "vo", "vmo", "vma", "va", "ac"];
+
+/// `Sim.Device` `V` `I`: `DC <dc>` or a waveform function of `Sim.Type`, then `AC <ac> <ph>`.
+///
+/// Written as KiCad 10 writes them (`doc/dev/spice_netlist_format.md` section 3.3): the parameters
+/// before the last one given default to `0`, and the ones after it are left out.
+fn source(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
+    let device = &fields.device;
+    let letter = device.chars().next().unwrap();
+    if fields.library.is_some() {
+        return Err(Error::new(format!(
+            "Sim.Library for Sim.Device {device} is not supported"
+        )));
+    }
+    let sim_type = fields.sim_type.as_deref().unwrap_or("DC");
+    let &(_, function, wave) = SOURCE_TYPES
+        .iter()
+        .find(|(name, _, _)| *name == sim_type)
+        .ok_or_else(|| fields.unsupported_type())?;
+    let names: Vec<&str> = wave.iter().copied().chain(["ac", "ph"]).collect();
+    let mut values: Vec<Option<String>> = vec![None; names.len()];
+    for (name, value) in &fields.params {
+        let index = names
+            .iter()
+            .position(|known| known.eq_ignore_ascii_case(name))
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "Sim.Params {name} of Sim.Type {sim_type} is not supported (its parameters are {})",
+                    names.join(" ")
+                ))
+            })?;
+        if values[index].is_some() {
+            return Err(Error::new(format!("Sim.Params {name} is given twice")));
+        }
+        values[index] = Some(if names[index] == "pwl" {
+            pwl_points(value, letter)?
+        } else {
+            let unit = if SOURCE_LEVELS.contains(&names[index]) {
+                letter
+            } else {
+                ' '
+            };
+            param_value(name, value, unit)?
+        });
+    }
+    if sim_type == "PULSE" && values[6].is_none() && values[7].is_none() {
+        // A single pulse, as KiCad: ngspice 46 repeats a pulse without `per`.
+        values[6] = Some("0".into());
+        values[7] = Some("1".into());
+    }
+    // `dc` of a DC source defaults to the value instead.
+    let dc_from_value = function.is_empty() && values[0].is_none();
+    let given = values
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |i| i + 1);
+    let values: Vec<String> = values[..given]
+        .iter()
+        .map(|value| value.clone().unwrap_or_else(|| "0".into()))
+        .collect();
+    let ac = match values.get(wave.len()..).unwrap_or_default() {
+        [] => String::new(),
+        [ac] => format!(" AC {ac}"),
+        [ac, ph] => format!(" AC {ac} {ph}"),
+        _ => unreachable!(),
+    };
+    let wave_values = &values[..given.min(wave.len())];
+    let args = if function.is_empty() {
+        if dc_from_value {
+            value_args(input.value, letter, "DC ", &ac)?
+        } else {
+            Args::Fixed(format!("DC {}{ac}", wave_values[0]))
+        }
+    } else {
+        if fields.params.is_empty() {
+            return Err(Error::new(format!(
+                "Sim.Type {sim_type} of Sim.Device {device} needs Sim.Params"
+            )));
+        }
+        // SIN's offset `dc` is also the DC value.
+        let dc = match (sim_type, wave_values.first()) {
+            ("SIN", Some(dc)) => format!("DC {dc} "),
+            _ => String::new(),
+        };
+        Args::Fixed(format!("{dc}{function}( {} ){ac}", wave_values.join(" ")))
+    };
+    let (nodes, unused) = map_pins(input.symbol, &["+", "-"])?;
+    Ok(element(letter, nodes, args, Vec::new(), unused))
+}
+
+/// A number of `Sim.Params` in KiCad's notation, converted to SPICE's (with the unit of `device`).
+fn param_value(name: &str, value: &str, device: char) -> Result<String, Error> {
+    value::to_spice(value, device)
+        .ok_or_else(|| Error::new(format!("Sim.Params {name}={value} is not a number")))
+}
+
+/// The `pwl` parameter: pairs of time and value, numbers in KiCad's notation.
+fn pwl_points(text: &str, device: char) -> Result<String, Error> {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    if tokens.is_empty() || !tokens.len().is_multiple_of(2) {
+        return Err(Error::new(format!(
+            "Sim.Params pwl={text:?} is not pairs of time and value"
+        )));
+    }
+    let points = tokens
+        .iter()
+        .enumerate()
+        .map(|(i, token)| param_value("pwl", token, if i.is_multiple_of(2) { ' ' } else { device }))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(points.join(" "))
 }
 
 /// Diodes and transistors: a built-in model with `Sim.Params`, or a library model.
@@ -297,7 +433,7 @@ fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
     if input.symbol.pins.len() != 2 {
         return Ok(SpiceDef::Unsupported);
     }
-    let args = value_args(input.value, letter, "")?;
+    let args = value_args(input.value, letter, "", "")?;
     let nodes = input
         .symbol
         .pins
@@ -314,15 +450,16 @@ fn inferred(input: &SimInput) -> Result<SpiceDef, Error> {
 }
 
 /// The arguments for the value of the part (in KiCad's notation, converted to SPICE).
-fn value_args(value: &Value, device: char, prefix: &str) -> Result<Args, Error> {
+fn value_args(value: &Value, device: char, prefix: &str, suffix: &str) -> Result<Args, Error> {
     match value {
         Value::Param => Ok(Args::Value {
             prefix: prefix.to_string(),
+            suffix: suffix.to_string(),
         }),
         Value::Fixed(value) => {
             let spice = value::try_to_spice(value, device)
                 .map_err(|e| Error::new(format!("{e}; use `value: param` or a numeric value")))?;
-            Ok(Args::Fixed(format!("{prefix}{spice}")))
+            Ok(Args::Fixed(format!("{prefix}{spice}{suffix}")))
         }
     }
 }
@@ -479,7 +616,6 @@ fn parse_params(text: &str) -> Result<Vec<(String, String)>, Error> {
                 chars.next();
             }
         }
-        check_param_value(&name, &value)?;
         params.push((name, value));
     }
 }
@@ -507,7 +643,7 @@ mod tests {
     pub(super) fn props(props: &[(&str, &str)]) -> String {
         props
             .iter()
-            .map(|(k, v)| format!("(property \"{k}\" \"{v}\")"))
+            .map(|(k, v)| format!("(property \"{k}\" \"{}\")", v.replace('"', "\\\"")))
             .collect()
     }
 
@@ -551,7 +687,10 @@ mod tests {
                     device: 'R',
                     suffix: String::new(),
                     nodes: strings(&["1", "2"]),
-                    args: Args::Value { prefix: "".into() },
+                    args: Args::Value {
+                        prefix: "".into(),
+                        suffix: "".into(),
+                    },
                     models: vec![],
                     dialect: Dialect::Ngspice,
                     info: None,
@@ -649,6 +788,124 @@ mod tests {
         assert_eq!(
             error(&[("Sim.Device", "D"), ("Sim.Params", "rs=1;x")]),
             "the value \"1;x\" of rs cannot be written in a deck"
+        );
+    }
+
+    /// The forms of the sources, as kicad-cli 10.0.8 writes them (except for the PULSE marked).
+    #[test]
+    fn test_source_waveforms() {
+        let args = |device: &str, sim_type: &str, params: &str, value: Value| {
+            let s = symbol(
+                &props(&[
+                    ("Sim.Device", device),
+                    ("Sim.Type", sim_type),
+                    ("Sim.Params", params),
+                ]),
+                &[("1", "~"), ("2", "~")],
+            );
+            convert(&s, "V", value, &mut fixture_resolver()).map(|def| single(def).0.args)
+        };
+        let fixed = |device: &str, sim_type: &str, params: &str| match args(
+            device,
+            sim_type,
+            params,
+            Value::Fixed("2.345".into()),
+        )
+        .unwrap()
+        {
+            Args::Fixed(text) => text,
+            args => panic!("{args:?}"),
+        };
+        // The symbols of Simulation_SPICE.
+        assert_eq!(
+            fixed("V", "SIN", "dc=0 ampl=1 f=1k ac=1"),
+            "DC 0 SIN( 0 1 1k 0 0 0 ) AC 1"
+        );
+        assert_eq!(
+            fixed("I", "PULSE", "y1=0 y2=1 td=2n tr=2n tf=2n tw=50n per=100n"),
+            "PULSE( 0 1 2n 2n 2n 50n 100n )"
+        );
+        assert_eq!(
+            fixed("V", "EXP", "y1=0 y2=1 td1=2n tau1=30n td2=60n tau2=40n"),
+            "EXP( 0 1 2n 30n 60n 40n )"
+        );
+        assert_eq!(
+            fixed(
+                "V",
+                "PWL",
+                r#"pwl="0 -1 50n -1 51n 0 97n 1 171n -1 200n -1""#
+            ),
+            "PWL( 0 -1 50n -1 51n 0 97n 1 171n -1 200n -1 )"
+        );
+        assert_eq!(
+            fixed(
+                "I",
+                "AM",
+                "vo=1 vmo=2 vma=3 fm=4 fc=5 td=6 phasem=7 phasec=8"
+            ),
+            "AM( 1 2 3 4 5 6 7 8 )"
+        );
+        assert_eq!(
+            fixed("I", "SFFM", "vo=1 va=2 fm=3 mdi=4 fc=5 phasem=6 phasec=7"),
+            "SFFM( 1 2 3 4 5 6 7 )"
+        );
+        // Parameters before the last one given are 0, the ones after it are left out.
+        assert_eq!(fixed("V", "SIN", "AMPL=1 F=1k"), "DC 0 SIN( 0 1 1k )");
+        assert_eq!(fixed("V", "EXP", "tau2=3"), "EXP( 0 0 0 0 0 3 )");
+        assert_eq!(
+            fixed("V", "SIN", "ampl=1 ph=30"),
+            "DC 0 SIN( 0 1 0 0 0 0 ) AC 0 30"
+        );
+        // Numbers in KiCad's notation.
+        assert_eq!(fixed("V", "EXP", "y1=1M y2=4k7V"), "EXP( 1Meg 4.7k )");
+        assert_eq!(
+            fixed("V", "PWL", r#"pwl="0 0 1M 2M""#),
+            "PWL( 0 0 1Meg 2Meg )"
+        );
+        // A single pulse without `per` and `np`. KiCad 10.0.8 appends `0 1` after the parameters
+        // given (`PULSE( 0 1 0 1 )`, so `td` 0 and `tr` 1), which is not what it means.
+        assert_eq!(fixed("V", "PULSE", "y1=0 y2=1"), "PULSE( 0 1 0 0 0 0 0 1 )");
+        assert_eq!(fixed("V", "PULSE", "y2=1 np=3"), "PULSE( 0 1 0 0 0 0 0 3 )");
+        // DC: `dc`, or the value, with AC.
+        assert_eq!(fixed("V", "DC", "dc=1M ac=2 ph=3"), "DC 1Meg AC 2 3");
+        assert_eq!(fixed("I", "", "ph=2"), "DC 2.345 AC 0 2");
+        assert_eq!(fixed("I", "DC", ""), "DC 2.345");
+        assert_eq!(
+            args("V", "DC", "ac=1", Value::Param).unwrap(),
+            Args::Value {
+                prefix: "DC ".into(),
+                suffix: " AC 1".into()
+            }
+        );
+
+        let error = |device: &str, sim_type: &str, params: &str| {
+            args(device, sim_type, params, Value::Param)
+                .unwrap_err()
+                .to_string()
+        };
+        assert_eq!(
+            error("V", "SIN", ""),
+            "Sim.Type SIN of Sim.Device V needs Sim.Params"
+        );
+        assert_eq!(
+            error("V", "SIN", "freq=1k"),
+            "Sim.Params freq of Sim.Type SIN is not supported (its parameters are dc ampl f td theta phase ac ph)"
+        );
+        assert_eq!(
+            error("V", "SIN", "f=1k f=2k"),
+            "Sim.Params f is given twice"
+        );
+        assert_eq!(
+            error("V", "SIN", "f={x}"),
+            "Sim.Params f={x} is not a number"
+        );
+        assert_eq!(
+            error("V", "PWL", r#"pwl="0 0 1u""#),
+            "Sim.Params pwl=\"0 0 1u\" is not pairs of time and value"
+        );
+        assert_eq!(
+            error("V", "WHITENOISE", "rms=1"),
+            "Sim.Type \"WHITENOISE\" of Sim.Device V is not supported"
         );
     }
 
@@ -799,7 +1056,6 @@ mod tests {
                 ("b".to_string(), "2k".to_string())
             ]
         );
-        assert!(parse_params("type=\\").is_err());
         assert!(parse_params("a").is_err());
     }
 }

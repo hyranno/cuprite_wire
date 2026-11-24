@@ -462,13 +462,14 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
     let nodes = &element.nodes;
     let args = match &element.args {
         Args::Fixed(text) => quote!(#text),
-        Args::Value { prefix } => quote! {
+        Args::Value { prefix, suffix } => quote! {
             ::std::format!(
-                "{}{}",
+                "{}{}{}",
                 #prefix,
                 // Checked by `new`.
                 #krate::spice::spice_value(#device, &self.value)
-                    .unwrap_or_else(|error| ::core::panic!("{}", error))
+                    .unwrap_or_else(|error| ::core::panic!("{}", error)),
+                #suffix
             )
         },
     };

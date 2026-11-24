@@ -137,6 +137,43 @@ the RKM code (`r=4k7` stays `4k7`, which ngspice reads as 4k). Text it cannot pa
 so values like `100uF;16V` appear in its output; ngspice happens to accept them (`;16V` is an inline
 comment and the `F` after the suffix is ignored), but cuprite_wire emits clean numeric values.
 
+#### Sources (`Sim.Device` `V` / `I`)
+
+Observed with kicad-cli 10.0.8 by editing the `Sim.*` fields of the sources in a copy of
+`demos/simulation/v_i_sources` and exporting it (`kicad-cli sch export netlist --format spice`);
+the rules match `SPICE_GENERATOR_SOURCE::ItemLine` and `SIM_MODEL_SOURCE::doSetParamValue` in
+`eeschema/sim/sim_model_source.cpp` (read for reference only; KiCad is GPL-3.0).
+
+- Each `Sim.Type` has a fixed list of parameters, followed by `ac` and `ph`:
+  `DC` `dc`; `SIN` `dc ampl f td theta phase`; `PULSE` `y1 y2 td tr tf tw per np`;
+  `EXP` `y1 y2 td1 tau1 td2 tau2`; `AM` `vo vmo vma fm fc td phasem phasec`;
+  `SFFM` `vo va fm mdi fc phasem phasec`; `PWL` `pwl` (a quoted list of time/value pairs).
+  An unknown parameter name makes KiCad give up and write `Sim.Params` as is after the nodes
+  (`V9 n GND freq=1k`), which ngspice rejects. Names are case-insensitive, `Sim.Type` is not
+  (`pulse` is not found). A parameter given twice: the last one wins.
+- Setting a parameter fills every empty parameter before it with `0` (with the default of the
+  parameter being set when that is a number, which is `0` for all of the above), and the
+  parameters after the last one given are left out: `ampl=2 f=1k` gives `SIN( 0 2 1k )`,
+  `tau2=3` gives `EXP( 0 0 0 0 0 3 )`, and `ac=1` fills the whole waveform.
+- Written: `DC <dc> ` when `dc` is set (for `SIN`, where `dc` is also the offset, whenever any
+  parameter is given), then `<FUNC>( <values> ) ` with the values set, then `AC <ac> <ph>` when
+  `ac` is set (so `ph=30` alone gives `AC 0 30`). `DC` without `dc` takes the `Value` field
+  (`DC 2.345 AC 0 2` for `ph=2`), copied as is when it is not a number (`DC VTRRANDOM`).
+  Without parameters a waveform is empty (`SIN( )`), which ngspice cannot read.
+- `PULSE` without `per` and `np` (KiCad 10, for ngspice 46, whose default `per` turns one pulse into
+  a train): KiCad appends `0 1` (per 0, np 1) after the values set. With fewer than six values set
+  they land on the wrong parameters (`y1=3` gives `PULSE( 3 0 1 )`, `td` 1), and a filled `per`
+  (`ac=1`) counts as set (`PULSE( 0 1 0 0 0 0 0 0 ) AC 1`). cuprite_wire writes what KiCad means:
+  the values up to `tw` and `0 1` whenever neither `per` nor `np` is given.
+- ngspice 44.2 reads `0` for `tr`, `tf`, `pw`, `per` of `PULSE` as their defaults (`tstep`,
+  `tstop`), and accepts the eighth `np`.
+- Numbers get the SI prefixes converted (`1M` -> `1Meg`) but not the RKM code (`4k7` stays), as for
+  other `Sim.Params`; `PWL` values are converted one by one, and `{...}` expressions are kept.
+- The noise and random types (`WHITENOISE` -> `TRNOISE( rms dt 0 0 0 0 0 )`, `PINKNOISE`,
+  `BURSTNOISE`, `RANDUNIFORM` / `RANDGAUSSIAN` / `RANDEXP` / `RANDPOISSON` -> `TRRANDOM( <n> ... )`)
+  are written from named parameters with their own defaults; cuprite_wire does not support them.
+  The library's `VAM` / `VSFFM` / `IAM` / `ISFFM` symbols use `Sim.Device SPICE`, not these types.
+
 ## 4. Nodes (nets)
 
 - Node names are arbitrary tokens. KiCad uses the net names of the `.net` export

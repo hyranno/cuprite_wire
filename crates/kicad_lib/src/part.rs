@@ -682,7 +682,10 @@ mod tests {
                     device: 'R',
                     suffix: String::new(),
                     nodes: strings(&["1", "2"]),
-                    args: Args::Value { prefix: "".into() },
+                    args: Args::Value {
+                        prefix: "".into(),
+                        suffix: "".into(),
+                    },
                     models: vec![],
                     dialect: Dialect::Ngspice,
                     info: None,

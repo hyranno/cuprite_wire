@@ -102,6 +102,39 @@ kicad_part! {
     }
 }
 
+kicad_part! {
+    /// A sine source (Sim.Params `dc=0 ampl=1 f=1k ac=1`).
+    struct Vsin {
+        symbol: "Simulation_SPICE:VSIN",
+        footprint: none,
+    }
+}
+
+kicad_part! {
+    /// A pulse source (Sim.Params `y1=0 y2=1 td=2n tr=2n tf=2n tw=50n per=100n`).
+    struct Ipulse {
+        symbol: "Simulation_SPICE:IPULSE",
+        footprint: none,
+    }
+}
+
+kicad_part! {
+    /// A piecewise linear source.
+    struct Vpwl {
+        symbol: "Simulation_SPICE:VPWL",
+        footprint: none,
+    }
+}
+
+kicad_part! {
+    /// A DC source (`Sim.Type DC`, no Sim.Params): the value.
+    struct Vdc {
+        symbol: "Simulation_SPICE:VDC",
+        footprint: none,
+        value: param,
+    }
+}
+
 /// A circuit using every part: an op-amp stage driving a transistor, a diode and a MOSFET.
 fn circuit() -> CircuitBuilder {
     let mut c = CircuitBuilder::new();
@@ -259,4 +292,51 @@ fn test_golden_duplicate_pins() {
         "kicad_libraries_duplicate_pins.net",
         &String::from_utf8(out).unwrap(),
     );
+}
+
+/// The sources of Simulation_SPICE are written as kicad-cli writes them, and simulate.
+#[test]
+fn test_sources() {
+    let mut c = CircuitBuilder::new();
+    let sin = c.instantiate_part(Named("sin", Vsin));
+    let pulse = c.instantiate_part(Named("pulse", Ipulse));
+    let pwl = c.instantiate_part(Named("pwl", Vpwl));
+    let dc = c.instantiate_part(Named("dc", Vdc::new("2.5")));
+    for (name, source) in [("SIN", &sin), ("PULSE", &pulse), ("PWL", &pwl), ("DC", &dc)] {
+        let r = c.instantiate_part(Named(&format!("r_{name}"), Resistor::new("1k")));
+        c.label(source["1"], NetLabel::local(name));
+        c.connect(source["1"], r["1"]);
+        c.label(source["2"], NetLabel::global("GND"));
+        c.label(r["2"], NetLabel::global("GND"));
+    }
+    let deck = deck_of(&c);
+    let text = deck.to_string();
+    for line in [
+        "V1 /SIN 0 DC 0 SIN( 0 1 1k 0 0 0 ) AC 1",
+        "I1 /PULSE 0 PULSE( 0 1 2n 2n 2n 50n 100n )",
+        "V2 /PWL 0 PWL( 0 -1 50n -1 51n 0 97n 1 171n -1 200n -1 )",
+        "V3 /DC 0 DC 2.5",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{line}\n{text}");
+    }
+    let deck = deck.control([
+        "tran 1n 300n",
+        r#"meas tran sin find v("/SIN") at=250n"#,
+        r#"meas tran pulse find v("/PULSE") at=130n"#,
+        r#"meas tran pwl find v("/PWL") at=97n"#,
+        r#"meas tran dc find v("/DC") at=100n"#,
+        "print sin pulse pwl dc",
+    ]);
+    let sim = deck.run().unwrap();
+    // The current of 1 A flows from + through the source to -, so the pulse is -1 kV across R.
+    let sin = (2.0 * std::f64::consts::PI * 1e3 * 250e-9).sin();
+    let expect = [("sin", sin), ("pulse", -1000.0), ("pwl", 1.0), ("dc", 2.5)];
+    for (name, value) in expect {
+        let actual = sim.expect_value(name);
+        assert!(
+            (actual - value).abs() < 1e-6 * value.abs().max(1.0),
+            "{name} = {actual}\n{}",
+            sim.log()
+        );
+    }
 }
