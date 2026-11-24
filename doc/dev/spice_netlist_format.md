@@ -308,6 +308,12 @@ Notes (verified with ngspice 44.2):
 - `meas ... WHEN` takes a vector or `vdb(<node>)`, not an expression like `db(v("/out"))`
   (`Error: no such vector as db(v("/out"))`).
 - `write` without a file writes `rawspice.raw` in the working directory.
+- `vp(<node>)` and `vdb(<node>)` take a node, not a vector: `vp(v("/out"))` fails with
+  `Error: bad v() syntax`. `vp()` and `ph()` are wrapped to -π..π (radians unless `set units=degrees`);
+  `cph()` is continuous (three RC stages reach -4.7 rad). `group_delay(<vector>)` is `-dφ/dω` in
+  seconds; it matches a second-order central difference within 1 % inside the scale (50 points
+  per decade), but takes a cruder difference at the ends (it was negative at the last point of
+  three RC stages).
 - `wrdata` after a `tran` with a `tstart` writes only the points from `tstart` on. With `uic` and no initial conditions, the first point of an RC low-pass driven by
   1 V DC through 10 kΩ is 1e-4 V at the capacitor, not exactly 0.
 - A lossless transmission line (`T1 p1 n1 p2 n2 z0=50 td=1n`) does not limit the time step by
