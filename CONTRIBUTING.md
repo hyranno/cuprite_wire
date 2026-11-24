@@ -87,6 +87,7 @@ review, not rules.
 | [`doc/dev/kicad_bom_format.md`](doc/dev/kicad_bom_format.md) | the BOM (CSV) of `kicad-cli sch export bom`, as observed in KiCad 10 |
 | [`doc/dev/spice_netlist_format.md`](doc/dev/spice_netlist_format.md) | the SPICE netlist format and ngspice's behavior |
 | [`doc/dev/ibis.md`](doc/dev/ibis.md) | KiCad's IBIS conversion, how to reproduce it, and the design of the IBIS support |
+| [`doc/dev/design.md`](doc/dev/design.md) | design decisions about the API: what belongs to part types and what to instance overrides |
 | [`doc/dev/verifying.md`](doc/dev/verifying.md) | the tests and the scripts in `tools/` that check the output against KiCad and ngspice |
 
 The user documentation is listed in [`README.md`](README.md#documentation).

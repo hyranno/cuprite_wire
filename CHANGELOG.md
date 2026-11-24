@@ -12,9 +12,6 @@ break the API).
 
 ### Added
 
-- `kicad_part!` takes `spice: custom`: the generated `spice()` returns the SPICE description the
-  type's implementation of the new trait `cuprite_wire::spice::CustomSpice` writes by hand, for
-  symbols without a model, or with one the macro cannot convert.
 - `KicadPartInfo::datasheet` and `description`, which `kicad_part!` takes from the symbol's
   `Datasheet` and `Description` fields. The KiCad netlist writes them as the `datasheet` and
   `description` of a component when set (a `~` datasheet is left out, as Eeschema does).
@@ -30,10 +27,12 @@ break the API).
   Eeschema writes a pin with a no-connect flag.
 - `Netlist::to_spice_with` takes `SpiceOptions`, whose `ground_net(..)` connects more nets (e.g.
   `AGND`) to the SPICE ground besides `GND` and `0`. `to_spice()` is unchanged.
-- `cuprite_wire::parts::PartExt` overrides the value, footprint, fields and flags of a part
-  instance without writing a new part: `part.dnp()`, `exclude_from_bom()`,
-  `exclude_from_board()`, `with_value(..)`, `with_footprint(..)` and `with_field(..)` return an
-  `Overridden` part (chainable), so parts from `kicad_part!` can be marked DNP for the BOM.
+- `cuprite_wire::parts::PartExt` overrides the value, footprint, fields, flags and SPICE
+  description of a part instance without writing a new part: `part.dnp()`, `exclude_from_bom()`,
+  `exclude_from_board()`, `with_value(..)`, `with_footprint(..)`, `with_field(..)` and
+  `with_spice(..)` return an `Overridden` part (chainable), so parts from `kicad_part!` can be
+  marked DNP for the BOM, or simulated with a hand-written description when the macro cannot
+  convert their model.
 - `KicadNetlist::bom` makes a bill of materials (`cuprite_wire::kicad::KicadBom`) and writes it
   as CSV in the format of `kicad-cli sch export bom`: components excluded from the BOM are left
   out, equal components are grouped into one row with reference ranges (`R1-R5`), and DNP

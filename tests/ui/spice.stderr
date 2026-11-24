@@ -1,26 +1,5 @@
-error: cannot simulate test:R (use `spice: none` or `spice: excluded` to skip, or `spice: custom` to write it): the value "R" is not a number (like 10k, 4k7 or 1M for mega); use `value: param` or a numeric value
+error: cannot simulate test:R (use `spice: none` or `spice: excluded` to skip): the value "R" is not a number (like 10k, 4k7 or 1M for mega); use `value: param` or a numeric value
  --> tests/ui/spice.rs:4:17
   |
 4 |         symbol: "test:R",
   |                 ^^^^^^^^
-
-error: `sim` gives a model, so the part cannot be `spice: none`, `excluded` or `custom`
-  --> tests/ui/spice.rs:31:16
-   |
-31 |         spice: custom,
-   |                ^^^^^^
-
-error[E0277]: `NoCustomSpice` is generated with `spice: custom`, but does not implement `CustomSpice`
-  --> tests/ui/spice.rs:23:16
-   |
-23 |         spice: custom,
-   |                ^^^^^^ `spice()` calls `CustomSpice::custom_spice`
-   |
-help: the trait `CustomSpice` is not implemented for `NoCustomSpice`
-  --> tests/ui/spice.rs:19:1
-   |
-19 | / cuprite_wire::kicad_part! {
-20 | |     struct NoCustomSpice {
-   | |________________________^
-   = note: implement `cuprite_wire::spice::CustomSpice` for `NoCustomSpice` to give its SPICE description
-   = note: this error originates in the macro `cuprite_wire::kicad_part` (in Nightly builds, run with -Z macro-backtrace for more info)

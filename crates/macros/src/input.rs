@@ -249,13 +249,10 @@ impl Parse for PartInput {
                     }
                     KicadPartKey::Kicad(KicadKey::Spice) => {
                         options.spice =
-                            match keyword(content, &["auto", "none", "excluded", "custom"])?
-                                .as_str()
-                            {
+                            match keyword(content, &["auto", "none", "excluded"])?.as_str() {
                                 "auto" => SpiceOption::Auto,
                                 "none" => SpiceOption::None,
-                                "excluded" => SpiceOption::Excluded,
-                                _ => SpiceOption::Custom,
+                                _ => SpiceOption::Excluded,
                             };
                         Some(OptionKey::Spice)
                     }

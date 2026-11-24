@@ -15,22 +15,4 @@ cuprite_wire::kicad_part! {
     }
 }
 
-// Writing it by hand needs `CustomSpice`.
-cuprite_wire::kicad_part! {
-    struct NoCustomSpice {
-        symbol: "test:R",
-        footprint: "test:R_0603",
-        spice: custom,
-    }
-}
-
-// A model and `spice: custom` contradict each other.
-cuprite_wire::kicad_part! {
-    struct CustomAndSim {
-        symbol: "test:VSUP",
-        spice: custom,
-        sim: { library: "${TEST_MODELS}/clamp.lib", name: "clamp", pins: { "1" => "A", "2" => "K" } },
-    }
-}
-
 fn main() {}

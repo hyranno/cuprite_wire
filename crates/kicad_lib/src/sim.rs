@@ -41,8 +41,6 @@ pub enum SpiceDef {
     /// The symbol has no simulation model.
     Unsupported,
     Excluded,
-    /// Written by hand (`spice: custom`).
-    Custom,
     Elements(Elements),
     /// A buffer of an IBIS file, simulated by the part the macro generates.
     Ibis(Box<ibis::IbisDef>),

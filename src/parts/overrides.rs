@@ -1,4 +1,5 @@
-//! Overriding the value, footprint, fields and flags of a part instance, e.g. marking it DNP.
+//! Overriding the value, footprint, fields, flags and SPICE description of a part instance, e.g.
+//! marking it DNP.
 
 use std::{any::Any, collections::BTreeMap};
 
@@ -11,8 +12,9 @@ use crate::{
 /// What [`Overridden`] replaces in the information of a part. `None` (or no entry) keeps the
 /// part's own.
 ///
-/// Only the information written to the netlist and the bill of materials is overridden, not the
-/// pins nor the SPICE information: [`PartOverrides::value`] does not change what is simulated.
+/// The pins are not overridden. The value, footprint, fields and flags are the information written
+/// to the netlist and the bill of materials: [`PartOverrides::value`] does not change what is
+/// simulated, which [`PartOverrides::spice`] replaces.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PartOverrides {
     /// The value ([`Part::value`]).
@@ -30,6 +32,8 @@ pub struct PartOverrides {
     /// Not placed on the board
     /// ([`PartFlags::exclude_from_board`](crate::kicad::PartFlags::exclude_from_board)).
     pub exclude_from_board: Option<bool>,
+    /// The SPICE description ([`Part::spice`]).
+    pub spice: Option<SpicePartInfo>,
 }
 
 impl PartOverrides {
@@ -85,7 +89,10 @@ impl Part for Overridden {
         self.part.kicad().map(|info| self.overrides.apply(info))
     }
     fn spice(&self) -> Option<SpicePartInfo> {
-        self.part.spice()
+        match &self.overrides.spice {
+            Some(spice) => Some(spice.clone()),
+            None => self.part.spice(),
+        }
     }
     #[cfg(feature = "shared-ngspice")]
     fn cosim_device(&self) -> Option<&crate::spice::cosim::CosimDevice> {
@@ -112,7 +119,8 @@ pub trait PartExt: Sized {
     /// The part as an [`Overridden`], with no overrides unless it is one.
     fn into_overridden(self) -> Overridden;
 
-    /// The part with the value `value`. It does not change what is simulated.
+    /// The part with the value `value`. It does not change what is simulated (see
+    /// [`PartExt::with_spice`]).
     fn with_value(self, value: impl Into<String>) -> Overridden {
         let mut part = self.into_overridden();
         part.overrides.value = Some(value.into());
@@ -134,6 +142,29 @@ pub trait PartExt: Sized {
             Some((_, old)) => *old = value,
             None => fields.push((name, value)),
         }
+        part
+    }
+    /// The part simulated as `spice` instead of its own SPICE description, e.g. a part without
+    /// a model, or with one `kicad_part!` cannot convert (`spice: none`). The elements name the
+    /// pins by their pin IDs, and are checked against the pins when the SPICE netlist is made.
+    ///
+    /// ```
+    /// use cuprite_wire::{
+    ///     basic::Resistor0603,
+    ///     circuit::CircuitBuilder,
+    ///     parts::PartExt,
+    ///     spice::{SpiceElement, SpicePartInfo},
+    /// };
+    ///
+    /// // A resistor whose resistance rises with temperature.
+    /// let ptc = Resistor0603::new("1k")
+    ///     .with_spice(SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], "1k tc1=0.004")));
+    /// let mut c: CircuitBuilder = CircuitBuilder::new();
+    /// c.instantiate_part(ptc);
+    /// ```
+    fn with_spice(self, spice: SpicePartInfo) -> Overridden {
+        let mut part = self.into_overridden();
+        part.overrides.spice = Some(spice);
         part
     }
     /// The part marked as not populated (DNP). It is still simulated.
@@ -183,6 +214,8 @@ mod tests {
     use crate::{
         circuit::CircuitBuilder,
         kicad::PartFlags,
+        naming::NetLabel,
+        spice::SpiceElement,
         test_parts::{CustomPart, Resistor},
     };
 
@@ -222,6 +255,32 @@ mod tests {
         assert_eq!(info.pins, original.kicad().unwrap().pins);
         assert_eq!(part.pin_ids(), original.pin_ids());
         assert_eq!(part.spice(), original.spice());
+    }
+
+    #[test]
+    fn test_spice() {
+        let spice = SpicePartInfo::element(SpiceElement::new('R', ["1", "2"], "1k tc1=0.004"));
+        let part = Resistor("1k").with_value("PTC").with_spice(spice.clone());
+        assert_eq!(part.spice(), Some(spice.clone()));
+        assert_eq!(part.value(), "PTC");
+        // The SPICE netlist has the elements given, checked against the pins.
+        let deck = |part: Overridden| {
+            let mut circuit = CircuitBuilder::new();
+            let r = circuit.instantiate_part(part);
+            circuit.label(r["2"], NetLabel::global("GND"));
+            circuit.build(&()).to_netlist().unwrap().to_spice()
+        };
+        let text = deck(part).unwrap().to_string();
+        assert!(
+            text.contains("R1 unconnected-_R1-Pad1_ 0 1k tc1=0.004\n"),
+            "{text}"
+        );
+        let wrong = SpicePartInfo::element(SpiceElement::new('R', ["1", "3"], "1k"));
+        let errors = deck(Resistor("1k").with_spice(wrong)).unwrap_err();
+        assert!(
+            format!("{errors:?}").contains("SpicePinUnmapped"),
+            "{errors:?}"
+        );
     }
 
     #[test]

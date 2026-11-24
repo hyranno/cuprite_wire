@@ -18,7 +18,7 @@ use cuprite_wire_kicad_lib::{
     spice_lib::Dialect,
 };
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{format_ident, quote};
 
 /// Generates a part type (a struct implementing `Part`) from a KiCad symbol and footprint.
 ///
@@ -54,7 +54,7 @@ use quote::{format_ident, quote, quote_spanned};
 /// | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin number | the pin numbers |
 /// | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs | stacked pins |
 /// | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins | none (such pads are an error) |
-/// | `spice` | `auto`, `none` (not simulated), `excluded` (`exclude_from_sim`) or `custom` (`spice()` calls the type's `CustomSpice`) | `auto` (from `Sim.*`) |
+/// | `spice` | `auto`, `none` (not simulated) or `excluded` (`exclude_from_sim`) | `auto` (from `Sim.*`) |
 /// | `sim` | a library model replacing the symbol's `Sim.*` fields: `{ library, name, pins: { "1" => "PORT" }, unused, params, dialect }`, or a list of them with `suffix` | the `Sim.*` fields |
 /// | `ibis` | an IBIS model replacing the symbol's `Sim.*` fields (feature `ibis`): `{ library, component, pin, model, diff: bool, driver: bool }` | the `Sim.*` fields |
 /// | `sim_model` | `include` or `inline` (copy model definitions into the code) | `include` |
@@ -199,10 +199,7 @@ fn expand(
     // Track what was read even when it failed, so fixing a library file triggers a rebuild.
     let tracking = tracking(resolver);
     match result {
-        Ok(part) => {
-            let spice_span = spans.of(OptionKey::Spice, fallback, header.name.span());
-            generate(header, renamed, &part, spice_span, tracking)
-        }
+        Ok(part) => generate(header, renamed, &part, tracking),
         Err(error) => {
             let span = spans.of(error.key, fallback, header.name.span());
             let error = syn::Error::new(span, error.error.message).to_compile_error();
@@ -231,7 +228,6 @@ fn generate(
     header: &input::Header,
     renamed: &[(String, String)],
     part: &PartDef,
-    spice_span: Span,
     tracking: TokenStream,
 ) -> TokenStream {
     let krate = quote!(::cuprite_wire);
@@ -328,7 +324,7 @@ fn generate(
         .iter()
         .map(|group| quote!(::std::vec![#(::std::string::String::from(#group)),*]));
     let kicad_fn = kicad_fn(part, &krate);
-    let mut spice_fn = spice_fn(part, &krate, spice_span);
+    let mut spice_fn = spice_fn(part, &krate);
     let mut eq = Some(quote!(::core::cmp::Eq,));
     if let SpiceDef::Ibis(def) = &part.spice {
         // The part holds the driver or receiver it is simulated with.
@@ -435,21 +431,9 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     })
 }
 
-/// `spice()`; `spice_span` is the `spice` option, where a missing `CustomSpice` is reported.
-fn spice_fn(part: &PartDef, krate: &TokenStream, spice_span: Span) -> Option<TokenStream> {
+fn spice_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
     let body = match &part.spice {
         SpiceDef::Unsupported | SpiceDef::Ibis(_) => return None,
-        // A trait rather than a function given in the macro: the compiler then names what is
-        // missing (`on_unimplemented`), and the method can use the private fields (`value`).
-        SpiceDef::Custom => {
-            let custom =
-                quote_spanned!(spice_span=> <Self as #krate::spice::CustomSpice>::custom_spice);
-            return Some(quote! {
-                fn spice(&self) -> ::core::option::Option<#krate::spice::SpicePartInfo> {
-                    #custom(self)
-                }
-            });
-        }
         SpiceDef::Excluded => quote!(#krate::spice::SpicePartInfo::Excluded),
         SpiceDef::Elements(Elements {
             elements,

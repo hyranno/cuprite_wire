@@ -1,4 +1,4 @@
-error: cannot simulate test:IBIS_LEGACY (use `spice: none` or `spice: excluded` to skip, or `spice: custom` to write it): Sim.Type "IBISDRIVERDC" of Sim.Device IBIS is not supported; KiCad 10 has DEVICE, DCDRIVER, RECTDRIVER and PRBSDRIVER (the IBIS symbols of KiCad's library have an older type and no file: give the model with the `ibis` block)
+error: cannot simulate test:IBIS_LEGACY (use `spice: none` or `spice: excluded` to skip): Sim.Type "IBISDRIVERDC" of Sim.Device IBIS is not supported; KiCad 10 has DEVICE, DCDRIVER, RECTDRIVER and PRBSDRIVER (the IBIS symbols of KiCad's library have an older type and no file: give the model with the `ibis` block)
  --> tests/ui/ibis_sim.rs:9:17
   |
 9 |         symbol: "test:IBIS_LEGACY",
@@ -51,7 +51,7 @@ error: an IBIS part has no value to give: `value: param` is not supported
 68 |         value: param,
    |                ^^^^^
 
-error: `ibis` gives a model, so the part cannot be `spice: none`, `excluded` or `custom`
+error: `ibis` gives a model, so the part cannot be `spice: none` or `spice: excluded`
   --> tests/ui/ibis_sim.rs:77:16
    |
 77 |         spice: none,

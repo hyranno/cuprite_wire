@@ -74,7 +74,7 @@ error: give each model a distinct `suffix` (e.g. "A", "B")
 112 |             { library: "${TEST_MODELS}/clamp.lib", name: "clamp", pins: { "3" => "A", "4" => "K" } },
     |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-error: `sim` gives a model, so the part cannot be `spice: none`, `excluded` or `custom`
+error: `sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`
    --> tests/ui/sim.rs:122:16
     |
 122 |         spice: none,
