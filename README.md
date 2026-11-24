@@ -41,7 +41,8 @@ c.connect(amp[OpAmpSot23::OUT], amp[OpAmpSot23::IN_N]);
   through XSPICE (built with Verilator). Vendor models written for PSpice or LTspice are read as
   they are, through ngspice's compatibility modes.
 - **KiCad netlist.** The board is exported as a KiCad S-expression netlist (`.net`) that pcbnew
-  imports directly. The output is deterministic.
+  imports directly. The output is deterministic. A bill of materials is written as CSV in the
+  format of KiCad's BOM export.
 
 `examples/sensor_frontend/` shows all of this on a small board: an analog front end made of
 subcircuits, each with its own ERC and SPICE tests, checked as a whole and exported to pcbnew.

@@ -12,6 +12,11 @@ break the API).
 
 ### Added
 
+- `KicadNetlist::bom` makes a bill of materials (`cuprite_wire::kicad::KicadBom`) and writes it
+  as CSV in the format of `kicad-cli sch export bom`: components excluded from the BOM are left
+  out, equal components are grouped into one row with reference ranges (`R1-R5`), and DNP
+  components get a row of their own. `BomOptions` chooses the columns (including part fields such
+  as `MPN`), grouping and whether DNP components are listed.
 - `cuprite_wire_ibis`: a new crate reading IBIS model files (`.ibs`): the header, components with
   their package and pins, and models with their I-V tables, ramp rates, voltage ranges and input
   thresholds. Other keywords are skipped and listed. It does not depend on `cuprite_wire`, which

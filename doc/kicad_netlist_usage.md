@@ -1,7 +1,7 @@
 # Exporting a KiCad Netlist
 
 This document explains how to export a circuit described with cuprite_wire (`doc/circuits.md`) as a
-KiCad 9 netlist (`.net`) for pcbnew. See `doc/dev/kicad_netlist_format.md` for the file format itself.
+KiCad 9 netlist (`.net`) for pcbnew, and its bill of materials (section 6). See `doc/dev/kicad_netlist_format.md` for the file format itself.
 A complete example is in `examples/kicad_rc_filter.rs`
 (`cargo run --example kicad_rc_filter > rc_filter.net`).
 
@@ -89,3 +89,33 @@ Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_kicad` rep
 | `DuplicatePad` | two pins on the same pad that are not connected inside the part (connected ones are duplicate pins: the pad is written once, with the first of them in `Part::pin_ids`) |
 
 The output is checked against pcbnew and Eeschema by the tools described in `doc/dev/verifying.md`.
+
+## 6. Bill of materials
+
+`KicadNetlist::bom` makes a bill of materials, written as CSV in the format of
+`kicad-cli sch export bom` (`doc/dev/kicad_bom_format.md`):
+
+```rust
+use cuprite_wire::kicad::BomOptions;
+
+let bom = netlist.to_kicad()?.bom(&BomOptions::default().with_field("MPN"));
+bom.write(&mut file)?;            // or `bom.to_string()`; `bom.rows()` for the data
+```
+
+```text
+"Refs","Value","Footprint","Qty","DNP","MPN"
+"C1,C2","100n","Capacitor_SMD:C_0603_1608Metric","2","",""
+"R1-R5","10k","Resistor_SMD:R_0603_1608Metric","5","",""
+"X4","custom","Custom:Footprint","1","DNP","A"
+```
+
+- Components with `exclude_from_bom` are left out. DNP components are listed in rows of their own,
+  marked `DNP`; `exclude_dnp` leaves them out.
+- Components are grouped into one row when all their cells are equal, except the references and
+  the quantity. Add the fields that tell parts apart (`with_field("MPN")`), or they are grouped by
+  value and footprint only. `group: false` writes a row per component.
+- Three or more consecutive references are written as a range (`R1-R5`); `ref_ranges: false`
+  lists them all.
+- The columns (`BomOptions::columns`) can show the references, the value, the footprint, the
+  symbol (`LibSource`), the quantity, the DNP flag and any part field, with any label.
+- Rows are sorted by their first reference in natural order.
