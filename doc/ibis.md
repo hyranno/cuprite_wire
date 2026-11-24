@@ -221,7 +221,7 @@ states. The API reference is on [docs.rs](https://docs.rs/cuprite_wire_ibis).
 
 The subcircuits have the structure of KiCad's IBIS conversion (the package, `C_comp`, the I-V
 tables as `pwl` models), and their results are compared with KiCad's in the tests
-(`doc/dev/verifying.md`).
+(`doc/dev/verifying.md`). `doc/dev/ibis.md` describes KiCad's conversion and the design.
 
 ## 9. Not supported
 
