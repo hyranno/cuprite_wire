@@ -28,8 +28,8 @@ deck.run_with(DeviceModels::new().with("mcu", &mut firmware)).unwrap();
 ```
 
 The firmware runs as a periodic task: `Firmware` calls its step function every period, and the
-pins read the circuit at that time and drive it from then on. Digital input and output pins, PWM
-and a minimal ADC channel trait are provided.
+pins read the circuit at that time and drive it from then on. Digital input, output and
+open-drain pins, PWM and a minimal ADC channel trait are provided.
 
 ## Requirements
 

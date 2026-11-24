@@ -149,6 +149,28 @@ impl Board {
         OutputPinHandle(self.handle(state.outputs.len()))
     }
 
+    /// An open-drain pin (`InputPin`, `OutputPin`, `StatefulOutputPin`) on a bidirectional pin, as
+    /// for I2C or a wired-OR line: `set_low` drives it `Low` and `set_high` releases it (`HiZ`), so
+    /// a pull-up or another device sets its level then. `is_high` reads the pin, whatever drives it.
+    /// It starts released (`is_set_high` is true), as the bidirectional pin starts in `HiZ`.
+    pub fn open_drain_pin(&self, pin: &str) -> OpenDrainPinHandle {
+        let mut state = self.state.borrow_mut();
+        state.inputs.push(Input {
+            pin: Pin::new(pin),
+            high: false,
+        });
+        let input = state.inputs.len() - 1;
+        state.outputs.push(Output {
+            pin: Pin::new(pin),
+            level: Some(Level::HiZ),
+            changed: false,
+        });
+        OpenDrainPinHandle {
+            output: self.handle(state.outputs.len()),
+            input,
+        }
+    }
+
     /// A PWM channel (`SetDutyCycle`) on an output pin, with `period` seconds and duty steps of
     /// `1 / max_duty`. A new duty takes effect at the next period, also when it is set by a step
     /// at the time a period starts.
@@ -300,6 +322,24 @@ impl Handle {
     fn state_mut(&self) -> RefMut<'_, State> {
         self.state.borrow_mut()
     }
+
+    /// Sets the output of this index to `level`.
+    fn set_output(&self, level: Level) {
+        let mut state = self.state_mut();
+        let output = &mut state.outputs[self.index];
+        output.level = Some(level);
+        output.changed = true;
+    }
+
+    /// The level the output of this index was set to last.
+    fn output_level(&self) -> Option<Level> {
+        self.state().outputs[self.index].level
+    }
+
+    /// The level the input of index `input` read at the step.
+    fn input_high(&self, input: usize) -> bool {
+        self.state().inputs[input].high
+    }
 }
 
 /// A digital input of a [`Board`].
@@ -312,7 +352,7 @@ impl digital::ErrorType for InputPinHandle {
 
 impl digital::InputPin for InputPinHandle {
     fn is_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.0.state().inputs[self.0.index].high)
+        Ok(self.0.input_high(self.0.index))
     }
 
     fn is_low(&mut self) -> Result<bool, Infallible> {
@@ -324,42 +364,74 @@ impl digital::InputPin for InputPinHandle {
 #[derive(Debug)]
 pub struct OutputPinHandle(Handle);
 
-impl OutputPinHandle {
-    fn set(&mut self, level: Level) {
-        let mut state = self.0.state_mut();
-        let output = &mut state.outputs[self.0.index];
-        output.level = Some(level);
-        output.changed = true;
-    }
-
-    fn level(&self) -> Option<Level> {
-        self.0.state().outputs[self.0.index].level
-    }
-}
-
 impl digital::ErrorType for OutputPinHandle {
     type Error = Infallible;
 }
 
 impl digital::OutputPin for OutputPinHandle {
     fn set_low(&mut self) -> Result<(), Infallible> {
-        self.set(Level::Low);
+        self.0.set_output(Level::Low);
         Ok(())
     }
 
     fn set_high(&mut self) -> Result<(), Infallible> {
-        self.set(Level::High);
+        self.0.set_output(Level::High);
         Ok(())
     }
 }
 
 impl digital::StatefulOutputPin for OutputPinHandle {
     fn is_set_high(&mut self) -> Result<bool, Infallible> {
-        Ok(self.level() == Some(Level::High))
+        Ok(self.0.output_level() == Some(Level::High))
     }
 
     fn is_set_low(&mut self) -> Result<bool, Infallible> {
-        Ok(self.level() == Some(Level::Low))
+        Ok(self.0.output_level() == Some(Level::Low))
+    }
+}
+
+/// An open-drain pin of a [`Board`]: `High` releases it.
+#[derive(Debug)]
+pub struct OpenDrainPinHandle {
+    /// The output entry.
+    output: Handle,
+    /// The index of the input entry.
+    input: usize,
+}
+
+impl digital::ErrorType for OpenDrainPinHandle {
+    type Error = Infallible;
+}
+
+impl digital::InputPin for OpenDrainPinHandle {
+    fn is_high(&mut self) -> Result<bool, Infallible> {
+        Ok(self.output.input_high(self.input))
+    }
+
+    fn is_low(&mut self) -> Result<bool, Infallible> {
+        self.is_high().map(|high| !high)
+    }
+}
+
+impl digital::OutputPin for OpenDrainPinHandle {
+    fn set_low(&mut self) -> Result<(), Infallible> {
+        self.output.set_output(Level::Low);
+        Ok(())
+    }
+
+    fn set_high(&mut self) -> Result<(), Infallible> {
+        self.output.set_output(Level::HiZ);
+        Ok(())
+    }
+}
+
+impl digital::StatefulOutputPin for OpenDrainPinHandle {
+    fn is_set_high(&mut self) -> Result<bool, Infallible> {
+        Ok(self.output.output_level() == Some(Level::HiZ))
+    }
+
+    fn is_set_low(&mut self) -> Result<bool, Infallible> {
+        Ok(self.output.output_level() == Some(Level::Low))
     }
 }
 

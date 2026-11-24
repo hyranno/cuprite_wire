@@ -12,6 +12,9 @@ break the API).
 
 ### Added
 
+- `cuprite_wire_embedded_hal`: `Board::open_drain_pin` for a bidirectional pin driven open-drain
+  (I2C, wired-OR lines): `set_low` drives it low, `set_high` releases it, and it is an `InputPin`
+  reading the line whatever drives it.
 - `kicad_part!` converts the sources `Sim.Device` `V` / `I` with `Sim.Type` `SIN`, `PULSE`, `EXP`,
   `AM`, `SFFM` and `PWL` (the symbols `Simulation_SPICE:VSIN`, `VPULSE`, ...), and `ac` / `ph` of
   any source, as KiCad 10 writes them. A `PULSE` without `per` and `np` is a single pulse.

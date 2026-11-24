@@ -165,12 +165,17 @@ let regulator = mcu.into_task();   // check its state after the run
 
 - `Board` hands out the pins of the `CosimDevice` as `embedded-hal` objects:
   `input_pin(pin)` (`InputPin`), `output_pin(pin)` (`OutputPin`, `StatefulOutputPin`),
+  `open_drain_pin(pin)` (`InputPin`, `OutputPin`, `StatefulOutputPin` on a bidirectional pin),
   `pwm(pin, period, max_duty)` (`SetDutyCycle`; a new duty takes effect at the next period, also
   when the task sets it at the time a period starts) and `adc(pin, bits, reference)`
   (`AdcChannel`). The errors are `Infallible`. An output pin stays as the device starts it (`Low`,
   or `HiZ` for a bidirectional pin) until it is set; until then neither `is_set_high()` nor
-  `is_set_low()` is true. A pin driven open-drain (`HiZ` / `Low`) has no handle: use a
-  `DeviceModel` of your own.
+  `is_set_low()` is true.
+- **Open-drain pins** (I2C, wired-OR lines): `set_low()` drives the pin `Low` and `set_high()`
+  releases it (`HiZ`), so a pull-up (e.g. `InputCharacteristics::with_pull(Pull::up(..))` of the
+  pin, or a part in the circuit) or another device sets the level. `is_high()` reads the line
+  whatever drives it, so the firmware sees another device pulling it low. The pin must be
+  `bidirectional` in the `CosimDevice`, and starts released (`is_set_high()` is true).
 - **The firmware runs as a periodic task.** `Firmware::new(&board, period, task, step)` calls
   `step(&mut task)` every `period` seconds from time 0, as a timer interrupt or the body of a super
   loop would. At each call the inputs and ADC codes are those of that time, and the outputs set
