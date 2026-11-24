@@ -85,11 +85,11 @@ mod tests {
     use cuprite_wire::{
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
-        spice::{IndependentSource, Waveform},
+        spice::{IndependentSource, Waveform, analysis::Tran},
     };
 
     use super::*;
-    use crate::bench::{Bench, StageNodes, assert_near};
+    use crate::bench::{Bench, StageNodes, assert_near, run};
 
     #[test]
     fn erc() {
@@ -149,13 +149,9 @@ mod tests {
     fn small_signal() {
         let bench =
             bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.01, 1e3)));
-        let sim = bench.simulate([
-            "tran 1u 3m 1m",
-            r#"meas tran vmax MAX v("/OUT")"#,
-            r#"meas tran vmin MIN v("/OUT")"#,
-        ]);
-        assert_near("vmax", sim.expect_value("vmax"), 2.5 + 0.11, 0.003);
-        assert_near("vmin", sim.expect_value("vmin"), 2.5 - 0.11, 0.003);
+        let (vmin, vmax) = output_range(&bench);
+        assert_near("vmax", vmax, 2.5 + 0.11, 0.003);
+        assert_near("vmin", vmin, 2.5 - 0.11, 0.003);
     }
 
     /// A 0.4 V amplitude input would give 4.4 V; the output clips at the rails.
@@ -163,12 +159,18 @@ mod tests {
     fn clips_at_the_rails() {
         let bench =
             bench(IndependentSource::voltage(0.0).with_waveform(Waveform::sin(0.0, 0.4, 1e3)));
-        let sim = bench.simulate([
-            "tran 1u 3m 1m",
-            r#"meas tran vmax MAX v("/OUT")"#,
-            r#"meas tran vmin MIN v("/OUT")"#,
-        ]);
-        assert_near("vmax", sim.expect_value("vmax"), 4.99, 0.02);
-        assert_near("vmin", sim.expect_value("vmin"), 0.01, 0.02);
+        let (vmin, vmax) = output_range(&bench);
+        assert_near("vmax", vmax, 4.99, 0.02);
+        assert_near("vmin", vmin, 0.01, 0.02);
+    }
+
+    /// The range of `OUT` from 1 ms to 3 ms, after the start-up.
+    fn output_range(bench: &Bench) -> (f64, f64) {
+        let deck = bench.deck();
+        let out = deck.voltage("/OUT").unwrap();
+        let tran = Tran::new(1e-6, 3e-3).with_start(1e-3).probe(&out);
+        let result = run(&deck.analysis(&tran)).result(&tran).unwrap();
+        let vout = result.get(&out).unwrap().iter().copied();
+        vout.fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)))
     }
 }

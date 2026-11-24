@@ -59,11 +59,11 @@ mod tests {
     use cuprite_wire::{
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
-        spice::{IndependentSource, Waveform},
+        spice::{IndependentSource, Waveform, analysis::Tran},
     };
 
     use super::*;
-    use crate::bench::{Bench, assert_near};
+    use crate::bench::{Bench, assert_near, run};
 
     #[test]
     fn erc() {
@@ -100,11 +100,12 @@ mod tests {
             bench.circuit.connect(load["1"], ports.vref);
             bench.circuit.connect(load["2"], bench.gnd);
             // The divider's filter settles with a time constant of 50 ms.
-            let sim = bench.simulate([
-                "tran 100u 600m",
-                r#"meas tran vref FIND v("/VREF") AT=600m"#,
-            ]);
-            assert_near("vref", sim.expect_value("vref"), supply / 2.0, 1e-3);
+            let deck = bench.deck();
+            let vref = deck.voltage("/VREF").unwrap();
+            let tran = Tran::new(100e-6, 600e-3).probe(&vref);
+            let result = run(&deck.analysis(&tran)).result(&tran).unwrap();
+            let last = *result.get(&vref).unwrap().last().unwrap();
+            assert_near("vref", last, supply / 2.0, 1e-3);
         }
     }
 }

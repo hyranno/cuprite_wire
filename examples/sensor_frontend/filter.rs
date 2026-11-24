@@ -68,11 +68,14 @@ mod tests {
     use cuprite_wire::{
         erc::{ErcSettings, check_subcircuit},
         parts::PinType,
-        spice::{IndependentSource, Waveform},
+        spice::{
+            IndependentSource, Waveform,
+            analysis::{Op, Tran},
+        },
     };
 
     use super::*;
-    use crate::bench::{Bench, StageNodes, assert_near};
+    use crate::bench::{Bench, StageNodes, assert_near, run};
 
     #[test]
     fn erc() {
@@ -111,17 +114,20 @@ mod tests {
     #[test]
     fn frequency_response() {
         let bench = bench(IndependentSource::voltage(2.5).with_ac(1.0));
-        let sim = bench.simulate([
-            "op",
-            r#"let vout = v("/OUT")"#,
-            "print vout",
+        let deck = bench.deck();
+        let out = deck.voltage("/OUT").unwrap();
+        let op = Op::new().probe(&out);
+        // `meas ... WHEN` needs the node in `vdb(...)`, which the typed probes do not write.
+        let deck = deck.analysis(&op).control([
             "ac dec 50 10 100k",
             r#"meas ac pass FIND vdb("/OUT") AT=100"#,
             r#"meas ac f3db WHEN vdb("/OUT")=-3"#,
             r#"meas ac stop FIND vdb("/OUT") AT=10k"#,
         ]);
+        let sim = run(&deck);
         // The output follows the input at DC.
-        assert_near("vout", sim.expect_value("vout"), 2.5, 1e-3);
+        let vout = sim.result(&op).unwrap().get(&out).unwrap();
+        assert_near("vout", vout, 2.5, 1e-3);
         assert_near("pass (dB)", sim.expect_value("pass"), 0.0, 0.1);
         // With Q = 0.74 the -3 dB point is a little above the natural frequency.
         assert_near("f3db (Hz)", sim.expect_value("f3db"), 1120.0, 50.0);
@@ -143,12 +149,13 @@ mod tests {
             period: 2.0,
         };
         let bench = bench(IndependentSource::voltage(2.5).with_waveform(step));
-        let sim = bench.simulate([
-            "tran 1u 5m",
-            r#"meas tran vpeak MAX v("/OUT") FROM=1m TO=5m"#,
-            r#"meas tran vfinal FIND v("/OUT") AT=5m"#,
-        ]);
-        assert_near("vfinal", sim.expect_value("vfinal"), 2.6, 1e-3);
-        assert_near("overshoot", sim.expect_value("vpeak") - 2.6, 0.0057, 0.001);
+        let deck = bench.deck();
+        let out = deck.voltage("/OUT").unwrap();
+        let tran = Tran::new(1e-6, 5e-3).probe(&out);
+        let result = run(&deck.analysis(&tran)).result(&tran).unwrap();
+        let vout = result.get(&out).unwrap();
+        let vpeak = vout.iter().copied().fold(f64::MIN, f64::max);
+        assert_near("vfinal", *vout.last().unwrap(), 2.6, 1e-3);
+        assert_near("overshoot", vpeak - 2.6, 0.0057, 0.001);
     }
 }
