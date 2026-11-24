@@ -1,5 +1,5 @@
-//! Names and identifiers shared with `cuprite_wire`: library identifiers, natural ordering and
-//! SPICE element suffixes.
+//! Names and identifiers shared with `cuprite_wire`: library identifiers, natural ordering,
+//! symbol unit letters and SPICE element suffixes.
 
 use std::{cmp::Ordering, fmt, str::FromStr};
 
@@ -133,6 +133,24 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
+/// The letters KiCad appends to the reference of unit `unit` (from 1) of a multi-unit symbol:
+/// `A` to `Z`, then `AA`, `AB`, ... (`U1A`, `U1AA`).
+///
+/// # Panics
+/// If `unit` is 0.
+pub fn unit_letters(unit: u32) -> String {
+    assert!(unit > 0, "units are numbered from 1");
+    let mut letters = Vec::new();
+    let mut rest = unit;
+    while rest > 0 {
+        let digit = (rest - 1) % 26;
+        letters.push(b'A' + digit as u8);
+        rest = (rest - 1 - digit) / 26;
+    }
+    letters.reverse();
+    String::from_utf8(letters).unwrap()
+}
+
 /// Checks the suffix appended to a part's name to name one of its SPICE elements: ASCII letters,
 /// digits and `_` (it may be empty).
 pub fn check_element_suffix(suffix: &str) -> Result<(), String> {
@@ -150,6 +168,18 @@ pub fn check_element_suffix(suffix: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_unit_letters() {
+        let letters: Vec<_> = [1, 2, 26, 27, 28, 52, 53, 702, 703]
+            .into_iter()
+            .map(super::unit_letters)
+            .collect();
+        assert_eq!(
+            letters,
+            ["A", "B", "Z", "AA", "AB", "AZ", "BA", "ZZ", "AAA"]
+        );
+    }
+
     use super::*;
 
     #[test]

@@ -80,6 +80,16 @@ impl fmt::Display for HierPath {
     }
 }
 
+/// The UUID of the unit `unit` (from 1) of a part with the UUID `part`: the part's own UUID for
+/// unit 1, so it does not change when the part gets more units, and one derived from it otherwise.
+pub(crate) fn unit_uuid(part: Uuid, unit: u32) -> Uuid {
+    if unit <= 1 {
+        part
+    } else {
+        Uuid::new_v5(&UUID_NAMESPACE, format!("unit:{part}:{unit}").as_bytes())
+    }
+}
+
 pub(crate) use cuprite_wire_kicad_lib::naming::natural_cmp;
 
 /// Checks an explicit instance name.

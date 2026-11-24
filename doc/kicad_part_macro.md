@@ -87,6 +87,9 @@ with the same nickname.
   parts. Pin names are not used as IDs: they are often `~`, `+`, `-`, or shared by several pins.
   Use `pins` to give readable IDs.
 - Every unit of the symbol is part of the one generated part (the netlist has one component).
+  The part lists the units (`KicadPartInfo::units`: the letters `A`, `B`, ..., or the unit's
+  `unit_name`) and the unit of each pin, which give the automatic net names KiCad's references
+  of the units (`Net-(U1B-OUT)`) and a UUID per unit (`doc/kicad_netlist_usage.md`).
   Pins of unit 0 are shared by all units. A pin number defined in several units with the same
   name and type is one pin (e.g. a supply pin repeated in each unit). Only body style 1 is read
   (De Morgan styles repeat the pins).

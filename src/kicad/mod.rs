@@ -8,4 +8,6 @@ pub mod part;
 
 pub use bom::{BomColumn, BomField, BomGrouping, BomOptions, BomRow, KicadBom};
 pub use netlist::KicadNetlist;
-pub use part::{KicadPartInfo, KicadPinInfo, LibId, LibIdError, PartFlags, PinInfoProblem};
+pub use part::{
+    KicadPartInfo, KicadPinInfo, LibId, LibIdError, PartFlags, PinInfoProblem, unit_letters,
+};

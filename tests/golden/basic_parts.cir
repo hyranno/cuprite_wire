@@ -15,11 +15,11 @@ Rvee vee 0 1G
 X1 in1+ in1- vcc vee out1 cuprite_opamp
 X2 in2+ in2- vcc vee out2 cuprite_opamp
 .ends cuprite_opamp_dual
-C1 Net-_C1-Pad1_ 0 100n
+C1 Net-_U2A-+_ 0 100n
 D1 /OUT +5V __DiodeSod123
 D2 Net-_D2-A_ 0 __Led0603
-L1 /IN Net-_C1-Pad1_ 10u
+L1 /IN Net-_U2A-+_ 10u
 R1 Net-_U1--_ Net-_D2-A_ 10k
 XU1 /IN Net-_U1--_ +5V 0 Net-_U1--_ cuprite_opamp
-XU2 /OUT /OUT Net-_C1-Pad1_ 0 0 Net-_U2---Pad6_ Net-_U2---Pad6_ +5V cuprite_opamp_dual
+XU2 /OUT /OUT Net-_U2A-+_ 0 0 Net-_U2B--_ Net-_U2B--_ +5V cuprite_opamp_dual
 .end

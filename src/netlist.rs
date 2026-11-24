@@ -436,7 +436,9 @@ fn distinct_names(labels: &[&NodeLabel]) -> Vec<String> {
 /// Names a net without labels after one of its pins, like KiCad:
 /// `Net-(R1-Pad2)` / `Net-(U1-OUT)`, or `unconnected-(U1-NC-Pad7)` for a single pin.
 /// A pin without a name, or named as its pad number, is written as the pad (`Pad2`), and a pin
-/// name shared by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`).
+/// name shared by several pins of its unit is followed by the pad (`Net-(U1-GND-Pad5)`).
+/// A pin written by its name is written with the reference of its unit for a part with several
+/// units (`Net-(U1B-OUT)`); a pin of every unit is a candidate in each of them.
 ///
 /// As KiCad does, a pin written by its name alone is preferred to one written with the pad,
 /// and among those the smallest name in string order (not natural order) is chosen.
@@ -450,28 +452,45 @@ fn unnamed_net_name(
 ) -> String {
     let unconnected = nodes.len() == 1;
     let prefix = if unconnected { "unconnected" } else { "Net" };
-    // (written with the pad, net name) of a pin with KiCad information.
-    let candidate = |node: &NetNode| {
-        let info = kicad_infos[node.component]?;
-        let pin = info.pins.get(&node.pin_id)?;
-        let ref_name = escape_name(&components[node.component].ref_name);
+    // (written with the pad, net name) of a pin with KiCad information, in each of its units.
+    let candidates = |node: &NetNode| -> Vec<(bool, String)> {
+        let Some(info) = kicad_infos[node.component] else {
+            return Vec::new();
+        };
+        let Some(pin) = info.pins.get(&node.pin_id) else {
+            return Vec::new();
+        };
+        let ref_name = &components[node.component].ref_name;
         let pad = format!("Pad{}", escape_name(&pin.pad));
         let name = pin
             .name
             .as_deref()
             .filter(|name| !name.is_empty() && *name != pin.pad);
-        let (with_pad, pin_label) = match name {
-            Some(name) if unconnected || info.is_pin_name_shared(name) => {
-                (true, format!("{}-{pad}", escape_name(name)))
-            }
-            Some(name) => (false, escape_name(name)),
-            None => (true, pad),
+        let Some(name) = name else {
+            return vec![(true, format!("{prefix}-({}-{pad})", escape_name(ref_name)))];
         };
-        Some((with_pad, format!("{prefix}-({ref_name}-{pin_label})")))
+        // (unit, suffix of the reference): unit 0 stands for the single unit.
+        let units: Vec<(u32, &str)> = match (info.unit_count(), pin.unit) {
+            (1, _) => vec![(0, "")],
+            (_, 0) => (1..).zip(info.units.iter().map(String::as_str)).collect(),
+            (_, unit) => vec![(unit, &info.units[unit as usize - 1])],
+        };
+        units
+            .into_iter()
+            .map(|(unit, suffix)| {
+                let unit_ref = escape_name(&format!("{ref_name}{suffix}"));
+                let label = if unconnected || info.is_pin_name_shared(pin, unit) {
+                    (true, format!("{}-{pad}", escape_name(name)))
+                } else {
+                    (false, escape_name(name))
+                };
+                (label.0, format!("{prefix}-({unit_ref}-{})", label.1))
+            })
+            .collect()
     };
     nodes
         .iter()
-        .filter_map(candidate)
+        .flat_map(candidates)
         .min()
         .map(|(_, name)| name)
         .unwrap_or_else(|| {
@@ -615,6 +634,69 @@ mod tests {
         assert_eq!(name_of("X1.1"), "Net-(R1-Pad2)");
         // A named pin is preferred to unnamed ones.
         assert_eq!(name_of("X2.1"), "Net-(X2-A)");
+    }
+
+    #[test]
+    fn test_unnamed_net_names_of_units() {
+        // Units A, B and "PWR"; pins: (pad, name, unit).
+        let pins = [
+            ("1", "K", 1),
+            ("2", "A", 1),
+            ("3", "K", 2),
+            ("4", "A", 2),
+            ("5", "V", 0),
+            ("6", "G", 3),
+            ("7", "G", 3),
+            ("8", "8", 3),
+        ];
+        let mut circuit = CircuitBuilder::<()>::new();
+        let x = circuit.instantiate_part(CustomPart {
+            pin_ids: pins.iter().map(|(pad, _, _)| *pad).collect(),
+            kicad: Some(KicadPartInfo {
+                pins: pins
+                    .iter()
+                    .map(|&(pad, name, unit)| {
+                        let pin = KicadPinInfo::new(pad, Some(name), PinType::Passive);
+                        (pad.to_string(), pin.with_unit(unit))
+                    })
+                    .collect(),
+                units: vec!["A".into(), "B".into(), "PWR".into()],
+                ..CustomPart::valid().kicad.unwrap()
+            }),
+            spice: None,
+            ..CustomPart::valid()
+        });
+        let r: Vec<_> = (0..3)
+            .map(|_| circuit.instantiate_part(Resistor("1k")))
+            .collect();
+        for (i, pad) in ["1", "3", "5"].into_iter().enumerate() {
+            circuit.connect(x[pad], r[i]["1"]);
+        }
+        circuit.connect(x["6"], x["7"]);
+        let netlist = circuit.build(&()).to_netlist().unwrap();
+        let names: Vec<_> = summary(&netlist)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                // K is not shared in its unit, though unit B has a K too.
+                "Net-(X1A-K)",
+                // A pin of every unit is named in the smallest of them.
+                "Net-(X1A-V)",
+                "Net-(X1B-K)",
+                // G is shared in its unit.
+                "Net-(X1PWR-G-Pad6)",
+                "unconnected-(R1-Pad2)",
+                "unconnected-(R2-Pad2)",
+                "unconnected-(R3-Pad2)",
+                // A pin named as its pad is written without the unit.
+                "unconnected-(X1-Pad8)",
+                "unconnected-(X1A-A-Pad2)",
+                "unconnected-(X1B-A-Pad4)",
+            ]
+        );
     }
 
     #[derive(Debug, Clone)]

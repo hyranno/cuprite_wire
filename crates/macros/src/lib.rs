@@ -404,10 +404,13 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
             None => quote!(::core::option::Option::None),
         };
         let pin_type = format_ident!("{}", pin.electrical_type.variant_name());
+        // A single unit is written as 0, as for hand-written parts.
+        let unit = if kicad.units.is_empty() { 0 } else { pin.unit };
         quote! {
-            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::parts::PinType::#pin_type))
+            (::std::string::String::from(#id), #krate::kicad::KicadPinInfo::new(#pad, #pin_name, #krate::parts::PinType::#pin_type).with_unit(#unit))
         }
     });
+    let units = &kicad.units;
     let field_entries = kicad
         .fields
         .iter()
@@ -435,6 +438,7 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
                 },
                 datasheet: #datasheet,
                 description: #description,
+                units: ::std::vec![#(::std::string::String::from(#units)),*],
             })
         }
     })
@@ -702,6 +706,7 @@ mod tests {
                 exclude_from_board: false,
                 description: None,
                 datasheet: None,
+                units: Vec::new(),
             }),
             ref_prefix: "U".into(),
             value: Value::Fixed("PART".into()),

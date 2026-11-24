@@ -157,7 +157,10 @@ Reference designators (`R1`, `R2`, ...) are numbered in instantiation order over
   (a net labeled `ALPHA` and `ZED` is connected to another net labeled `ZED`).
 - An unnamed net is named after one of its pins, as Eeschema does: `Net-(<ref>-<pin name>)`, or
   `Net-(<ref>-Pad<number>)` for a pin without a name or named as its pad number. A pin name shared
-  by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`). Pins written by their
+  by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`). For a part with
+  several units (`KicadPartInfo::units`), a pin written by its name gets the reference of its
+  unit (`Net-(U1B-OUT)`), only the pins of that unit (and those of every unit) count for a shared
+  name, and a pin of every unit is a candidate in each unit. Pins written by their
   name alone are preferred, and among them the smallest name in string order (not natural order:
   `Net-(R10-Pad1)` before `Net-(R9-Pad1)`); the pin type does not matter. A net of a single pin is
   `unconnected-(...)`. Pins of parts without KiCad information are used only if no pin has it,

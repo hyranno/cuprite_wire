@@ -34,7 +34,7 @@ fn kicad(&self) -> Option<KicadPartInfo> {
         ]),
         lib_source: Some("Device:R".parse().unwrap()),
         ..Default::default()   // fields, flags (dnp, exclude_from_bom, exclude_from_board),
-                               // datasheet, description
+                               // datasheet, description, units
     })
 }
 ```
@@ -42,6 +42,12 @@ fn kicad(&self) -> Option<KicadPartInfo> {
 - `KicadPinInfo` gives the pad number (`pin` in the netlist), the pin name (`pinfunction`) and the
   electrical type (`pintype`). `KicadPartInfo::pins` needs exactly one entry per pin ID, and pads
   must be unique within a part.
+- A part made from a symbol with several units (a dual op-amp) lists what KiCad appends to the
+  reference of each unit in `KicadPartInfo::units` (`["A", "B", "C"]`, from `unit_letters`, or
+  the symbol's unit names), and gives each pin its unit with `KicadPinInfo::with_unit` (0, the
+  default, for a pin of every unit). The automatic net names then use the reference of the unit
+  (`Net-(U1A-OUT)`) as KiCad does; a pin in a unit the part does not have is an error
+  (`UnknownPinUnit`).
 - `LibId` (`Library:Name`) is checked when it is parsed or created with `LibId::new`.
 - An instance can override the value, footprint, fields, flags and SPICE description of its part
   with the methods of `PartExt` (implemented for every part and `Box<dyn Part>`), without writing
@@ -104,8 +110,9 @@ note in `doc/circuits.md` section 4.
 - Not written: `libparts`, `libraries`, the `Footprint` / `Datasheet` / `Description` fields, the
   `description` of `libsource`, and the `Sheetname` / `Sheetfile` properties. Custom fields are written in `fields` only, not repeated as `property`
   (pcbnew reads `fields`).
-- Multi-unit parts are one component with all the pins of the symbol and a single `tstamps`
-  (Eeschema writes one UUID per unit).
+- Multi-unit parts are one component with all the pins of the symbol, and `tstamps` has a UUID
+  for each unit, as Eeschema writes it. The first is the component's UUID (the same as for a
+  single unit), which pcbnew takes as the footprint's path; the others are derived from it.
 
 ## 5. Errors
 
@@ -117,6 +124,7 @@ Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_kicad` rep
 | `FootprintMissing` | no footprint assigned |
 | `PinInfoMissing` | no `KicadPinInfo` for a pin ID |
 | `UnknownPinId` | a `KicadPinInfo` for a pin ID the part does not have |
+| `UnknownPinUnit` | a `KicadPinInfo` in a unit that `KicadPartInfo::units` does not have |
 | `DuplicatePad` | two pins on the same pad that are not connected inside the part (connected ones are duplicate pins: the pad is written once, with the first of them in `Part::pin_ids`) |
 
 The output is checked against pcbnew and Eeschema by the tools described in `doc/dev/verifying.md`.
