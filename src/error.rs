@@ -283,7 +283,10 @@ impl fmt::Display for CircuitErrorKind {
                 )
             }
             CircuitErrorKind::GroundMissing => {
-                write!(f, "no ground net for SPICE: name a net \"GND\" or \"0\"")
+                write!(
+                    f,
+                    "no ground net for SPICE: name a net \"GND\" or \"0\", or add one with `SpiceOptions::ground_net`"
+                )
             }
         }
     }

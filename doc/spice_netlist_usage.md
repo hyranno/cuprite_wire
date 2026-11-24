@@ -169,6 +169,14 @@ converted as KiCad does, so that the deck can be compared with KiCad's own expor
 | `Net-(R1-Pad2)`, `unconnected-(U1-NC-Pad7)`, `/a(b) c` | `Net-_R1-Pad2_`, `unconnected-_U1-NC-Pad7_`, `/a_b__c` (`% ( ) , [ ] < > ~` and whitespace -> `_`) |
 | `GND` (any case), `0` | `0` (the ground) |
 
+Other nets become the ground with `to_spice_with` and `SpiceOptions::ground_net`, given by their exact
+net names (`AGND` for a global label, `/sensor/AGND` for a local label in a subcircuit). They may sit
+next to `GND`, which ties the grounds together in the simulation only:
+
+```rust
+let spice = netlist.to_spice_with(&SpiceOptions::new().ground_net("AGND").ground_net("PGND"))?;
+```
+
 `SpiceNetlist::node(net_name)` returns the node name. In front-end commands quote names containing
 `/` or `-`: `v("/OUT")`.
 
@@ -182,10 +190,10 @@ trace of the part or the label):
 | `UnknownPinId` | an element or `unused_pins` refers to a pin the part does not have |
 | `SpicePinUnmapped` | a pin is not used by the model (section 2) |
 | `InvalidSpiceNodeName` | a node name ngspice cannot read: non-ASCII characters (ngspice replaces them, which can merge nets), `= { } ' " ;`, or a leading `$` |
-| `SpiceNodeCollision` | two nets give the same node name ignoring case (ngspice would merge them silently), e.g. `/A` and `/a`, or `GND` and `0` |
+| `SpiceNodeCollision` | two nets give the same node name ignoring case (ngspice would merge them silently), e.g. `/A` and `/a`, or `GND` and `0` (nets added by `SpiceOptions::ground_net` are not checked) |
 | `SpiceElementCollision` | two element names differ only in case |
 | `SpiceModelConflict` | two parts define an inline model with the same name differently |
-| `GroundMissing` | no net named `GND` or `0` is used by an element |
+| `GroundMissing` | no net named `GND` or `0` (or added by `SpiceOptions::ground_net`) is used by an element |
 
 ## 5. Running ngspice
 

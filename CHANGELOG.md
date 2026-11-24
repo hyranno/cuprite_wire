@@ -12,6 +12,8 @@ break the API).
 
 ### Added
 
+- `Netlist::to_spice_with` takes `SpiceOptions`, whose `ground_net(..)` connects more nets (e.g.
+  `AGND`) to the SPICE ground besides `GND` and `0`. `to_spice()` is unchanged.
 - `cuprite_wire::parts::PartExt` overrides the value, footprint, fields and flags of a part
   instance without writing a new part: `part.dnp()`, `exclude_from_bom()`,
   `exclude_from_board()`, `with_value(..)`, `with_footprint(..)` and `with_field(..)` return an

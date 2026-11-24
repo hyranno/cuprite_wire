@@ -19,6 +19,33 @@ use crate::{
 /// The node name of the ground.
 pub const GROUND: &str = "0";
 
+/// How [`Netlist::to_spice_with`] makes a SPICE netlist. The default is what [`Netlist::to_spice`] does.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SpiceOptions {
+    /// Nets connected to the ground (node [`GROUND`]) besides `GND` (in any case) and `0`, by their
+    /// exact net names (e.g. `AGND`, or `/sensor/AGND` for a local label in a subcircuit).
+    pub ground_nets: Vec<String>,
+}
+
+impl SpiceOptions {
+    /// The default options.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a net connected to the ground, by its exact net name (e.g. `AGND`).
+    #[must_use]
+    pub fn ground_net(mut self, net_name: impl Into<String>) -> Self {
+        self.ground_nets.push(net_name.into());
+        self
+    }
+
+    fn is_ground_net(&self, net_name: &str) -> bool {
+        self.ground_nets.iter().any(|name| name == net_name)
+    }
+}
+
 /// A netlist checked and resolved for SPICE. Write it with [`SpiceNetlist::write`] or `Display`,
 /// or add analyses with [`SpiceNetlist::deck`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -175,6 +202,15 @@ fn element_name(device: char, ref_name: &str, suffix: &str) -> String {
 }
 
 impl Netlist {
+    /// Resolves the SPICE information of every component and checks it, with the default
+    /// [`SpiceOptions`].
+    ///
+    /// # Errors
+    /// See [`Netlist::to_spice_with`].
+    pub fn to_spice(&self) -> Result<SpiceNetlist, CircuitErrors> {
+        self.to_spice_with(&SpiceOptions::default())
+    }
+
     /// Resolves the SPICE information of every component and checks it.
     ///
     /// # Errors
@@ -186,7 +222,7 @@ impl Netlist {
         clippy::missing_panics_doc,
         reason = "panics only if the netlist breaks its invariant that every pin is on a net"
     )]
-    pub fn to_spice(&self) -> Result<SpiceNetlist, CircuitErrors> {
+    pub fn to_spice_with(&self, options: &SpiceOptions) -> Result<SpiceNetlist, CircuitErrors> {
         let mut errors = Vec::new();
         let net_of_pin: HashMap<(usize, &str), usize> = self
             .nets
@@ -233,6 +269,7 @@ impl Netlist {
 
         let nodes = self.resolve_nodes(
             lines.iter().flat_map(|line| line.nets.iter().copied()),
+            options,
             &mut errors,
         );
         check_element_names(
@@ -279,18 +316,34 @@ impl Netlist {
     }
 
     /// SPICE node names of the nets used by elements, after checking them.
+    ///
+    /// The nets of [`SpiceOptions::ground_nets`] are meant to be merged into the ground, so they
+    /// are not checked for collisions.
     fn resolve_nodes(
         &self,
         used: impl Iterator<Item = usize>,
+        options: &SpiceOptions,
         errors: &mut Vec<CircuitError>,
     ) -> BTreeMap<usize, String> {
         let nodes: BTreeMap<usize, String> = used
-            .map(|net| (net, spice_node_name(&self.nets[net].name)))
+            .map(|net| {
+                let name = &self.nets[net].name;
+                let node = if options.is_ground_net(name) {
+                    GROUND.to_string()
+                } else {
+                    spice_node_name(name)
+                };
+                (net, node)
+            })
             .collect();
         let nets: Vec<usize> = nodes.keys().copied().collect();
+        let checked: Vec<usize> = (0..nets.len())
+            .filter(|&i| !options.is_ground_net(&self.nets[nets[i]].name))
+            .collect();
         let collisions: HashMap<usize, usize> =
-            case_insensitive_duplicates(nodes.values().map(String::as_str))
+            case_insensitive_duplicates(checked.iter().map(|&i| nodes[&nets[i]].as_str()))
                 .into_iter()
+                .map(|(i, first)| (checked[i], checked[first]))
                 .collect();
         for (i, (&net, node)) in nodes.iter().enumerate() {
             let name = &self.nets[net].name;
