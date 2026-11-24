@@ -178,7 +178,7 @@ Children of `node`:
 | `ref` | required | `ref` of a `comp`. Nodes of components that do not exist (or are excluded by `exclude_from_board` etc.) are ignored. |
 | `pin` | required | Must match a **footprint pad number** (not a symbol pin name). |
 | `pinfunction` | optional | Pin name. Eeschema omits it when the pin name is empty. pcbnew shows it as the pad's "pin function". |
-| `pintype` | optional | Electrical type of the pin: `input` `output` `bidirectional` `tri_state` `passive` `free` `unspecified` `power_in` `power_out` `open_collector` `open_emitter` `no_connect`. A single pin marked with a no-connect flag gets a `+no_connect` suffix (e.g. `passive+no_connect`). |
+| `pintype` | optional | Electrical type of the pin: `input` `output` `bidirectional` `tri_state` `passive` `free` `unspecified` `power_in` `power_out` `open_collector` `open_emitter` `no_connect`. A pin alone on a net with a no-connect flag gets a `+no_connect` suffix (e.g. `passive+no_connect`); see 6.2. |
 
 ### 6.1 Net naming conventions (following Eeschema)
 
@@ -206,6 +206,26 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
 - Nodes are sorted by `ref` (string order) then by pin number, with duplicates removed.
 - Components are written sheet by sheet in page order, and by reference in natural order in each
   sheet (a root `X1` comes before `C1` on page 2).
+
+### 6.2 The `+no_connect` suffix
+
+Observed with KiCad 10.0 (`kicad-cli sch export netlist`) on the demos `ecc83/ecc83-pp`,
+`complex_hierarchy` and `cm5_minima`, and on schematics synthesized by
+`tools/compare_kicad_cli_netlist.py --keep DIR` with no-connect flags added by hand:
+
+| Net | `pintype` |
+|---|---|
+| one pin, with a no-connect flag (with or without a label) | `<type>+no_connect` |
+| one pin, without a flag (also a `no_connect` pin) | `<type>` |
+| several pins, with a flag (ERC `no_connect_connected`) | `<type>` for every pin |
+
+A flagged net of several pins without a label is named `unconnected-(...)` instead of `Net-(...)`
+(e.g. `unconnected-(R1-Pad2)` for R1 pad 2 and U1 pin `-`, whose name would otherwise be
+`Net-(U1--)`), whichever pin the flag is on. cuprite_wire keeps the `Net-(...)` name: the net is
+an ERC error anyway, and the rule picking the pin was not worked out.
+
+`tools/compare_kicad_cli_netlist.py` places a no-connect flag on every pin whose type has the
+suffix, so the golden `multi_pin_ic.net` checks the suffix against kicad-cli.
 
 ## 7. Minimal form
 

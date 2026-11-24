@@ -79,7 +79,9 @@ note in `doc/circuits.md` section 4.
   sheet by sheet in page order: the root first, then each instance followed by the ones inside it,
   in instantiation order. In each, they are sorted by reference in natural order (`R2` before `R10`).
 - `nets`: `code` (from 1), `name`, `class` (`"Default"`), and `node`s with `ref`, `pin` (the
-  footprint pad number), `pinfunction` (if the pin has a name) and `pintype`. Nets are sorted by
+  footprint pad number), `pinfunction` (if the pin has a name) and `pintype` (with the suffix
+  `+no_connect` for the only pin of a net marked with `circuit.no_connect`, as KiCad writes a pin
+  with a no-connect flag; pcbnew then does not report the pad as unconnected). Nets are sorted by
   name in natural order (case-sensitive); nodes by reference and then pad, both in string order
   (as KiCad does).
 - `design` has only `source` (if set with `with_source`) and `tool`. No date is written, so the
