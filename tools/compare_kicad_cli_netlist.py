@@ -6,6 +6,7 @@ For each netlist, an equivalent schematic is synthesized: one symbol per compone
 flags from the component; the component's tstamps as the symbol's unique id),
 connected by wires, with a global label for every global net name and a local
 label (in its sheet) for every local one. Unnamed nets get no label, so KiCad names them itself.
+A pin whose type has the suffix `+no_connect` gets a no-connect flag.
 `kicad-cli sch export netlist --format kicadsexpr` then exports the schematic, and
 both netlists are compared after removing what cuprite_wire intentionally omits
 (see KNOWN_DIFFERENCES, and KICAD10_KNOWN_DIFFERENCES with KiCad 10). The remaining
@@ -86,6 +87,8 @@ KICAD10_KNOWN_DIFFERENCES = {
     "empty groups / variants": "not written (KiCad 10)",
     "pin number suffix of pinfunction": "the pin name only, as KiCad 9 writes it (KiCad 10 appends `_<pin>`)",
 }
+# KiCad appends it to the pin type of a pin alone on a net with a no-connect flag.
+NO_CONNECT_SUFFIX = "+no_connect"
 SYMBOL_DIR_VARIABLE = re.compile(r"\$\{KICAD\d+_SYMBOL_DIR\}")
 
 PIN_PITCH = 2.54
@@ -136,6 +139,10 @@ class Sheet:
         self.labels = []  # (kind, text, net index)
 
 
+def no_connect_line(x, y):
+    return f"(no_connect (at {mm(x)} {mm(y)}) (uuid {quote(new_uuid())}))"
+
+
 def symbol_lines(lib_id, ref, signature):
     name = lib_id.split(":", 1)[1]
     prefix = re.match(r"[A-Za-z#]*", ref).group() or "X"
@@ -161,7 +168,7 @@ def synthesize(path, project, sim=None):
     # pins[ref] = [(pad, name, type)] of the netlist nodes.
     pins = {ref: [] for ref in netlist.components}
     for (ref, pad), node in netlist.nodes.items():
-        pins[ref].append((pad, node.pinfunction, node.pintype))
+        pins[ref].append((pad, node.pinfunction, node.pintype.removesuffix(NO_CONNECT_SUFFIX)))
     libsources = {}
     for comp in children(children(root_tree, "components")[0], "comp"):
         source = children(comp, "libsource")
@@ -264,6 +271,7 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
 
     # Symbols and sheet symbols in a row; pin ends and sheet pins on the line PIN_Y.
     ends = {}
+    no_connects = []
     x = 25.4
     for ref in s.components:
         comp = netlist.components[ref]
@@ -283,6 +291,8 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
         for i, (pad, _, _) in enumerate(sorted(pins[ref])):
             ends[("pin", ref, pad)] = (x + i * PIN_PITCH, PIN_Y)
             out.append(f"(pin {quote(pad)} (uuid {quote(new_uuid())}))")
+            if netlist.nodes[(ref, pad)].pintype.endswith(NO_CONNECT_SUFFIX):
+                no_connects.append(no_connect_line(*ends[("pin", ref, pad)]))
         out.append(f"(instances (project {quote(project['name'])} "
                    f"(path {quote(instance)} (reference {quote(ref)}) (unit 1)))))")
         x += COMPONENT_PITCH
@@ -301,6 +311,7 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
         out.append(f"(instances (project {quote(project['name'])} "
                    f"(path {quote(instance)} (page {quote(str(child.page))})))))")
         x += width + COMPONENT_PITCH
+    out += no_connects
 
     # Every net gets a hub on the line HUB_Y, wired to the ends on the line PIN_Y. All wire
     # ends are on these two lines, so none lies inside another wire and connects to it.
@@ -656,6 +667,8 @@ def synthesize_library(path, project, sim_excluded=None):
                 node = netlist.nodes.get((ref, expand_stacked_pin(number)[0]))
                 if node is None:
                     raise ValueError(f"{ref}: pin {number} of the symbol is not in the netlist")
+                if node.pintype.endswith(NO_CONNECT_SUFFIX):
+                    out.append(no_connect_line(x + px, y - py))
                 net = node.net
                 auto = net.startswith(("Net-(", "unconnected-("))
                 if auto and len(nets[net]) == 1:

@@ -12,6 +12,9 @@ break the API).
 
 ### Added
 
+- The KiCad netlist writes the pin type of the only pin of a net marked with
+  `CircuitBuilder::no_connect` with the suffix `+no_connect` (e.g. `input+no_connect`), as
+  Eeschema writes a pin with a no-connect flag.
 - `Netlist::to_spice_with` takes `SpiceOptions`, whose `ground_net(..)` connects more nets (e.g.
   `AGND`) to the SPICE ground besides `GND` and `0`. `to_spice()` is unchanged.
 - `cuprite_wire::parts::PartExt` overrides the value, footprint, fields and flags of a part

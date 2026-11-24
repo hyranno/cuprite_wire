@@ -100,7 +100,8 @@ reports both as `isolated_pin_label`. Before following KiCad 10, this crate repo
 
 ## 4. Marks
 
-Nodes can carry marks seen only by ERC; the exporters ignore them. Like labels, marks attached
+Nodes can carry marks seen only by ERC; the exporters ignore them, except that the KiCad netlist
+writes the pin type of the only pin of a no-connect net with the suffix `+no_connect`. Like labels, marks attached
 inside a subcircuit stay on the nets of the circuit that instantiates it.
 
 | Method | KiCad equivalent | Effect |

@@ -7,6 +7,7 @@ use std::{collections::HashSet, fmt, io};
 use uuid::Uuid;
 
 use crate::{
+    erc::ErcMark,
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     kicad::{KicadPartInfo, LibId, PartFlags, PinInfoProblem},
     netlist::{Component, Netlist},
@@ -47,6 +48,8 @@ struct KicadNode {
     pad: String,
     pin_function: Option<String>,
     pin_type: &'static str,
+    /// Whether the pin type gets the suffix `+no_connect`.
+    no_connect: bool,
 }
 
 impl Netlist {
@@ -120,6 +123,7 @@ impl Netlist {
                             pad: pin.pad.clone(),
                             pin_function: pin.name.clone().filter(|name| !name.is_empty()),
                             pin_type: pin.pin_type.as_str(),
+                            no_connect: false,
                         })
                     })
                     .collect();
@@ -135,6 +139,10 @@ impl Netlist {
                     "a pad is listed twice in net {:?}",
                     net.name
                 );
+                // KiCad marks a pin alone on a net with a no-connect flag (not one of several).
+                if let [node] = nodes.as_mut_slice() {
+                    node.no_connect = net.marks.iter().any(|mark| mark.mark == ErcMark::NoConnect);
+                }
                 KicadNet {
                     code: i + 1,
                     name: net.name.clone(),
@@ -307,7 +315,12 @@ impl KicadNet {
             if let Some(pin_function) = &node.pin_function {
                 node_items.push(SExpr::kv("pinfunction", pin_function));
             }
-            node_items.push(SExpr::kv("pintype", node.pin_type));
+            let pin_type = if node.no_connect {
+                format!("{}+no_connect", node.pin_type)
+            } else {
+                node.pin_type.to_string()
+            };
+            node_items.push(SExpr::kv("pintype", pin_type));
             SExpr::node("node", node_items)
         }));
         SExpr::node("net", items)
@@ -477,6 +490,8 @@ mod tests {
         circuit.label(u_ic["gnd_b"], NetLabel::global("GND"));
         circuit.label(u_amp["vdd"], NetLabel::global("+3V3"));
         circuit.label(u_ic["vcc"], NetLabel::global("+3V3"));
+        // A single pin with a no-connect flag gets the pin type suffix `+no_connect`.
+        circuit.no_connect(u_amp["in_p"]);
 
         check_golden("multi_pin_ic.net", &export(&circuit));
     }

@@ -99,7 +99,8 @@ pub struct Net {
     pub trace: Trace,
     /// Whether the name is given by a label.
     pub labeled: bool,
-    /// ERC marks attached to the net. The exporters ignore them.
+    /// ERC marks attached to the net. The exporters ignore them, except that the KiCad netlist
+    /// writes the pin type of a single pin on a net with a no-connect mark with the suffix `+no_connect`.
     pub marks: Vec<NodeMark>,
 }
 

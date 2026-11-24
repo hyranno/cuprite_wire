@@ -44,4 +44,4 @@
     (net (code "5")
       (name "unconnected-(U1-+-Pad3)")
       (class "Default")
-      (node (ref "U1") (pin "3") (pinfunction "+") (pintype "input")))))
+      (node (ref "U1") (pin "3") (pinfunction "+") (pintype "input+no_connect")))))
