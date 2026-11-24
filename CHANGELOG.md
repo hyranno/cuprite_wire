@@ -103,6 +103,18 @@ break the API).
   without `..Default::default()` must set them.
 - The KiCad netlist of parts from `kicad_part!` (and `cuprite_wire::basic`) has the `description`
   (and `datasheet`) of their symbols.
+- **Breaking:** `KicadPinInfo` has the field `unit` (set with `KicadPinInfo::with_unit`; `new`
+  makes a pin of every unit) and `KicadPartInfo` the field `units`, what KiCad appends to the
+  reference of each unit (`unit_letters`, or the symbol's `unit_name`). `kicad_part!` fills them
+  for symbols with several units. A pin in a unit the part does not have is an error
+  (`CircuitErrorKind::UnknownPinUnit`).
+- Multi-unit parts are written as KiCad writes them: automatic net names use the reference of
+  the pin's unit, and a pin name is shared only within its unit (`Net-(U1B--)` instead of
+  `Net-(U1---Pad6)` for a dual op-amp, `Net-(D1A-K)` instead of `Net-(D1-A-Pad6)` for
+  `Diode:BAT54SDW`), which also changes the SPICE node names; `tstamps` lists a UUID per unit,
+  the first being the component's UUID as before, so pcbnew keeps the footprints' paths.
+- Automatic net names no longer count duplicate pins (on the same pad) or `no_connect` pins as
+  sharing a pin's name, as KiCad does.
 
 ## [0.3.0] - 2026-11-22
 

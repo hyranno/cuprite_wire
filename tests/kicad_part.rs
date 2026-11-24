@@ -101,6 +101,7 @@ fn test_resistor() {
             flags: PartFlags::default(),
             datasheet: None,
             description: Some("Resistor".into()),
+            units: vec![],
         })
     );
     assert_eq!(
@@ -146,16 +147,19 @@ fn test_dual_amp() {
     let info = amp.kicad().unwrap();
     assert_eq!(
         info.pins["out_a"],
-        KicadPinInfo::new("1", None, PinType::Output)
+        KicadPinInfo::new("1", None, PinType::Output).with_unit(1)
     );
     assert_eq!(
         info.pins["4"],
-        KicadPinInfo::new("4", Some("V-"), PinType::PowerIn)
+        KicadPinInfo::new("4", Some("V-"), PinType::PowerIn).with_unit(3)
     );
     assert_eq!(
         info.pins["ep"],
         KicadPinInfo::new("9", None, PinType::Passive)
     );
+    // The extra pad is in every unit.
+    assert_eq!(info.pins["ep"].unit, 0);
+    assert_eq!(info.units, strings(&["A", "B", "C"]));
     assert_eq!(info.fields, vec![("MPN".to_string(), "DA-1".to_string())]);
     assert!(info.check_pins(&PartPins::of(&amp)).is_empty());
     assert_eq!(amp.spice(), None);

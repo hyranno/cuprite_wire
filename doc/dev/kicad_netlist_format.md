@@ -115,7 +115,12 @@ If "Link footprints using symbol references" is selected in the dialog, matching
 - For multi-unit parts (e.g. a dual op-amp), Eeschema has one symbol per unit, so they are merged into
   one `comp` whose `tstamps` lists several UUIDs
   (`(tstamps "uuid-A" "uuid-B" "uuid-C")`). pcbnew keeps all of them.
-  Eeschema picks the unit with the smallest UUID as the primary one and writes it last.
+  Eeschema picks the unit with the smallest UUID as the primary one and writes it last, the other
+  units first in the order of the sheet's file. pcbnew (KiCad 10) matches a footprint against any
+  of the UUIDs, but sets a new footprint's path from the **first** one (and reports a path change
+  if a matched footprint has another). cuprite_wire writes one UUID per unit, the component's own
+  UUID first (unchanged from a single-unit part, so existing boards keep their paths) and UUIDs
+  derived from it for units 2, 3, ... (ref. 7, 8).
 - UUIDs are lowercase hex in the hyphenated `8-4-4-4-12` form.
 - The `tstamps` inside `sheetpath` is read as a single path string.
 
@@ -194,7 +199,7 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
 
 - For an unnamed net, Eeschema prefers a pin that is written by its name alone (`U1-OUT`) to one
   written with `Pad<number>` (a pin without a name, named as its pad number, or whose name is
-  shared by several pins of the symbol), and among those takes the smallest net name in string
+  shared by several pins of the symbol or unit, 6.1.1), and among those takes the smallest net name in string
   order. The pin type does not matter. (Observed with KiCad 9.0.2 using
   `tools/compare_kicad_cli_netlist.py`.)
 - Characters such as `/` in net names are escaped by Eeschema (e.g. `/` -> `{slash}`).
@@ -206,6 +211,34 @@ Net names are arbitrary strings to pcbnew, but using Eeschema's naming fits bett
 - Nodes are sorted by `ref` (string order) then by pin number, with duplicates removed.
 - Components are written sheet by sheet in page order, and by reference in natural order in each
   sheet (a root `X1` comes before `C1` on page 2).
+
+### 6.1.1 Multi-unit symbols
+
+Observed with KiCad 10.0 on the `ecc83` demo (a three-unit valve) and on a copy with a
+`unit_name` added, and explained by `SCH_PIN::GetDefaultNetName` and `SCH_SYMBOL::GetRef` (ref. 9):
+
+- A pin written by its name uses the reference **with the unit's suffix**: `Net-(U1A-K)`,
+  `Net-(U1B-K)`. The suffix is the unit's `unit_name` if the library symbol has one
+  (`Net-(U1Tri-K)`), otherwise letters `A`..`Z`, `AA`, `AB`, ... (`LIB_SYMBOL::LetterSubReference`,
+  with the default schematic settings: no separator, first letter `A`). Symbols with one unit get
+  no suffix. A pin written as `Pad<number>` never gets the suffix (`Net-(U1-Pad3)`), since pad
+  numbers are unique in the footprint.
+- "Shared name" (which adds `-Pad<number>`) is decided among the pins of the **placed unit**
+  (its own pins and those of unit 0): another pin with the same shown name, a different shown
+  number, and the same no-connect-ness as the net (`unconnected` iff the other pin is of type
+  `no_connect`). So the K of each unit of `Diode:BAT54SDW` is not shared, and the net of pad 6 is
+  `Net-(D1A-K)` (cuprite_wire used to write `Net-(D1-A-Pad6)`, judging over all units).
+- Each placed unit has its own copies of the unit-0 pins (and of a pin repeated in several
+  units), so each copy is a candidate and the smallest name wins as usual: `U1A-...` for letters.
+- cuprite_wire keeps one pin per pad with the **lowest** unit of a repeated pin
+  (`KicadPinInfo::unit`), and treats a unit-0 pin as a candidate in every unit. A pin repeated in
+  units 1 and 2 is therefore only judged in unit 1; KiCad would also consider unit 2, which only
+  matters if its name is shared in unit 1 but not in unit 2 (none of the 17 symbols of the KiCad
+  10 libraries with pins repeated in some units have that). A stacked pin in KiCad 10's notation
+  (`[2,13]`) is one library pin, so its pads do not share a name in KiCad, but they are separate
+  pins here and do (the name gets `-Pad`).
+- KiCad 10's own format adds `(units (unit (name "A") (pins (pin (num "1")) ...)) ...)` to each
+  component; cuprite_wire writes the 9 format without it.
 
 ### 6.2 The `+no_connect` suffix
 
@@ -286,6 +319,9 @@ them, and `doc/dev/verifying.md` for how the output is checked against pcbnew an
 | 4 | KiCad source `common/netlist.keywords` (9.0 branch) <https://gitlab.com/kicad/code/kicad/-/blob/9.0/common/netlist.keywords> | List of keywords used | GPL-2.0-or-later |
 | 5 | KiCad Developer Documentation, "S-Expression Format" <https://dev-docs.kicad.org/en/file-formats/sexpr-intro/> | General S-expression lexical rules | GPL-3.0 (LICENSE of the kicad/services/kicad-dev-docs repository) |
 | 6 | "KiCad without Eeschema or CvPcb" <https://www.sheep-thrills.net/KiCad_without_Eeschema_or_CvPcb.html> | Hints for the minimal form (note: targets KiCad 2013, the older unquoted `version D` format) | None stated (treated as copyrighted by the author; content is not reproduced) |
+| 7 | KiCad source `pcbnew/netlist_reader/kicad_netlist_reader.cpp` and `board_netlist_updater.cpp` (10.0 branch) <https://gitlab.com/kicad/code/kicad/-/tree/10.0/pcbnew/netlist_reader> | How pcbnew uses the `tstamps` of a component (path from the first, matching by any) | GPL-3.0-or-later; read for reference only |
+| 8 | KiCad source `eeschema/netlist_exporters/netlist_exporter_xml.cpp` (10.0 branch) | Order of the multi-unit `tstamps`, the `units` element of the KiCad 10 format | GPL-3.0-or-later; read for reference only |
+| 9 | KiCad source `eeschema/sch_pin.cpp`, `sch_symbol.cpp`, `lib_symbol.cpp` and `sch_io/kicad_sexpr/sch_io_kicad_sexpr_parser.cpp` (10.0 branch) | Automatic net names of multi-unit symbols, unit suffixes (`unit_name`, letters) | GPL-3.0-or-later; read for reference only |
 
 ### License notes
 

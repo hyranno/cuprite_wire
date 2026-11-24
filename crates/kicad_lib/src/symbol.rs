@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     Error,
-    naming::natural_cmp,
+    naming::{natural_cmp, unit_letters},
     sexpr::{self, Sexpr},
 };
 
@@ -111,6 +111,9 @@ pub struct Symbol {
     /// netlist): by unit, then by position in the unit (left to right, then top to bottom), then
     /// in file order.
     pub pins: Vec<Pin>,
+    /// What KiCad appends to the reference of each unit, from unit 1: the unit's `unit_name`, or
+    /// letters (`A`, `B`, ...). Empty for a symbol with a single unit.
+    pub units: Vec<String>,
     pub power: bool,
     pub exclude_from_sim: bool,
     pub in_bom: bool,
@@ -218,10 +221,12 @@ impl SymbolLib {
         };
 
         let pins = collect_pins(base, base_name)?;
+        let units = collect_units(base, base_name)?;
         Ok(Symbol {
             name: name.to_string(),
             properties,
             pins,
+            units,
             power: chain.iter().any(|symbol| symbol.child("power").is_some()),
             exclude_from_sim: flag("exclude_from_sim", false),
             in_bom: flag("in_bom", true),
@@ -241,18 +246,7 @@ impl SymbolLib {
 fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
     let mut pins: Vec<Pin> = Vec::new();
     for unit_symbol in base.children("symbol") {
-        let unit_name = unit_symbol.arg(0).unwrap_or_default();
-        let (unit, style) = unit_name
-            .strip_prefix(base_name)
-            .and_then(|rest| rest.strip_prefix('_'))
-            .and_then(|rest| rest.split_once('_'))
-            .and_then(|(unit, style)| Some((unit.parse::<u32>().ok()?, style.parse::<u32>().ok()?)))
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "{}: unexpected unit symbol name {unit_name:?}",
-                    unit_symbol.pos()
-                ))
-            })?;
+        let (unit, style) = unit_and_style(unit_symbol, base_name)?;
         if style > 1 {
             continue;
         }
@@ -294,6 +288,43 @@ fn collect_pins(base: &Sexpr, base_name: &str) -> Result<Vec<Pin>, Error> {
             .then(b.at.1.total_cmp(&a.at.1))
     });
     Ok(pins)
+}
+
+/// The unit and body style of a unit sub-symbol `<base>_<unit>_<style>`.
+fn unit_and_style(unit_symbol: &Sexpr, base_name: &str) -> Result<(u32, u32), Error> {
+    let unit_name = unit_symbol.arg(0).unwrap_or_default();
+    unit_name
+        .strip_prefix(base_name)
+        .and_then(|rest| rest.strip_prefix('_'))
+        .and_then(|rest| rest.split_once('_'))
+        .and_then(|(unit, style)| Some((unit.parse::<u32>().ok()?, style.parse::<u32>().ok()?)))
+        .ok_or_else(|| {
+            Error::new(format!(
+                "{}: unexpected unit symbol name {unit_name:?}",
+                unit_symbol.pos()
+            ))
+        })
+}
+
+/// [`Symbol::units`]: as many as the highest unit number of the sub-symbols (as KiCad counts
+/// them), each with its `unit_name` (from any body style) or its letters.
+fn collect_units(base: &Sexpr, base_name: &str) -> Result<Vec<String>, Error> {
+    let mut names: BTreeMap<u32, String> = BTreeMap::new();
+    let mut count = 1;
+    for unit_symbol in base.children("symbol") {
+        let (unit, _) = unit_and_style(unit_symbol, base_name)?;
+        count = count.max(unit);
+        let name = unit_symbol.child("unit_name").and_then(|name| name.arg(0));
+        if let Some(name) = name.filter(|name| !name.is_empty()) {
+            names.entry(unit).or_insert_with(|| name.to_string());
+        }
+    }
+    if count == 1 {
+        return Ok(Vec::new());
+    }
+    Ok((1..=count)
+        .map(|unit| names.remove(&unit).unwrap_or_else(|| unit_letters(unit)))
+        .collect())
 }
 
 fn parse_pin(pin: &Sexpr, unit: u32) -> Result<Pin, Error> {
@@ -395,6 +426,7 @@ mod tests {
     (symbol "AMP_1_2"
       (pin output line (at 5 0 180) (length 2) (name "~" (effects)) (number "1" (effects))))
     (symbol "AMP_2_1"
+      (unit_name "PWR")
       (pin power_in line (at 0 5 270) (length 2) (name "V+" (effects)) (number "10" (effects)))
       (pin power_in line (at 0 -5 90) (length 2) (name "V-" (effects)) (number "4" (effects)))
       (pin passive line (at 0 -5 90) (length 2) (hide yes) (name "V-" (effects)) (number "5" (effects)))))
@@ -422,6 +454,8 @@ mod tests {
             vec![vec!["4".to_string(), "5".to_string()]]
         );
         assert!(symbol.in_bom);
+        // Unit 2 has a `unit_name`.
+        assert_eq!(symbol.units, ["A", "PWR"]);
     }
 
     #[test]
@@ -432,6 +466,7 @@ mod tests {
         assert_eq!(symbol.property("Description"), Some("base"));
         assert_eq!(symbol.property("Sim.Device"), Some("SUBCKT"));
         assert_eq!(symbol.pins.len(), 6);
+        assert_eq!(symbol.units, ["A", "PWR"]);
         assert!(!symbol.in_bom);
         assert!(lib.symbol("NONE").is_err());
     }
@@ -471,6 +506,7 @@ mod tests {
         assert_eq!(symbol.pins[0].number, "1");
         assert_eq!(symbol.pins[1].number, "[2,4-5]");
         assert_eq!(symbol.pins[1].pads, strings(&["2", "4", "5"]));
+        assert!(symbol.units.is_empty());
         let lib = SymbolLib::parse(
             r#"(kicad_symbol_lib (symbol "X"
                  (symbol "X_1_1" (pin input line (at 0 0 0) (name "A") (number "[1")))))"#,
@@ -518,6 +554,7 @@ mod tests {
             ]
         );
         assert!(symbol.stacked_pins().is_empty());
+        assert_eq!(symbol.units, ["A", "B"]);
     }
 
     #[test]

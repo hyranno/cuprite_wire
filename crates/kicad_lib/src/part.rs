@@ -171,6 +171,8 @@ pub struct KicadDef {
     pub exclude_from_board: bool,
     pub description: Option<String>,
     pub datasheet: Option<String>,
+    /// [`Symbol::units`](crate::symbol::Symbol::units).
+    pub units: Vec<String>,
 }
 
 pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartDef, PartError> {
@@ -397,6 +399,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
             exclude_from_board: !symbol.on_board,
             description: non_empty("Description"),
             datasheet: non_empty("Datasheet"),
+            units: symbol.units.clone(),
         }),
         ref_prefix,
         value,

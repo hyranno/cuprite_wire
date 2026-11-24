@@ -151,6 +151,15 @@ pub enum CircuitErrorKind {
         /// The footprint pad assigned to more than one pin.
         pad: String,
     },
+    /// A pin of a part is in a unit the part does not have ([`crate::kicad::KicadPartInfo::units`]).
+    UnknownPinUnit {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The pin ID.
+        pin_id: String,
+        /// The unit of the pin.
+        unit: u32,
+    },
     /// The part has no SPICE information.
     SpiceUnsupported {
         /// Reference designator of the part.
@@ -251,6 +260,16 @@ impl fmt::Display for CircuitErrorKind {
                 write!(
                     f,
                     "{ref_name}: pad {pad:?} is assigned to more than one pin"
+                )
+            }
+            CircuitErrorKind::UnknownPinUnit {
+                ref_name,
+                pin_id,
+                unit,
+            } => {
+                write!(
+                    f,
+                    "{ref_name}: pin {pin_id:?} is in unit {unit}, which the part does not have"
                 )
             }
             CircuitErrorKind::SpiceUnsupported { ref_name } => {

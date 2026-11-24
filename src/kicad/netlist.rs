@@ -10,6 +10,7 @@ use crate::{
     erc::ErcMark,
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     kicad::{KicadPartInfo, LibId, PartFlags, PinInfoProblem},
+    naming::unit_uuid,
     netlist::{Component, Netlist},
     sexpr::SExpr,
 };
@@ -34,7 +35,9 @@ pub(super) struct KicadComponent {
     pub(super) description: String,
     pub(super) sheet_names: String,
     pub(super) sheet_tstamps: String,
-    pub(super) uuid: Uuid,
+    /// One for each unit. The first is the component's UUID, which pcbnew takes as the
+    /// footprint's path.
+    pub(super) uuids: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,7 +91,9 @@ impl Netlist {
                     flags: info.flags,
                     sheet_names: component.path.to_string(),
                     sheet_tstamps: component.path.tstamps(),
-                    uuid: component.uuid,
+                    uuids: (1..=info.unit_count())
+                        .map(|unit| unit_uuid(component.uuid, unit))
+                        .collect(),
                 })
             })
             .collect();
@@ -196,6 +201,11 @@ fn check_component<'a>(
                 PinInfoProblem::DuplicatePad { pad } => CircuitErrorKind::DuplicatePad {
                     ref_name: ref_name(),
                     pad,
+                },
+                PinInfoProblem::UnknownUnit { pin_id, unit } => CircuitErrorKind::UnknownPinUnit {
+                    ref_name: ref_name(),
+                    pin_id,
+                    unit,
                 },
             });
         footprint.into_iter().chain(pins).collect()
@@ -310,7 +320,12 @@ impl KicadComponent {
                 SExpr::kv("tstamps", &self.sheet_tstamps),
             ],
         ));
-        items.push(SExpr::kv("tstamps", self.uuid.to_string()));
+        items.push(SExpr::node(
+            "tstamps",
+            self.uuids
+                .iter()
+                .map(|uuid| SExpr::string(uuid.to_string())),
+        ));
         SExpr::node("comp", items)
     }
 }
@@ -611,7 +626,7 @@ mod tests {
             netlist
                 .components
                 .iter()
-                .map(|c| (c.uuid, (c.ref_name.clone(), c.value.clone())))
+                .map(|c| (c.uuids[0], (c.ref_name.clone(), c.value.clone())))
                 .collect()
         };
         let before = by_uuid(&before);
