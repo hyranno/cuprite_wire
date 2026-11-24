@@ -8,7 +8,8 @@
 //! ```
 //!
 //! Run `cargo run --example sensor_frontend > sensor_frontend.net` to check the board with ERC
-//! and write its KiCad netlist, and `cargo test --example sensor_frontend` to test the
+//! and write its KiCad netlist, `cargo run --example sensor_frontend -- --bom > bom.csv` to write
+//! its bill of materials instead, and `cargo test --example sensor_frontend` to test the
 //! subcircuits. See `examples/sensor_frontend/README.md`.
 
 mod bias;
@@ -24,6 +25,7 @@ use std::{io, process::ExitCode};
 use cuprite_wire::{
     circuit::{CircuitBuilder, Named},
     erc::ErcSettings,
+    kicad::BomOptions,
     naming::NetLabel,
 };
 
@@ -78,10 +80,16 @@ fn main() -> Result<ExitCode, Box<dyn std::error::Error>> {
         eprintln!("ERC failed; the netlist is not written");
         return Ok(ExitCode::FAILURE);
     }
-    netlist
+    let kicad = netlist
         .to_kicad()?
-        .with_source("examples/sensor_frontend/main.rs")
-        .write(&mut io::stdout().lock())?;
+        .with_source("examples/sensor_frontend/main.rs");
+    if std::env::args().any(|arg| arg == "--bom") {
+        kicad
+            .bom(&BomOptions::default())
+            .write(&mut io::stdout().lock())?;
+    } else {
+        kicad.write(&mut io::stdout().lock())?;
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -109,5 +117,15 @@ mod tests {
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains(r#"(footprint "sensor_frontend:PinHeader_1x04_P2.54mm_Vertical")"#));
         assert!(text.contains(r#"(footprint "cuprite_basic:SOT-23-5")"#));
+    }
+
+    /// The bill of materials groups the parts by value and footprint.
+    #[test]
+    fn board_bom() {
+        let netlist = board().build(&()).to_netlist().unwrap();
+        let bom = netlist.to_kicad().unwrap().bom(&BomOptions::default());
+        let text = bom.to_string();
+        assert!(text.starts_with("\"Refs\",\"Value\",\"Footprint\",\"Qty\",\"DNP\"\n"));
+        assert!(text.contains("\"U1-U3\",\"OPAMP_RRIO\",\"cuprite_basic:SOT-23-5\",\"3\",\"\"\n"));
     }
 }

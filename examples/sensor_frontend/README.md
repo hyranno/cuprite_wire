@@ -19,6 +19,7 @@ J1 IN ──> [preamp: AC coupling, gain 11] ──> [filter: 2nd-order low-pass
 
 ```sh
 cargo run --example sensor_frontend > sensor_frontend.net   # ERC, then the netlist
+cargo run --example sensor_frontend -- --bom > bom.csv      # ERC, then the bill of materials
 cargo test --example sensor_frontend                          # the tests (needs ngspice)
 ```
 

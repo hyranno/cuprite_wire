@@ -17,21 +17,21 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KicadNetlist {
     source: Option<String>,
-    components: Vec<KicadComponent>,
+    pub(super) components: Vec<KicadComponent>,
     nets: Vec<KicadNet>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct KicadComponent {
-    ref_name: String,
-    value: String,
-    footprint: LibId,
-    fields: Vec<(String, String)>,
-    lib_source: Option<LibId>,
-    flags: PartFlags,
-    sheet_names: String,
-    sheet_tstamps: String,
-    uuid: Uuid,
+pub(super) struct KicadComponent {
+    pub(super) ref_name: String,
+    pub(super) value: String,
+    pub(super) footprint: LibId,
+    pub(super) fields: Vec<(String, String)>,
+    pub(super) lib_source: Option<LibId>,
+    pub(super) flags: PartFlags,
+    pub(super) sheet_names: String,
+    pub(super) sheet_tstamps: String,
+    pub(super) uuid: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

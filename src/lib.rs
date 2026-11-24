@@ -27,7 +27,7 @@
 //! | Guide | Contents |
 //! |---|---|
 //! | [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md) | parts, labels, subcircuits, errors ([`circuit`], [`parts`], [`subcircuit`]) |
-//! | [Exporting a KiCad netlist](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_netlist_usage.md) | the netlist for pcbnew ([`kicad`]) |
+//! | [Exporting a KiCad netlist](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_netlist_usage.md) | the netlist for pcbnew and the bill of materials ([`kicad`]) |
 //! | [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) | [`kicad_part!`] and [`basic`] |
 //! | [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) | [`spice_part!`], the `sim` block, dialects |
 //! | [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md) | test benches and ngspice ([`spice`]) |
