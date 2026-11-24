@@ -236,7 +236,7 @@ is written for the project in the style of TI's models (CRLF, a Windows-1252 com
 `tests/vendor_models.rs` lists the files it expects: TI's TPS3899DL transient model and LMx58/LM2904
 model, checked with ngspice 44.2 on 2026-11-18). The TPS3899 model is marked "All rights reserved",
 so it is only read from the directory given by `CUPRITE_VENDOR_MODELS_DIR` (e.g. the git-ignored
-`vendor_models.local/`).
+`.scratch.local/vendor_models/`).
 
 ## 8. Verifying
 

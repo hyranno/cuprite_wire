@@ -24,7 +24,7 @@ the PR; the user merges it and pushes the tag.
 3. **Regenerate the goldens**, which contain `(tool "cuprite_wire X.Y.Z")`:
    ```bash
    UPDATE_GOLDEN=1 cargo test --workspace
-   UPDATE_GOLDEN=1 CUPRITE_VENDOR_MODELS_DIR=/workspace/vendor_models.local cargo test --workspace --all-features
+   UPDATE_GOLDEN=1 CUPRITE_VENDOR_MODELS_DIR=/workspace/.scratch.local/vendor_models cargo test --workspace --all-features
    ```
    Check that `git diff tests/golden` changes only the version.
 4. **Cut the CHANGELOG**: rename `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD`, add an empty
@@ -35,7 +35,7 @@ the PR; the user merges it and pushes the tag.
    (the settings of `[package.metadata.docs.rs]`; nightly is in the devcontainer).
 6. **Run the usual checks**: `cargo xtask all` (the checks of CI; the pre-push hook runs it
    too), and the tests with the vendor models, which CI does not run:
-   `CUPRITE_VENDOR_MODELS_DIR=/workspace/vendor_models.local cargo test --workspace --all-features`.
+   `CUPRITE_VENDOR_MODELS_DIR=/workspace/.scratch.local/vendor_models cargo test --workspace --all-features`.
 7. **Open the PR.** After the user merges it, update local `main` and create the tag locally:
    `git tag vX.Y.Z <merge commit>` (a lightweight tag on the merge commit, like the earlier
    ones). The user pushes it
