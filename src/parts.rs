@@ -12,6 +12,10 @@ use petgraph::{graph::NodeIndex, unionfind::UnionFind};
 
 use crate::{kicad::KicadPartInfo, naming::HierPath, spice::SpicePartInfo, trace::Trace};
 
+mod overrides;
+
+pub use overrides::{Overridden, PartExt, PartOverrides};
+
 /// A part (component) definition.
 ///
 /// The trait itself is format-independent. Format-specific information is returned by

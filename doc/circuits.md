@@ -55,6 +55,8 @@ impl Part for Passive {
   unsupported format is an error (`KicadUnsupported`, `SpiceUnsupported`). There is no option to
   skip unsupported parts; for SPICE, parts that should not be simulated are excluded explicitly
   (`SpicePartInfo::Excluded`).
+- An instance can override the value, footprint, fields and flags (DNP, ...) of its part, e.g.
+  `Resistor0603::new("10k").dnp()`, with `PartExt` (`doc/kicad_netlist_usage.md` section 2).
 
 ## 3. Nodes, parts and subcircuits
 
