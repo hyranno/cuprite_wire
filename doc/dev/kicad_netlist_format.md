@@ -35,6 +35,13 @@ The format is KiCad's S-expression netlist (the "KiCad" format of Eeschema, `ver
 - Tokens (keywords) consist of lowercase letters and `_` only.
 - Strings are enclosed in `"` and encoded in UTF-8. A `"` inside a string is escaped as `\"`
   (e.g. `(value "c=\"\"")`).
+- Control characters in strings: KiCad 10's lexer keeps them as they are, except that a raw
+  NUL ends the string (the rest is lost) and an escaped one (`\000`) is not a character either.
+  Checked with `pcbnew.FootprintLoad` on a footprint whose `descr` holds raw `\x01 \x7f \x1b`
+  (kept), a raw NUL (`"a\0b"` read as `a`) and `\001` (read as `\x01`); the netlist reader uses
+  the same lexer. So cuprite_wire writes control characters other than `\n \r \t` raw, rejects
+  them in names and labels (`InvalidName`), and reports a NUL in any other text of a part
+  (`KicadNulCharacter`).
 - KiCad 9 quotes numeric-looking values (`code`, `pin`, etc.) as strings too.
   The reader accepts both quoted and unquoted forms, but we always quote to match KiCad.
 - Indentation and line breaks are insignificant.

@@ -160,6 +160,14 @@ pub enum CircuitErrorKind {
         /// The unit of the pin.
         unit: u32,
     },
+    /// A text of the part for KiCad (its value, a field, a pin name, ...) contains a NUL
+    /// character, where KiCad would end the text.
+    KicadNulCharacter {
+        /// Reference designator of the part.
+        ref_name: String,
+        /// The text.
+        text: String,
+    },
     /// The part has no SPICE information.
     SpiceUnsupported {
         /// Reference designator of the part.
@@ -270,6 +278,12 @@ impl fmt::Display for CircuitErrorKind {
                 write!(
                     f,
                     "{ref_name}: pin {pin_id:?} is in unit {unit}, which the part does not have"
+                )
+            }
+            CircuitErrorKind::KicadNulCharacter { ref_name, text } => {
+                write!(
+                    f,
+                    "{ref_name}: KiCad would cut the text {text:?} at its NUL character"
                 )
             }
             CircuitErrorKind::SpiceUnsupported { ref_name } => {

@@ -129,6 +129,33 @@ break the API).
   the first being the component's UUID as before, so pcbnew keeps the footprints' paths.
 - Automatic net names no longer count duplicate pins (on the same pad) or `no_connect` pins as
   sharing a pin's name, as KiCad does.
+- **Breaking:** `SimulationError::Cosimulation` has the fields `reason` and `dir` (it was a tuple
+  variant). The error of a co-simulation is reported even if ngspice also failed (it was hidden
+  behind `SimulationError::Ngspice`), and the run directory is kept and named in the error
+  (it was removed when ngspice succeeded).
+- The analyses check their values when made, and panic with a message, instead of panicking
+  when the deck is written (`NaN`, infinities) or making a deck ngspice rejects or runs without
+  points: `Tran` (positive step and stop, a start from 0 to before the stop, a positive maximum
+  step), `Dc` (a non-zero step toward the stop) and `Ac` (at least one point, a start above 0
+  for `decade` / `octave`, from 0 for `linear`, and a finite stop not below it).
+  `IbisDiffBuffer::new` checks that `vdiff` and `tdelay` are finite, `Pwm::set_duty` rejects NaN
+  (which drove the pin high), and `InputCharacteristics::decode` checks that the times do not
+  decrease.
+- Instance names, subcircuit base names, net labels and reference prefixes with control
+  characters are rejected (`CircuitErrorKind::InvalidName`). A NUL character in a text of a part
+  written to the KiCad netlist (value, field, datasheet, description, unit or pin name, pad) is an
+  error (`CircuitErrorKind::KicadNulCharacter`), since KiCad ends the text there;
+  `KicadNetlist::with_source` panics on one.
+
+### Fixed
+
+- A clone of a `CircuitBuilder` shared the identity of the original, so a node made by one after
+  cloning was taken by the other as its own: connected to a wrong pin, or a panic. Such a node is
+  now a `ForeignNode` error; the nodes made before cloning still belong to both.
+- `Simulation::result` of an analysis whose output has no rows is a `SimulationError::Table`
+  error instead of a panic (`Op`).
+- `cuprite_wire_ibis` rejects numbers out of the range of `f64` (`1e999`) instead of reading them
+  as infinities.
 
 ## [0.3.0] - 2026-11-22
 

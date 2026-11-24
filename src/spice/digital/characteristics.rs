@@ -262,6 +262,10 @@ impl InputCharacteristics {
             voltage.len(),
             "the samples must have one time each"
         );
+        assert!(
+            time.windows(2).all(|w| w[0] <= w[1]),
+            "the times of the samples must not decrease"
+        );
         let Some(&first) = voltage.first() else {
             return DigitalSequence::new(Level::Low);
         };
@@ -368,6 +372,13 @@ mod tests {
         // From 0.5 V at 2 s to 0 V at 3 s, crossing 0.3 V at 2.4 s.
         assert!((t - 2.4).abs() < 1e-12, "{t}");
         assert!(!input.read(0.4, false) && input.read(0.4, true));
+    }
+
+    /// Decreasing times are rejected even without a level change between them.
+    #[test]
+    #[should_panic(expected = "the times of the samples must not decrease")]
+    fn test_decode_decreasing_times() {
+        InputCharacteristics::cmos(1.0).decode(&[0.0, 2.0, 1.0], &[0.0, 0.0, 0.0]);
     }
 
     #[test]

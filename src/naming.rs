@@ -92,6 +92,10 @@ pub(crate) fn unit_uuid(part: Uuid, unit: u32) -> Uuid {
 
 pub(crate) use cuprite_wire_kicad_lib::naming::natural_cmp;
 
+/// Why a name with a control character is rejected: KiCad keeps them in its files, but a NUL
+/// ends the text, and the others are not meant for names.
+const CONTROL_CHARACTER: &str = "names must not contain control characters";
+
 /// Checks an explicit instance name.
 pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
     if name.is_empty() {
@@ -100,6 +104,8 @@ pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
         Err("'#' is reserved for automatic names")
     } else if name.contains(ESCAPE_START) {
         Err("'{' is reserved for escape sequences such as {slash}")
+    } else if name.contains(char::is_control) {
+        Err(CONTROL_CHARACTER)
     } else {
         Ok(())
     }
@@ -116,6 +122,8 @@ pub(crate) fn check_base_name(name: &str) -> Result<(), &'static str> {
         Err("'#' is reserved for automatic names")
     } else if name.contains(ESCAPE_START) {
         Err("'{' is reserved for escape sequences such as {slash}")
+    } else if name.contains(char::is_control) {
+        Err(CONTROL_CHARACTER)
     } else {
         Ok(())
     }
@@ -135,6 +143,8 @@ pub(crate) fn check_ref_prefix(prefix: &str) -> Result<(), &'static str> {
         Err("reference prefixes must not end with a digit")
     } else if prefix.contains(char::is_whitespace) {
         Err("reference prefixes must not contain whitespace")
+    } else if prefix.contains(char::is_control) {
+        Err(CONTROL_CHARACTER)
     } else if let Some(c) = prefix
         .chars()
         .find(|&c| matches!(c, '?' | '#' | '/' | ESCAPE_START))
@@ -156,6 +166,8 @@ pub(crate) fn check_label_name(name: &str) -> Result<(), &'static str> {
         Err("net labels must not be empty")
     } else if name.contains(ESCAPE_START) {
         Err("'{' is reserved for escape sequences such as {slash}")
+    } else if name.contains(char::is_control) {
+        Err(CONTROL_CHARACTER)
     } else {
         Ok(())
     }
@@ -306,6 +318,9 @@ mod tests {
         assert!(check_explicit_name("").is_err());
         assert!(check_explicit_name("R#1").is_err());
         assert!(check_explicit_name("a{slash}b").is_err());
+        assert!(check_explicit_name("a\0b").is_err());
+        assert!(check_base_name("a\nb").is_err());
+        assert!(check_ref_prefix("U\u{7f}").is_err());
     }
 
     #[test]
@@ -313,5 +328,6 @@ mod tests {
         assert!(check_label_name("I/O").is_ok());
         assert!(check_label_name("").is_err());
         assert!(check_label_name("I{slash}O").is_err());
+        assert!(check_label_name("I\tO").is_err());
     }
 }

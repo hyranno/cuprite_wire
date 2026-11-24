@@ -35,6 +35,14 @@ impl Probe {
     pub fn expression(&self) -> &str {
         &self.expression
     }
+
+    /// A probe of `expression`, unchecked, for tests.
+    #[cfg(test)]
+    pub(crate) fn of_expression(expression: &str) -> Self {
+        Probe {
+            expression: expression.into(),
+        }
+    }
 }
 
 impl fmt::Display for Probe {
@@ -303,6 +311,11 @@ impl Analysis for Op {
     }
 }
 
+/// Whether `value` is finite and above 0.
+fn is_positive(value: f64) -> bool {
+    value.is_finite() && value > 0.0
+}
+
 /// A transient analysis, `tran <step> <stop> [<start> [<max step>]] [uic]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tran {
@@ -317,7 +330,16 @@ pub struct Tran {
 impl Tran {
     /// From 0 to `stop` seconds, printing every `step` seconds (ngspice also limits its time step
     /// to `step` or to `(stop - start) / 50`, whichever is smaller).
+    ///
+    /// # Panics
+    /// If `step` or `stop` is not finite and positive.
+    #[track_caller]
     pub fn new(step: f64, stop: f64) -> Self {
+        assert!(
+            is_positive(step) && is_positive(stop),
+            "the step and the stop time of a transient analysis must be finite and positive: \
+             {step}, {stop}"
+        );
         Tran {
             step,
             stop,
@@ -329,7 +351,18 @@ impl Tran {
     }
 
     /// Records the points from `start` seconds on; the simulation still starts at 0.
+    ///
+    /// # Panics
+    /// If `start` is not finite, is negative, or is not before the stop time (ngspice rejects
+    /// it).
+    #[track_caller]
     pub fn with_start(mut self, start: f64) -> Self {
+        assert!(
+            (0.0..self.stop).contains(&start),
+            "the start time of a transient analysis must be from 0 to before the stop time {}: \
+             {start}",
+            self.stop
+        );
         self.start = Some(start);
         self.probes = self.probes.renew();
         self
@@ -337,7 +370,15 @@ impl Tran {
 
     /// Limits the internal time step of ngspice to `max_step` seconds, instead of the smaller of
     /// `step` and `(stop - start) / 50`.
+    ///
+    /// # Panics
+    /// If `max_step` is not finite and positive.
+    #[track_caller]
     pub fn with_max_step(mut self, max_step: f64) -> Self {
+        assert!(
+            is_positive(max_step),
+            "the maximum step of a transient analysis must be finite and positive: {max_step}"
+        );
         self.max_step = Some(max_step);
         self.probes = self.probes.renew();
         self
@@ -400,7 +441,18 @@ pub struct Dc {
 
 impl Dc {
     /// Sweeps the value of `source` from `start` to `stop` by `step`.
+    ///
+    /// # Panics
+    /// If a value is not finite, `step` is 0, or `step` goes away from `stop` (ngspice would
+    /// write no points).
+    #[track_caller]
     pub fn new(source: &Source, start: f64, stop: f64, step: f64) -> Self {
+        assert!(
+            [start, stop, step].iter().all(|value| value.is_finite())
+                && step != 0.0
+                && (stop - start) * step >= 0.0,
+            "a DC sweep must go from {start} to {stop} by a finite step toward the stop: {step}"
+        );
         Dc {
             source: source.element.clone(),
             start,
@@ -449,7 +501,21 @@ pub struct Ac {
 }
 
 impl Ac {
+    #[track_caller]
     fn new(variation: &'static str, points: u32, start: f64, stop: f64) -> Self {
+        // ngspice rejects a start of 0 for `dec` and `oct`, and takes default values for a stop
+        // before the start.
+        let lowest_start = if variation == "lin" {
+            0.0
+        } else {
+            f64::MIN_POSITIVE
+        };
+        assert!(
+            points > 0 && start >= lowest_start && stop.is_finite() && start <= stop,
+            "an AC analysis ({variation}) needs points and frequencies from {} up to a finite \
+             stop: {points} points from {start} to {stop}",
+            if variation == "lin" { "0" } else { "above 0" }
+        );
         Ac {
             variation,
             points,
@@ -460,16 +526,28 @@ impl Ac {
     }
 
     /// `points` frequencies per decade from `start` to `stop` hertz.
+    ///
+    /// # Panics
+    /// If `points` is 0, `start` is not positive, or `stop` is not finite or is below `start`.
+    #[track_caller]
     pub fn decade(points: u32, start: f64, stop: f64) -> Self {
         Ac::new("dec", points, start, stop)
     }
 
     /// `points` frequencies per octave from `start` to `stop` hertz.
+    ///
+    /// # Panics
+    /// As [`Ac::decade`].
+    #[track_caller]
     pub fn octave(points: u32, start: f64, stop: f64) -> Self {
         Ac::new("oct", points, start, stop)
     }
 
     /// `points` frequencies in all, evenly spaced from `start` to `stop` hertz.
+    ///
+    /// # Panics
+    /// If `points` is 0, `start` is negative, or `stop` is not finite or is below `start`.
+    #[track_caller]
     pub fn linear(points: u32, start: f64, stop: f64) -> Self {
         Ac::new("lin", points, start, stop)
     }
@@ -745,9 +823,7 @@ mod tests {
     }
 
     fn probe(expression: &str) -> Probe {
-        Probe {
-            expression: expression.into(),
-        }
+        Probe::of_expression(expression)
     }
 
     /// A delay of 1 ms (φ = -ωτ, wrapped several times) on a linear scale.
@@ -814,5 +890,35 @@ mod tests {
     fn test_phase_degrees() {
         assert_eq!(Complex { re: 0.0, im: -1.0 }.phase_degrees(), -90.0);
         assert_eq!(Complex { re: -1.0, im: 0.0 }.phase_degrees(), 180.0);
+    }
+
+    /// Values ngspice rejects, or that cannot be written, are rejected when the analysis is made.
+    #[test]
+    fn test_invalid_analyses_panic() {
+        let source = Source {
+            element: "V1".into(),
+        };
+        let panics =
+            |case: &dyn Fn()| std::panic::catch_unwind(std::panic::AssertUnwindSafe(case)).is_err();
+        assert!(panics(&|| drop(Tran::new(f64::NAN, 1.0))));
+        assert!(panics(&|| drop(Tran::new(1e-6, 0.0))));
+        assert!(panics(&|| drop(Tran::new(1e-6, 1e-3).with_start(1e-3))));
+        assert!(panics(&|| drop(Tran::new(1e-6, 1e-3).with_start(-1.0))));
+        assert!(panics(&|| drop(
+            Tran::new(1e-6, 1e-3).with_max_step(f64::INFINITY)
+        )));
+        assert!(panics(&|| drop(Dc::new(&source, 0.0, 1.0, 0.0))));
+        assert!(panics(&|| drop(Dc::new(&source, 0.0, 1.0, -0.1))));
+        assert!(panics(&|| drop(Dc::new(&source, 0.0, f64::NAN, 0.1))));
+        assert!(panics(&|| drop(Ac::decade(0, 1.0, 1e3))));
+        assert!(panics(&|| drop(Ac::decade(10, 0.0, 1e3))));
+        assert!(panics(&|| drop(Ac::octave(10, f64::NAN, 1e3))));
+        assert!(panics(&|| drop(Ac::linear(10, 10.0, 1.0))));
+        assert!(panics(&|| drop(Ac::linear(10, 0.0, f64::INFINITY))));
+        // The edge cases ngspice accepts.
+        drop(Ac::linear(5, 0.0, 10.0));
+        drop(Ac::decade(5, 10.0, 10.0));
+        drop(Dc::new(&source, 1.0, 0.0, -0.1));
+        drop(Tran::new(1e-6, 1e-3).with_start(0.0).with_max_step(1e-7));
     }
 }
