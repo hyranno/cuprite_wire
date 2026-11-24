@@ -24,3 +24,36 @@ there is one place to look for them.
   netlist is made rather than at compile time.
 - The KiCad overrides (`with_value`, ...) do not change the SPICE description, which is replaced
   only by `with_spice`, so that what is simulated never changes implicitly.
+
+## 2. Typed analyses and probes
+
+`spice::analysis` writes `op`, `tran`, `dc` and `ac` with the vectors to record (`Probe`), and
+reads their results without file or column names. The string commands of `SpiceDeck::control`
+stay, and both go into the `.control` block in the order they are added, so `meas`, `let`,
+`setplot` and analyses not covered by types can be mixed in.
+
+- Probes are made by the deck (`deck.voltage("/OUT")`, `voltage_between`, `current("V1")`), not by
+  the netlist or the analysis: the deck is the test bench, `deck.netlist()` knows the nets and
+  elements to check the name against, and `SpiceDeck::run_with` of the co-simulation takes the same
+  deck. An unknown net or source is an error (`ProbeError`) naming it, before the run.
+- `SpiceDeck::analysis(&a)` appends the analysis command and a `wrdata analysis<n>.txt <probes>`
+  right after it (`wrdata` writes the current plot). The deck records the analysis by an identity
+  (`id`) with its file, and `Simulation` copies the record, so `sim.result(&a)` finds the file. The
+  identity is a process-wide counter renewed by every builder method (`probe`, `probes`), so an
+  analysis that the deck did not run, including one of another deck or one changed after it was
+  added, is an error (`SimulationError::Analysis`), not the result of another analysis. The file
+  names count per deck, so the deck text is deterministic. Adding the same analysis twice panics.
+- Results are read by position, not by the column names: the generator knows the columns (the
+  scale, then each probe, two columns for complex values), and the names ngspice writes are not
+  stable (`v("/OUT")` becomes `v(/OUT)`, the scale of `op` is a node of the plot; see
+  [SPICE netlist format](spice_netlist_format.md) 6). The count of columns is checked.
+- AC values are written as `real(<probe>) imag(<probe>)` and returned as a small `Complex` with
+  `norm`, `db` and `phase`, without a dependency on a complex number crate.
+- `op` is read from `wrdata` as the other analyses, not by parsing `print` in the log.
+- The result types are `OpResult` (`get -> f64`), `SweepResult` for `tran` and `dc` (`scale`,
+  `get -> &[f64]`, `interpolate`) and `AcResult` (`frequency`, `get -> &[Complex]`). Asking for a
+  probe the analysis does not record is a `SimulationError::Analysis`, so tests can use `?`.
+- The `Analysis` trait is sealed: the identity, the command and the reading of the columns are
+  internal, and new analyses are added in the crate.
+- `Probe::expression()` gives the ngspice expression (`v("/OUT")`, `v("/IN")-v("/OUT")`, `i(V1)`)
+  for string commands. `meas ... WHEN` does not take expressions, only vectors and `vdb(<node>)`.

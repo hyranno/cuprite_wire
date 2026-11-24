@@ -6,7 +6,11 @@ use std::{
     process::Command,
 };
 
-use crate::spice::{SpiceDeck, temp_dir::TempDir};
+use crate::spice::{
+    SpiceDeck,
+    analysis::{Analysis, column_count},
+    temp_dir::TempDir,
+};
 
 /// The ngspice program, run in batch mode (`ngspice -b deck.cir`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +60,12 @@ impl Ngspice {
             .arg(dir.join(DECK_FILE))
             .current_dir(dir.path())
             .output()?;
-        finish_run(dir, output_log(&output), output.status.success())
+        finish_run(
+            deck.analyses(),
+            dir,
+            output_log(&output),
+            output.status.success(),
+        )
     }
 }
 
@@ -113,6 +122,7 @@ pub(crate) fn output_log(output: &std::process::Output) -> String {
 
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
 pub(crate) fn finish_run(
+    analyses: &[(u64, Option<String>)],
     dir: TempDir,
     log: String,
     succeeded: bool,
@@ -124,7 +134,11 @@ pub(crate) fn finish_run(
             dir: dir.keep(),
         });
     }
-    Ok(Simulation { dir, log })
+    Ok(Simulation {
+        dir,
+        log,
+        analyses: analyses.to_vec(),
+    })
 }
 
 /// Whether ngspice reports an error with `line`: it starts with the word `error` (`Error: ...`,
@@ -148,6 +162,8 @@ fn is_error_line(line: &str) -> bool {
 pub struct Simulation {
     dir: TempDir,
     log: String,
+    /// The typed analyses of the deck, as [`SpiceDeck::analyses`].
+    analyses: Vec<(u64, Option<String>)>,
 }
 
 impl Simulation {
@@ -174,6 +190,36 @@ impl Simulation {
                 file: file.to_string(),
                 reason,
             })
+    }
+
+    /// The result of `analysis`, which the deck ran ([`SpiceDeck::analysis`]).
+    ///
+    /// # Errors
+    /// [`SimulationError::Analysis`] if the deck did not have the analysis or it has no probes,
+    /// and [`SimulationError::Table`] if its output cannot be read.
+    pub fn result<A: Analysis>(&self, analysis: &A) -> Result<A::Output, SimulationError> {
+        let error =
+            |reason: &str| SimulationError::Analysis(format!("{}: {reason}", analysis.command()));
+        let file = self
+            .analyses
+            .iter()
+            .find(|(id, _)| *id == analysis.id())
+            .ok_or_else(|| error("the deck did not have the analysis"))?
+            .1
+            .as_deref()
+            .ok_or_else(|| error("the analysis has no probes"))?;
+        let table = self.table(file)?;
+        let expected = column_count(analysis);
+        if table.columns.len() != expected {
+            return Err(SimulationError::Table {
+                file: file.to_string(),
+                reason: format!(
+                    "{} columns for {expected} (the scale and the probes)",
+                    table.columns.len()
+                ),
+            });
+        }
+        Ok(analysis.read(table.columns))
     }
 
     /// A value printed as `name = value` (by `meas` or `print`), matched case-insensitively.
@@ -263,18 +309,21 @@ impl Table {
     /// The value of a column at `x` on the scale, interpolated linearly
     /// (`None` outside the scale or for an unknown column).
     pub fn interpolate(&self, name: &str, x: f64) -> Option<f64> {
-        let ys = self.column(name)?;
-        let xs = self.scale();
-        let i = xs
-            .windows(2)
-            .position(|w| (w[0] <= x && x <= w[1]) || (w[1] <= x && x <= w[0]))?;
-        let (x0, x1, y0, y1) = (xs[i], xs[i + 1], ys[i], ys[i + 1]);
-        Some(if x1 == x0 {
-            y0
-        } else {
-            y0 + (y1 - y0) * (x - x0) / (x1 - x0)
-        })
+        interpolate(self.scale(), self.column(name)?, x)
     }
+}
+
+/// The value of `ys` at `x` on the scale `xs`, interpolated linearly (`None` outside the scale).
+pub(crate) fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> Option<f64> {
+    let i = xs
+        .windows(2)
+        .position(|w| (w[0] <= x && x <= w[1]) || (w[1] <= x && x <= w[0]))?;
+    let (x0, x1, y0, y1) = (xs[i], xs[i + 1], ys[i], ys[i + 1]);
+    Some(if x1 == x0 {
+        y0
+    } else {
+        y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    })
 }
 
 /// An error running a deck or reading its results.
@@ -297,6 +346,9 @@ pub enum SimulationError {
         /// Why it cannot be read.
         reason: String,
     },
+    /// The result of a typed analysis cannot be read: the deck did not have the analysis, or the
+    /// analysis has no such probe.
+    Analysis(String),
     /// The ngspice shared library cannot be loaded or used.
     #[cfg(feature = "shared-ngspice")]
     SharedLibrary(String),
@@ -317,6 +369,7 @@ impl fmt::Display for SimulationError {
                 )
             }
             SimulationError::Table { file, reason } => write!(f, "cannot read {file}: {reason}"),
+            SimulationError::Analysis(reason) => write!(f, "cannot read the result of {reason}"),
             #[cfg(feature = "shared-ngspice")]
             SimulationError::SharedLibrary(reason) => {
                 write!(f, "cannot use the ngspice shared library: {reason}")
@@ -343,6 +396,7 @@ mod tests {
         Simulation {
             dir: TempDir::new("sim").unwrap(),
             log: log.to_string(),
+            analyses: Vec::new(),
         }
     }
 
@@ -365,7 +419,7 @@ mod tests {
     fn test_run_dir_kept_on_error() {
         let dir = TempDir::new("sim").unwrap();
         let path = dir.to_path_buf();
-        let error = finish_run(dir, "Error: no circuit loaded.".into(), true).unwrap_err();
+        let error = finish_run(&[], dir, "Error: no circuit loaded.".into(), true).unwrap_err();
         assert!(matches!(&error, SimulationError::Ngspice { dir, .. } if *dir == path));
         assert!(path.is_dir());
         fs::remove_dir(&path).unwrap();

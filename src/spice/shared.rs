@@ -157,7 +157,7 @@ impl SharedNgspice {
             resume_unwind(panic);
         }
         let succeeded = status? == 0;
-        finish_run(dir, log, succeeded && !exited)
+        finish_run(deck.analyses(), dir, log, succeeded && !exited)
     }
 }
 

@@ -55,6 +55,8 @@ on_each_simulator!(
     simulate_digital_rc_load,
     simulate_open_drain,
     simulate_uart,
+    typed_analyses,
+    typed_operating_point,
 );
 
 fn check_golden(name: &str, text: &impl ToString) {
@@ -893,4 +895,108 @@ fn test_digital_driver_reference() {
         "{}",
         sim.log()
     );
+}
+
+/// Typed analyses mixed with string commands in one deck, read without file or column names.
+fn typed_analyses(simulator: &dyn Simulator) {
+    use crate::spice::analysis::{Ac, Dc, Tran};
+    let deck = deck_of(&rc_filter_bench(
+        IndependentSource::voltage(0.0)
+            .with_ac(1.0)
+            .with_waveform(Waveform::Pulse {
+                initial: 0.0,
+                pulsed: 1.0,
+                delay: 0.0,
+                rise: 1e-9,
+                fall: 1e-9,
+                width: 1.0,
+                period: 2.0,
+            }),
+    ));
+    let out = deck.voltage("/OUT").unwrap();
+    let across = deck.voltage_between("/IN", "/OUT").unwrap();
+    let source = deck.netlist().to_string();
+    let source = source
+        .lines()
+        .find_map(|line| {
+            line.split_whitespace()
+                .next()
+                .filter(|n| n.starts_with('V'))
+        })
+        .unwrap()
+        .to_string();
+    let current = deck.current(&source).unwrap();
+    let tran = Tran::new(10e-6, 5e-3).probes([out.clone(), across.clone(), current.clone()]);
+    let ac = Ac::decade(50, 1.0, 100e3).probes([out.clone(), current.clone()]);
+    let dc = Dc::new(&source, 0.0, 2.0, 0.5).probe(&out);
+    let deck = deck
+        .analysis(&tran)
+        .analysis(&ac)
+        // `meas ... WHEN` takes a vector or `vdb(<node>)`, not an expression like `db(v(...))`.
+        .control([r#"meas ac f3db WHEN vdb("/OUT")=-3"#])
+        .analysis(&dc);
+    let sim = simulator.run(&deck).unwrap();
+
+    let t = sim.result(&tran).unwrap();
+    let v = t.interpolate(&out, 1e-3).unwrap().unwrap();
+    assert!((v - 0.632).abs() < 0.01, "{v}");
+    let vr = t.interpolate(&across, 1e-3).unwrap().unwrap();
+    assert!((v + vr - 1.0).abs() < 1e-3, "{v} + {vr}");
+    let i = t.interpolate(&current, 1e-3).unwrap().unwrap();
+    // The current flows out of the positive pin of the source: -(1 - v) / 10k.
+    assert!((i + (1.0 - v) / 10e3).abs() < 1e-6, "{i}");
+
+    let a = sim.result(&ac).unwrap();
+    let index = a.frequency().iter().position(|&f| f >= 10e3).unwrap();
+    let gain = a.get(&out).unwrap()[index].db();
+    assert!((gain + 36.0).abs() < 0.2, "{gain}");
+    assert!(a.get(&across).is_err());
+    let f3db = sim.expect_value("f3db");
+    assert!((f3db - 159.15).abs() < 2.0, "{f3db}");
+
+    let d = sim.result(&dc).unwrap();
+    assert_eq!(d.scale(), [0.0, 0.5, 1.0, 1.5, 2.0]);
+    assert_eq!(d.get(&out).unwrap(), d.scale());
+
+    // An analysis of another deck.
+    assert!(matches!(
+        sim.result(&Tran::new(10e-6, 5e-3).probe(&out)),
+        Err(crate::spice::SimulationError::Analysis(_))
+    ));
+}
+
+fn typed_operating_point(simulator: &dyn Simulator) {
+    use crate::spice::analysis::{Op, ProbeError};
+    let mut circuit = CircuitBuilder::new();
+    let v = circuit.instantiate_part(IndependentSource::voltage(10.0));
+    let meter = circuit.instantiate_part(Ammeter);
+    let top = circuit.instantiate_part(Resistor("1k"));
+    let bottom = circuit.instantiate_part(Resistor("3k"));
+    circuit.connect(v[IndependentSource::P], meter[Ammeter::P]);
+    circuit.connect(meter[Ammeter::N], top["1"]);
+    circuit.connect(top["2"], bottom["1"]);
+    circuit.label(bottom["1"], NetLabel::local("MID"));
+    circuit.label(bottom["2"], NetLabel::global("GND"));
+    circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
+    let deck = deck_of(&circuit);
+    let mid = deck.voltage("/MID").unwrap();
+    let current = deck.current("vm1").unwrap();
+    assert_eq!(current.expression(), "i(VM1)");
+    assert_eq!(deck.voltage("GND"), Err(ProbeError::Ground("GND".into())));
+    assert_eq!(
+        deck.voltage("/NONE"),
+        Err(ProbeError::UnknownNet("/NONE".into()))
+    );
+    assert_eq!(
+        deck.current("R1"),
+        Err(ProbeError::UnknownSource("R1".into()))
+    );
+    let ground = deck.voltage_between("GND", "/MID").unwrap();
+    assert_eq!(ground.expression(), r#"(-v("/MID"))"#);
+    let op = Op::new().probes([mid.clone(), current.clone(), ground.clone()]);
+    let sim = simulator.run(&deck.analysis(&op)).unwrap();
+    let result = sim.result(&op).unwrap();
+    assert!((result.get(&mid).unwrap() - 7.5).abs() < 1e-6);
+    assert!((result.get(&current).unwrap() - 2.5e-3).abs() < 1e-9);
+    assert!((result.get(&ground).unwrap() + 7.5).abs() < 1e-6);
 }
