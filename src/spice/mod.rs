@@ -21,7 +21,7 @@ pub mod xspice;
 
 pub use deck::SpiceDeck;
 pub use netlist::{GROUND, SpiceNetlist, SpiceOptions, spice_node_name};
-pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProblem};
+pub use part::{CustomSpice, ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProblem};
 #[cfg(feature = "shared-ngspice")]
 pub use shared::SharedNgspice;
 pub use simulation::{Ngspice, Simulation, SimulationError, Simulator, Table};

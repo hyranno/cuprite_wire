@@ -11,7 +11,7 @@ use cuprite_wire::{
     kicad_part,
     naming::NetLabel,
     parts::{Part, PartPins, PinType},
-    spice::{ModelSource, SpiceElement, SpicePartInfo},
+    spice::{CustomSpice, ModelSource, SpiceElement, SpicePartInfo},
 };
 
 kicad_part! {
@@ -67,6 +67,34 @@ kicad_part! {
         symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
         footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
         sim_library_dir: "crates/kicad_lib/tests/fixtures",
+    }
+}
+
+kicad_part! {
+    /// The dual amplifier, which has no model, simulated as two ideal amplifiers (`spice: custom`).
+    struct IdealDualAmp {
+        symbol: "test:DUAL_AMP",
+        footprint: "test:SOIC-8-EP",
+        pins: { "9" => "ep" },
+        extra_pads: ["9"],
+        internal_connections: [["4", "ep"]],
+        value: param,
+        spice: custom,
+        symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+        footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
+    }
+}
+
+impl CustomSpice for IdealDualAmp {
+    fn custom_spice(&self) -> Option<SpicePartInfo> {
+        // The value is the gain; it is not checked or converted, as for `spice: auto`.
+        let unit = |suffix: &str, out: &str, plus: &str, minus: &str| {
+            SpiceElement::new('E', [out, "4", plus, minus], self.value.clone()).with_suffix(suffix)
+        };
+        Some(
+            SpicePartInfo::elements([unit("A", "1", "3", "2"), unit("B", "7", "5", "6")])
+                .with_unused_pins(["8"]),
+        )
     }
 }
 
@@ -276,6 +304,43 @@ fn test_export() {
     );
     // The amplifier has no SPICE model.
     assert!(netlist.to_spice().is_err());
+}
+
+/// A part with `spice: custom` is simulated with the elements of its `CustomSpice`, and keeps
+/// its KiCad information.
+#[test]
+fn test_custom_spice() {
+    let amp = IdealDualAmp::new("100k");
+    assert_eq!(amp.value(), "100k");
+    assert_eq!(
+        amp.kicad().unwrap().lib_source,
+        Some(LibId::new("test", "DUAL_AMP").unwrap())
+    );
+    let mut circuit = CircuitBuilder::new();
+    let amp = circuit.instantiate_part(Named("amp", amp));
+    let r1 = circuit.instantiate_part(Named("r1", Resistor::new("10k")));
+    let r2 = circuit.instantiate_part(Named("r2", Resistor::new("1k")));
+    circuit.connect(amp["1"], r1["1"]);
+    circuit.connect(r1["2"], amp["2"]);
+    circuit.connect(amp["2"], r2["1"]);
+    circuit.connect(amp["7"], amp["6"]);
+    circuit.label(r2["2"], NetLabel::global("GND"));
+    circuit.label(amp["ep"], NetLabel::global("GND"));
+    circuit.label(amp["8"], NetLabel::global("VCC"));
+    circuit.label(amp["3"], NetLabel::local("IN"));
+    circuit.label(amp["5"], NetLabel::local("IN"));
+    circuit.label(amp["1"], NetLabel::local("OUT"));
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    assert!(netlist.to_kicad().is_ok());
+    let deck = netlist.to_spice().unwrap().to_string();
+    assert!(
+        deck.contains("EU1A /OUT 0 /IN Net-_R1-Pad2_ 100k\n"),
+        "{deck}"
+    );
+    assert!(
+        deck.contains("EU1B Net-_U1---Pad6_ 0 /IN Net-_U1---Pad6_ 100k\n"),
+        "{deck}"
+    );
 }
 
 /// The generated code names everything by its full path, so it compiles where the user's names

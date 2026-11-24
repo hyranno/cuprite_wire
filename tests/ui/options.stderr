@@ -16,7 +16,7 @@ error: `symbol` is given twice
 17 |         symbol: "test:R",
    |         ^^^^^^
 
-error: expected `auto` or `none` or `excluded`
+error: expected `auto` or `none` or `excluded` or `custom`
   --> tests/ui/options.rs:24:16
    |
 24 |         spice: maybe,

@@ -12,6 +12,9 @@ break the API).
 
 ### Added
 
+- `kicad_part!` takes `spice: custom`: the generated `spice()` returns the SPICE description the
+  type's implementation of the new trait `cuprite_wire::spice::CustomSpice` writes by hand, for
+  symbols without a model, or with one the macro cannot convert.
 - `KicadPartInfo::datasheet` and `description`, which `kicad_part!` takes from the symbol's
   `Datasheet` and `Description` fields. The KiCad netlist writes them as the `datasheet` and
   `description` of a component when set (a `~` datasheet is left out, as Eeschema does).

@@ -41,6 +41,8 @@ pub enum SpiceOption {
     None,
     /// Excluded from the simulation.
     Excluded,
+    /// Written by hand: `spice()` calls the `CustomSpice` implementation of the type.
+    Custom,
 }
 
 /// The options shared by `kicad_part!` and `spice_part!`.
@@ -292,7 +294,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         if options.spice != SpiceOption::Auto {
             return err(
                 Spice,
-                "`ibis` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
+                "`ibis` gives a model, so the part cannot be `spice: none`, `excluded` or `custom`",
             );
         }
         let def =
@@ -307,14 +309,15 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         ibis_part(def)
     } else {
         match (options.spice, options.sim.is_empty()) {
-            (SpiceOption::None | SpiceOption::Excluded, false) => {
+            (SpiceOption::None | SpiceOption::Excluded | SpiceOption::Custom, false) => {
                 return err(
                     Spice,
-                    "`sim` gives a model, so the part cannot be `spice: none` or `spice: excluded`",
+                    "`sim` gives a model, so the part cannot be `spice: none`, `excluded` or `custom`",
                 );
             }
             (SpiceOption::None, true) => SpiceDef::Unsupported,
             (SpiceOption::Excluded, true) => SpiceDef::Excluded,
+            (SpiceOption::Custom, true) => SpiceDef::Custom,
             (SpiceOption::Auto, false) => {
                 let elements = sim_block(
                     &options.sim,
@@ -338,7 +341,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
                     PartError {
                 key: Spice,
                 error: e.context(format!(
-                    "cannot simulate {symbol_id} (use `spice: none` or `spice: excluded` to skip)"
+                    "cannot simulate {symbol_id} (use `spice: none` or `spice: excluded` to skip, or `spice: custom` to write it)"
                 )),
             }
                 })?;

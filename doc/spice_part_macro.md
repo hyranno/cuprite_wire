@@ -75,7 +75,7 @@ all of them. `kicad()` returns `None`, and
 
 - Pins are numbers here, before the renaming of the top-level `pins` (as for the other options
   but `internal_connections`).
-- `sim` cannot be combined with `spice: none` / `spice: excluded`.
+- `sim` cannot be combined with `spice: none` / `spice: excluded` / `spice: custom`.
 - **Several models**: `sim: [{ ..., suffix: "A" }, { ..., suffix: "B" }]`. Vendors often model a
   dual op-amp as one amplifier; use it once per unit. A pin may be mapped in several models (the
   supply pins); each model checks its own ports (section 3).

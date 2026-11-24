@@ -45,7 +45,7 @@ once.
 | `pins` | `{ "1" => "out_a", ... }`: pin IDs by pin (or extra pad) number | the pin numbers |
 | `internal_connections` | `[["4", "ep"], ...]`: groups of pin IDs connected inside the part | stacked pins only |
 | `extra_pads` | `["9"]`: footprint pads without a symbol pin, made pins of the part | none |
-| `spice` | `auto`, `none` (`spice()` returns `None`) or `excluded` (excluded from the simulation) | `auto` |
+| `spice` | `auto`, `none` (`spice()` returns `None`), `excluded` (excluded from the simulation) or `custom` (written by hand, section 4) | `auto` |
 | `sim` | a library model mapped to the pins by hand, replacing the symbol's `Sim.*` fields (section 4) | the `Sim.*` fields |
 | `ibis` | an IBIS model replacing the symbol's `Sim.*` fields: `{ library, component, pin, model, diff, driver }` (feature `ibis`, section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
@@ -161,13 +161,50 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   the model library before inlining it** (section 6): vendor models often restrict redistribution.
 - Anything else (other `Sim.Device` / `Sim.Type`, `Sim.Params` with expressions, XSPICE
   code models as `Sim.Device`) is a compile error. Choose `spice: none` (not simulated) or
-  `spice: excluded` explicitly. A `.subckt` built from XSPICE code models is a `SUBCKT` like any
+  `spice: excluded` explicitly, or write the description by hand with `spice: custom` (below). A `.subckt` built from XSPICE code models is a `SUBCKT` like any
   other; files its code models read are handled as in `doc/spice_part_macro.md` section 5.
 - Built-in models are named after the generated type (`__Diode`), while KiCad names them after the
   reference (`__D1`); the definitions are the same.
 - The library model is checked as described in `doc/spice_part_macro.md` section 3 (except that
   pins missing from `Sim.Pins` are unused, as in KiCad), and its dialect is detected: models written
   for PSpice or LTspice run in ngspice's compatibility mode (`doc/spice_part_macro.md` section 4).
+
+**Writing it by hand (`spice: custom`).** When the symbol has no model, or one the macro cannot
+convert (e.g. a source with another `Sim.Type`, or `Sim.Params` with expressions), and the part is
+still to be simulated, `spice: custom` makes the generated `spice()` return what the type's
+implementation of `cuprite_wire::spice::CustomSpice` returns. The elements name the pins by their
+pin IDs, as in a hand-written part (`doc/spice_netlist_usage.md` section 2), and the value of
+`value: param` is the field `value`, not checked or converted:
+
+```rust
+use cuprite_wire::spice::{CustomSpice, SpiceElement, SpicePartInfo};
+
+kicad_part! {
+    /// A dual op-amp simulated as two ideal amplifiers of gain `value`.
+    pub struct IdealDualAmp {
+        symbol: "Amplifier_Operational:LM358",
+        footprint: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm",
+        value: param,
+        spice: custom,
+    }
+}
+
+impl CustomSpice for IdealDualAmp {
+    fn custom_spice(&self) -> Option<SpicePartInfo> {
+        let unit = |suffix: &str, out: &str, plus: &str, minus: &str| {
+            SpiceElement::new('E', [out, "4", plus, minus], self.value.clone()).with_suffix(suffix)
+        };
+        Some(
+            SpicePartInfo::elements([unit("A", "1", "3", "2"), unit("B", "7", "5", "6")])
+                .with_unused_pins(["8"]),
+        )
+    }
+}
+```
+
+The type does not compile without the implementation. Only the SPICE deck uses it: KiCad's own
+simulation of the schematic still uses the symbol's `Sim.*` fields. `spice: custom` cannot be
+combined with the `sim` or `ibis` block.
 
 **The `sim` block.** When the symbol has no (or wrong) `Sim.*` fields, e.g. a vendor's symbol,
 give the model and the mapping in the macro. The keys are those of `Sim.*`, with the pins mapped
