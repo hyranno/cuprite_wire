@@ -59,6 +59,8 @@ on_each_simulator!(
     typed_operating_point,
     typed_transient_options,
     typed_result_errors,
+    typed_ac_probes,
+    typed_ac_phase,
 );
 
 fn check_golden(name: &str, text: &impl ToString) {
@@ -1136,6 +1138,109 @@ fn typed_result_errors(simulator: &dyn Simulator) {
             assert_eq!(reason, "3 columns for 2 (the scale and the probes)");
         }
         other => panic!("{other:?}"),
+    }
+}
+
+/// The values of the voltage across the resistor and the current of the source in an AC analysis,
+/// and the phase in degrees.
+fn typed_ac_probes(simulator: &dyn Simulator) {
+    use crate::spice::analysis::{Ac, Complex};
+    let deck = deck_of(&rc_filter_bench(
+        IndependentSource::voltage(0.0).with_ac(1.0),
+    ));
+    let out = deck.voltage("/OUT").unwrap();
+    let across = deck.voltage_between("/IN", "/OUT").unwrap();
+    let current = deck.current("V1").unwrap();
+    let ac = Ac::decade(10, 10.0, 10e3).probes([out.clone(), across.clone(), current.clone()]);
+    let sim = simulator.run(&deck.analysis(&ac)).unwrap();
+    let a = sim.result(&ac).unwrap();
+    assert_eq!(a.frequency().len(), 31);
+    // `wrdata` writes 9 significant digits.
+    let close = |x: Complex, y: Complex| (x.re - y.re).hypot(x.im - y.im) < 1e-8 * y.norm();
+    for (i, &f) in a.frequency().iter().enumerate() {
+        // H = 1 / (1 + jωRC) with RC = 1 ms.
+        let wrc = std::f64::consts::TAU * f * 1e-3;
+        let denominator = 1.0 + wrc * wrc;
+        let expected = Complex {
+            re: 1.0 / denominator,
+            im: -wrc / denominator,
+        };
+        let v = a.get(&out).unwrap()[i];
+        assert!(close(v, expected), "{f}: {v:?} for {expected:?}");
+        let vr = a.get(&across).unwrap()[i];
+        assert!(close(
+            Complex {
+                re: v.re + vr.re,
+                im: v.im + vr.im
+            },
+            Complex { re: 1.0, im: 0.0 }
+        ));
+        // The current flows out of the positive pin of the source: -vr / 10k.
+        let current = a.get(&current).unwrap()[i];
+        let expected = Complex {
+            re: -vr.re / 10e3,
+            im: -vr.im / 10e3,
+        };
+        assert!(
+            close(current, expected),
+            "{f}: {current:?} for {expected:?}"
+        );
+        assert!((v.phase_degrees() + wrc.atan().to_degrees()).abs() < 1e-6);
+    }
+}
+
+/// The phases and the group delay of three RC stages (whose phase goes down to -3π/2) match
+/// `vp()`, `cph()` and `group_delay()` of ngspice.
+fn typed_ac_phase(simulator: &dyn Simulator) {
+    use crate::spice::analysis::Ac;
+    let mut circuit = CircuitBuilder::new();
+    let stages =
+        ["s1", "s2", "s3"].map(|name| circuit.instantiate_subcircuit(Named(name, RcStage)));
+    circuit.connect(stages[0][1], stages[1][0]);
+    circuit.connect(stages[1][1], stages[2][0]);
+    let v = circuit.instantiate_part(IndependentSource::voltage(0.0).with_ac(1.0));
+    circuit.connect(v[IndependentSource::P], stages[0][0]);
+    circuit.label(v[IndependentSource::N], NetLabel::global("GND"));
+    let deck = deck_of(&circuit);
+    let out = deck.voltage("/s3/OUT").unwrap();
+    let ac = Ac::decade(50, 1.0, 100e3).probe(&out);
+    let deck = deck.analysis(&ac).control([format!(
+        r#"wrdata ngspice_phase.txt vp("/s3/OUT") cph({out}) group_delay({out})"#
+    )]);
+    let sim = simulator.run(&deck).unwrap();
+    let a = sim.result(&ac).unwrap();
+    let table = sim.table("ngspice_phase.txt").unwrap();
+    let column = |i: usize| table.column(&table.names()[i]).unwrap();
+    assert_eq!(column(0), a.frequency());
+
+    let values = a.get(&out).unwrap();
+    for (value, vp) in values.iter().zip(column(1)) {
+        assert!((value.phase() - vp).abs() < 1e-6, "{value:?}: {vp}");
+    }
+    let phase = a.continuous_phase(&out).unwrap();
+    for (phase, cph) in phase.iter().zip(column(2)) {
+        assert!((phase - cph).abs() < 1e-6, "{phase}: {cph}");
+    }
+    let last = *phase.last().unwrap();
+    assert!(last < -std::f64::consts::PI, "{last}");
+
+    // The group delay goes from 6 ms (RC of 1 ms each: R1C1 + R2C2 + R3C3 + R1C2 + R1C3 + R2C3)
+    // down to nearly 0 as the phase settles at -3π/2.
+    let delay = a.group_delay(&out).unwrap();
+    assert!((delay[0] - 6e-3).abs() < 1e-5, "{}", delay[0]);
+    assert!(
+        delay.last().unwrap().abs() < 1e-7,
+        "{}",
+        delay.last().unwrap()
+    );
+    // ngspice differs at the ends, where it takes a difference of lower order.
+    let n = delay.len();
+    for (i, (delay, ngspice)) in delay.iter().zip(column(3)).enumerate().take(n - 1).skip(1) {
+        assert!(
+            (delay - ngspice).abs() < 1e-2 * ngspice.abs() + 1e-9,
+            "{}: {delay} for {ngspice}",
+            a.frequency()[i]
+        );
     }
 }
 

@@ -636,9 +636,14 @@ impl Complex {
         20.0 * self.norm().log10()
     }
 
-    /// The phase in radians (as `vp()` of ngspice).
+    /// The phase in radians, from -π to π (as `vp()` and `ph()` of ngspice).
     pub fn phase(self) -> f64 {
         self.im.atan2(self.re)
+    }
+
+    /// The phase in degrees, from -180 to 180.
+    pub fn phase_degrees(self) -> f64 {
+        self.phase().to_degrees()
     }
 }
 
@@ -662,5 +667,152 @@ impl AcResult {
     /// [`SimulationError::Analysis`] if `probe` is not a probe of the analysis.
     pub fn get(&self, probe: &Probe) -> Result<&[Complex], SimulationError> {
         Ok(&self.values[index_of(&self.probes, probe)?])
+    }
+
+    /// The phase of `probe` in radians at [`Self::frequency`], without the jumps of 2π of
+    /// [`Complex::phase`] (as `cph()` of ngspice): each step from one frequency to the next is
+    /// taken between -π and π.
+    ///
+    /// # Errors
+    /// [`SimulationError::Analysis`] if `probe` is not a probe of the analysis.
+    pub fn continuous_phase(&self, probe: &Probe) -> Result<Vec<f64>, SimulationError> {
+        let mut phase = Vec::new();
+        let mut previous: Option<f64> = None;
+        for value in self.get(probe)? {
+            let wrapped = value.phase();
+            let continuous = match previous {
+                None => wrapped,
+                Some(previous) => {
+                    let step = wrapped - previous;
+                    let turns = (step / std::f64::consts::TAU).round();
+                    previous + step - turns * std::f64::consts::TAU
+                }
+            };
+            phase.push(continuous);
+            previous = Some(continuous);
+        }
+        Ok(phase)
+    }
+
+    /// The group delay of `probe` in seconds at [`Self::frequency`], `-dφ/dω` of
+    /// [`Self::continuous_phase`] over the angular frequency ω = 2πf.
+    ///
+    /// The derivative is taken by finite differences: of second order between the neighbors of a
+    /// frequency, of first order at the first and the last ones, so it needs enough points per
+    /// decade where the phase turns quickly. With fewer than 2 frequencies, it is NaN.
+    ///
+    /// # Errors
+    /// [`SimulationError::Analysis`] if `probe` is not a probe of the analysis.
+    pub fn group_delay(&self, probe: &Probe) -> Result<Vec<f64>, SimulationError> {
+        let phase = self.continuous_phase(probe)?;
+        let omega: Vec<f64> = self
+            .frequency
+            .iter()
+            .map(|f| std::f64::consts::TAU * f)
+            .collect();
+        let n = phase.len();
+        if n < 2 {
+            return Ok(vec![f64::NAN; n]);
+        }
+        let slope = |i: usize, j: usize| (phase[j] - phase[i]) / (omega[j] - omega[i]);
+        Ok((0..n)
+            .map(|i| {
+                let derivative = if i == 0 {
+                    slope(0, 1)
+                } else if i == n - 1 {
+                    slope(n - 2, n - 1)
+                } else {
+                    // The slopes on both sides weighted by the width of the other side.
+                    let (h0, h1) = (omega[i] - omega[i - 1], omega[i + 1] - omega[i]);
+                    (slope(i - 1, i) * h1 + slope(i, i + 1) * h0) / (h0 + h1)
+                };
+                -derivative
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::f64::consts::TAU;
+
+    fn polar(phase: f64) -> Complex {
+        Complex {
+            re: phase.cos(),
+            im: phase.sin(),
+        }
+    }
+
+    fn probe(expression: &str) -> Probe {
+        Probe {
+            expression: expression.into(),
+        }
+    }
+
+    /// A delay of 1 ms (φ = -ωτ, wrapped several times) on a linear scale.
+    #[test]
+    fn test_continuous_phase_and_group_delay() {
+        let out = probe("v(out)");
+        let frequency: Vec<f64> = (0..=40).map(|i| 50.0 * f64::from(i)).collect();
+        let values = frequency.iter().map(|f| polar(-TAU * f * 1e-3)).collect();
+        let result = AcResult {
+            probes: vec![out.clone()],
+            frequency: frequency.clone(),
+            values: vec![values],
+        };
+        let phase = result.continuous_phase(&out).unwrap();
+        for (f, phase) in frequency.iter().zip(&phase) {
+            assert!((phase + TAU * f * 1e-3).abs() < 1e-9, "{f}: {phase}");
+        }
+        for delay in result.group_delay(&out).unwrap() {
+            assert!((delay - 1e-3).abs() < 1e-12, "{delay}");
+        }
+    }
+
+    /// The second-order difference is exact for a quadratic phase on an uneven scale.
+    #[test]
+    fn test_group_delay_uneven_scale() {
+        let out = probe("v(out)");
+        let frequency = vec![1.0, 2.0, 5.0, 6.0, 10.0];
+        // φ = -(ω / 100)², so the group delay is 2ω / 100².
+        let phase = |f: f64| -(TAU * f / 100.0).powi(2);
+        let result = AcResult {
+            probes: vec![out.clone()],
+            frequency: frequency.clone(),
+            values: vec![frequency.iter().map(|&f| polar(phase(f))).collect()],
+        };
+        let delay = result.group_delay(&out).unwrap();
+        for i in 1..frequency.len() - 1 {
+            let expected = 2.0 * TAU * frequency[i] / 100.0 / 100.0;
+            assert!(
+                (delay[i] - expected).abs() < 1e-12,
+                "{}: {}",
+                frequency[i],
+                delay[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_group_delay_single_frequency() {
+        let out = probe("v(out)");
+        let result = AcResult {
+            probes: vec![out.clone()],
+            frequency: vec![1.0],
+            values: vec![vec![polar(0.5)]],
+        };
+        assert!(result.group_delay(&out).unwrap()[0].is_nan());
+        assert_eq!(result.continuous_phase(&out).unwrap(), [0.5]);
+        assert!(matches!(
+            result.group_delay(&probe("v(in)")),
+            Err(SimulationError::Analysis(_))
+        ));
+    }
+
+    #[test]
+    fn test_phase_degrees() {
+        assert_eq!(Complex { re: 0.0, im: -1.0 }.phase_degrees(), -90.0);
+        assert_eq!(Complex { re: -1.0, im: 0.0 }.phase_degrees(), 180.0);
     }
 }

@@ -17,7 +17,8 @@ break the API).
   `SpiceDeck::analysis` among the string commands of the control block and read with
   `Simulation::result` without file or column names (AC values as `Complex`). `Tran` takes the
   start of the recording (`with_start`), the maximum time step (`with_max_step`) and `uic`
-  (`with_uic`).
+  (`with_uic`). `Complex::phase_degrees`, and `AcResult::continuous_phase` and `group_delay`
+  (as `cph()` and `group_delay()` of ngspice).
 
 - `Part::global_labels` (empty by default): pins that each instance connects to a global net.
   `kicad_part!` accepts symbols with hidden `power_in` pins (older and third-party libraries)

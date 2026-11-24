@@ -50,7 +50,15 @@ stay, and both go into the `.control` block in the order they are added, so `mea
   stable (`v("/OUT")` becomes `v(/OUT)`, the scale of `op` is a node of the plot; see
   [SPICE netlist format](spice_netlist_format.md) 6). The count of columns is checked.
 - AC values are written as `real(<probe>) imag(<probe>)` and returned as a small `Complex` with
-  `norm`, `db` and `phase`, without a dependency on a complex number crate.
+  `norm`, `db`, `phase` (radians, as `vp()`) and `phase_degrees`, without a dependency on a complex
+  number crate. `AcResult` computes `continuous_phase` (`cph()`) and `group_delay` from the values
+  instead of recording `cph()` and `group_delay()` of ngspice: the probes stay the vectors, any
+  probe (including a voltage between nodes) gets them, and the ends of the scale use a plain
+  one-sided difference (see [SPICE netlist format](spice_netlist_format.md) 6).
+- `AcResult` has no `interpolate`: between frequencies, linear interpolation of the real and
+  imaginary parts on a linear frequency is not what a Bode plot shows (dB and phase on a log
+  frequency), and no choice fits all uses. A value at a frequency is asked for with the scale
+  (`Ac::linear`, or a frequency on the `Ac::decade` grid), and a crossing with `meas`.
 - `op` is read from `wrdata` as the other analyses, not by parsing `print` in the log.
 - The result types are `OpResult` (`get -> f64`), `SweepResult` for `tran` and `dc` (`scale`,
   `get -> &[f64]`, `interpolate`) and `AcResult` (`frequency`, `get -> &[Complex]`). Asking for a
