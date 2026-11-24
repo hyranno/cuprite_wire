@@ -4,8 +4,8 @@ use super::*;
 use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
-    spice::{Simulator, Table, tests::on_each_simulator},
-    test_parts::deck_of,
+    spice::{Simulator, tests::on_each_simulator},
+    test_parts::{Line, LineDeck, deck_of},
 };
 
 /// Linear tables of 82.5 ohms (40 mA at 3.3 V), clamps beyond the supply, and edges of 1 ns
@@ -396,18 +396,15 @@ on_each_simulator!(
     simulate_ibis_diff_line
 );
 
-/// The voltage of the line in the table of [`simulate`].
-const LINE: &str = r#"v("/LINE")"#;
-
 /// The driver and the receiver on the line `/LINE`, with a 1 kohm pull-up if `pull_up`, simulated for
-/// `stop` seconds; the table has the voltage of the line ([`LINE`]).
+/// `stop` seconds.
 fn simulate(
     simulator: &dyn Simulator,
     driver: IbisDriver,
     receiver: IbisReceiver,
     pull_up: bool,
     stop: f64,
-) -> Table {
+) -> Line {
     let mut circuit = CircuitBuilder::new();
     let driver = circuit.instantiate_part(driver);
     let receiver = circuit.instantiate_part(receiver);
@@ -415,7 +412,6 @@ fn simulate(
     circuit.label(driver[IbisDriver::OUT], NetLabel::local("LINE"));
     circuit.label(driver[IbisDriver::GND], NetLabel::global("GND"));
     circuit.label(receiver[IbisReceiver::GND], NetLabel::global("GND"));
-    let mut control = Vec::new();
     if pull_up {
         // 1 kohm to 3.3 V, written as its Norton equivalent.
         let load = circuit.instantiate_part(crate::spice::digital::DigitalLoad::new(
@@ -426,10 +422,8 @@ fn simulate(
         circuit.connect(driver[IbisDriver::OUT], load["in"]);
         circuit.label(load["gnd"], NetLabel::global("GND"));
     }
-    control.push(format!("tran 10p {stop:e}"));
-    control.push(format!("wrdata line.txt {LINE}"));
-    let deck = deck_of(&circuit).control(control);
-    simulator.run(&deck).unwrap().table("line.txt").unwrap()
+    let deck = LineDeck::new(&circuit, 10e-12, stop);
+    deck.read(&simulator.run(&deck.deck).unwrap())
 }
 
 /// The I/O buffer drives the input buffer, which reads the levels back with its thresholds.
@@ -439,22 +433,19 @@ fn simulate_ibis_line(simulator: &dyn Simulator) {
         .at(5e-9, Level::High)
         .at(25e-9, Level::Low)
         .at(45e-9, Level::HiZ);
-    let table = simulate(
+    let line = simulate(
         simulator,
         IbisDriver::new(buffer("1"), sent),
         IbisReceiver::new(rx.clone()),
         false,
         60e-9,
     );
-    let at = |t| table.interpolate(LINE, t).unwrap();
+    let at = |t| line.at(t);
     // Unloaded, the line settles at the rails.
     assert!(at(4e-9).abs() < 1e-3, "{}", at(4e-9));
     assert!((at(20e-9) - 3.3).abs() < 1e-3, "{}", at(20e-9));
     assert!(at(40e-9).abs() < 1e-3, "{}", at(40e-9));
-    let read = rx
-        .input()
-        .unwrap()
-        .decode(table.scale(), table.column(LINE).unwrap());
+    let read = rx.input().unwrap().decode(line.time(), line.volts());
     assert_eq!(read.initial(), Level::Low);
     let [(rise, Level::High), (fall, Level::Low)] = read.events() else {
         panic!("{read:?}");
@@ -470,14 +461,14 @@ fn simulate_ibis_open_drain(simulator: &dyn Simulator) {
     let sent = DigitalSequence::new(Level::HiZ)
         .at(10e-9, Level::Low)
         .at(30e-9, Level::HiZ);
-    let table = simulate(
+    let line = simulate(
         simulator,
         IbisDriver::new(buffer("3"), sent),
         IbisReceiver::new(buffer("1")),
         true,
         60e-9,
     );
-    let at = |t| table.interpolate(LINE, t).unwrap();
+    let at = |t| line.at(t);
     assert!((at(9e-9) - 3.3).abs() < 1e-3, "{}", at(9e-9));
     let low = 3.3 * 82.5 / 1082.5;
     assert!((at(28e-9) - low).abs() < 1e-3, "{}", at(28e-9));

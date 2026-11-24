@@ -14,7 +14,7 @@ use crate::{
 #[path = "../tests/common/mod.rs"]
 mod common;
 
-pub use common::{check_golden, deck_of, simulation_error_message, strings};
+pub use common::{Line, LineDeck, check_golden, deck_of, simulation_error_message, strings};
 
 /// The SPICE netlist of `circuit`.
 pub fn spice_netlist(circuit: &CircuitBuilder) -> SpiceNetlist {

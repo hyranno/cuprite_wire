@@ -5,20 +5,18 @@ use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
     spice::{
-        IndependentSource, SimulationError, SpiceDeck, Table,
+        IndependentSource, SimulationError,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
         },
     },
-    test_parts::deck_of,
+    test_parts::{Line, LineDeck, deck_of},
 };
 
-const LINE: &str = r#"v("/LINE")"#;
-
-/// `device` with its pin `pin` on the line `/LINE`, loaded by `load`; the deck runs a transient
-/// analysis of `stop` seconds and writes the voltage of the line.
-fn line_deck(device: CosimDevice, pin: &str, load: DigitalLoad, stop: f64) -> SpiceDeck {
+/// `device` with its pin `pin` on the line `/LINE`, loaded by `load`, in a [`LineDeck`] of `stop`
+/// seconds.
+fn line_deck(device: CosimDevice, pin: &str, load: DigitalLoad, stop: f64) -> LineDeck {
     let mut circuit = CircuitBuilder::new();
     let device = circuit.instantiate_part(device);
     let load = circuit.instantiate_part(load);
@@ -26,14 +24,12 @@ fn line_deck(device: CosimDevice, pin: &str, load: DigitalLoad, stop: f64) -> Sp
     circuit.label(device[pin], NetLabel::local("LINE"));
     circuit.label(device[CosimDevice::GND], NetLabel::global("GND"));
     circuit.label(load[DigitalLoad::GND], NetLabel::global("GND"));
-    deck_of(&circuit).control([
-        format!("tran 10n {stop:e}"),
-        format!("wrdata line.txt {LINE}"),
-    ])
+    LineDeck::new(&circuit, 10e-9, stop)
 }
 
-fn table(deck: &SpiceDeck, models: DeviceModels<'_>) -> Table {
-    deck.run_with(models).unwrap().table("line.txt").unwrap()
+/// Runs `deck` with `models`; the voltage of the line.
+fn run(deck: &LineDeck, models: DeviceModels<'_>) -> Line {
+    deck.read(&deck.deck.run_with(models).unwrap())
 }
 
 /// Sets `out` to the levels of a sequence at its times, waking up for each.
@@ -61,21 +57,13 @@ fn test_output_at_breakpoint() {
     let device = CosimDevice::new("mcu")
         .output("out", OutputCharacteristics::cmos(3.3).with_resistance(1e3));
     let deck = line_deck(device, "out", DigitalLoad::new(input.clone()), 6e-6);
-    // The same analysis, typed.
-    let deck = deck.netlist().clone().deck();
-    let line = deck.voltage("/LINE").unwrap();
-    let tran = crate::spice::analysis::Tran::new(10e-9, 6e-6).probe(&line);
     let mut player = Player {
         sequence: DigitalSequence::new(Level::Low).at(1e-6, Level::High),
         steps: 0,
     };
-    let sim = deck
-        .analysis(&tran)
-        .run_with(DeviceModels::new().with("mcu", &mut player))
-        .unwrap();
+    let line = run(&deck, DeviceModels::new().with("mcu", &mut player));
     assert!(player.steps > 10, "{}", player.steps);
-    let result = sim.result(&tran).unwrap();
-    let read = input.decode(result.scale(), result.get(&line).unwrap());
+    let read = input.decode(line.time(), line.volts());
     let [(t, Level::High)] = read.events() else {
         panic!("{read:?}");
     };
@@ -114,8 +102,8 @@ fn test_open_drain_reads_back() {
         .with_pull(Pull::up(3.3, 10e3));
     let deck = line_deck(device, "sda", DigitalLoad::new(pull_up), 6e-6);
     let mut model = OpenDrain { reads: Vec::new() };
-    let table = table(&deck, DeviceModels::new().with("mcu", &mut model));
-    let at = |t| table.interpolate(LINE, t).unwrap();
+    let line = run(&deck, DeviceModels::new().with("mcu", &mut model));
+    let at = |t| line.at(t);
     assert!(at(0.5e-6) < 0.05, "{}", at(0.5e-6));
     // 10 kohm and about 105 pF (the load and the input of the pin).
     assert!((at(2e-6) - 3.3 * 0.614).abs() < 0.05, "{}", at(2e-6));
@@ -162,10 +150,9 @@ fn test_echo_input() {
     ] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck =
-        deck_of(&circuit).control(["tran 10n 8u".to_string(), format!("wrdata line.txt {LINE}")]);
-    let table = table(&deck, DeviceModels::new().with("mcu", &mut Echo));
-    let read = input.decode(table.scale(), table.column(LINE).unwrap());
+    let deck = LineDeck::new(&circuit, 10e-9, 8e-6);
+    let line = run(&deck, DeviceModels::new().with("mcu", &mut Echo));
+    let read = input.decode(line.time(), line.volts());
     assert_eq!(read.events().len(), sent.events().len(), "{read:?}");
     for (echo, edge) in read.events().iter().zip(sent.events()) {
         assert_eq!(echo.1, edge.1);
@@ -317,7 +304,7 @@ fn test_models_must_match_devices() {
         DigitalLoad::new(InputCharacteristics::cmos(3.3)),
         1e-6,
     );
-    let error = |models| match deck.run_with(models) {
+    let error = |models| match deck.deck.run_with(models) {
         Err(SimulationError::Cosimulation(reason)) => reason,
         other => panic!("{other:?}"),
     };
@@ -360,7 +347,8 @@ fn test_model_panics() {
         1e-6,
     );
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        deck.run_with(DeviceModels::new().with("mcu", &mut Panics))
+        deck.deck
+            .run_with(DeviceModels::new().with("mcu", &mut Panics))
     }))
     .unwrap_err();
     let message = panic.downcast_ref::<String>().unwrap();
@@ -369,7 +357,8 @@ fn test_model_panics() {
         sequence: DigitalSequence::new(Level::Low),
         steps: 0,
     };
-    deck.run_with(DeviceModels::new().with("mcu", &mut player))
+    deck.deck
+        .run_with(DeviceModels::new().with("mcu", &mut player))
         .unwrap();
     assert!(player.steps > 0);
 }
@@ -377,10 +366,10 @@ fn test_model_panics() {
 /// With the device's `gnd` 1 V above the ground, the pins read and drive relative to it.
 #[test]
 fn test_reference_above_ground() {
-    struct Probe {
+    struct Sensor {
         sense: f64,
     }
-    impl DeviceModel for Probe {
+    impl DeviceModel for Sensor {
         fn step(&mut self, io: &mut DeviceIo<'_>) {
             self.sense = io.voltage("sense");
             io.set("out", Level::High);
@@ -402,13 +391,11 @@ fn test_reference_above_ground() {
     for gnd in [offset[IndependentSource::N], sense[IndependentSource::N]] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let deck =
-        deck_of(&circuit).control(["tran 10n 1u".to_string(), format!("wrdata line.txt {LINE}")]);
-    let mut probe = Probe { sense: 0.0 };
-    let table = table(&deck, DeviceModels::new().with("mcu", &mut probe));
-    assert!((probe.sense - 1.5).abs() < 1e-6, "{}", probe.sense);
-    let end = *table.scale().last().unwrap();
-    let out = table.interpolate(LINE, end).unwrap();
+    let deck = LineDeck::new(&circuit, 10e-9, 1e-6);
+    let mut sensor = Sensor { sense: 0.0 };
+    let line = run(&deck, DeviceModels::new().with("mcu", &mut sensor));
+    assert!((sensor.sense - 1.5).abs() < 1e-6, "{}", sensor.sense);
+    let out = line.at(*line.time().last().unwrap());
     assert!((out - 4.3).abs() < 1e-3, "{out}");
 }
 
@@ -438,6 +425,7 @@ fn test_two_transient_analyses() {
         DigitalLoad::new(InputCharacteristics::cmos(3.3)),
         1e-6,
     )
+    .deck
     .control(["tran 10n 1u"]);
     let mut tick = Tick {
         timer: super::peripherals::Periodic::new(0.4e-6, 0.0),
@@ -539,7 +527,8 @@ fn test_interp_rejected() {
     let load = DigitalLoad::new(InputCharacteristics::cmos(3.3));
     let deck = line_deck(device, "out", load, 1e-6);
     let mut recorder = Recorder::default();
-    deck.run_with(DeviceModels::new().with("mcu", &mut recorder))
+    deck.deck
+        .run_with(DeviceModels::new().with("mcu", &mut recorder))
         .unwrap();
     assert!(recorder.times.len() > 10, "{:?}", recorder.times);
 }

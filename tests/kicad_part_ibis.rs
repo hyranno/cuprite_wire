@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::deck_of;
+use common::LineDeck;
 use cuprite_wire::{
     circuit::CircuitBuilder,
     ibis::Corner,
@@ -248,22 +248,17 @@ fn test_simulate() {
     circuit.label(tx["1"], NetLabel::global("GND"));
     circuit.label(rx["2"], NetLabel::global("GND"));
     circuit.no_connect(rx["3"]);
-    let line = r#"v("/LINE")"#;
-    let deck = deck_of(&circuit).control(vec![
-        "tran 10p 100n".to_string(),
-        format!("wrdata line.txt {line}"),
-    ]);
-    let table = Ngspice::new("ngspice")
-        .run(&deck)
-        .unwrap_or_else(|e| panic!("{e}"))
-        .table("line.txt")
-        .unwrap();
+    let deck = LineDeck::new(&circuit, 10e-12, 100e-9);
+    let simulation = Ngspice::new("ngspice")
+        .run(&deck.deck)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let line = deck.read(&simulation);
     let read = Rx::new(Corner::Typ)
         .unwrap()
         .buffer()
         .input()
         .unwrap()
-        .decode(table.scale(), table.column(line).unwrap());
+        .decode(line.time(), line.volts());
     assert_eq!(read.initial(), Level::Low);
     let edges: Vec<(f64, Level)> = read.events().to_vec();
     assert_eq!(edges.len(), 6, "{read:?}");
