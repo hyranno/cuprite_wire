@@ -499,7 +499,16 @@ impl IbisDiffBuffer {
     /// The pair of the buffers `p` (non-inverting) and `n` (inverting), with the differential
     /// threshold `vdiff` (in volts) and the delay `tdelay` of `n` after `p` (in seconds; negative
     /// if `n` switches first), without a termination.
+    ///
+    /// # Panics
+    /// If `vdiff` or `tdelay` is not finite.
+    #[track_caller]
     pub fn new(p: IbisBuffer, n: IbisBuffer, vdiff: Option<f64>, tdelay: f64) -> Self {
+        assert!(
+            vdiff.is_none_or(f64::is_finite) && tdelay.is_finite(),
+            "the threshold and the delay of a differential pair must be finite: {vdiff:?}, \
+             {tdelay}"
+        );
         IbisDiffBuffer {
             p,
             n,

@@ -321,8 +321,8 @@ impl SharedNgspice {
     ///
     /// # Errors
     /// [`SimulationError::Cosimulation`] if the models do not match the devices or the results
-    /// lack the node of a device's pin (a `save` leaving it out), and the errors of
-    /// [`SharedNgspice::run`].
+    /// lack the node of a device's pin (a `save` leaving it out), even if ngspice also failed,
+    /// and the errors of [`SharedNgspice::run`].
     ///
     /// # Panics
     /// Resumes a panic of a model after the run.
@@ -332,12 +332,18 @@ impl SharedNgspice {
         models: DeviceModels<'_>,
     ) -> Result<Simulation, SimulationError> {
         let mut session = CosimSession::new(deck.netlist().cosim_devices(), models.models)
-            .map_err(SimulationError::Cosimulation)?;
-        let simulation = self.run_session(deck, Some(&mut session))?;
-        match session.take_error() {
-            Some(reason) => Err(SimulationError::Cosimulation(reason)),
-            None => Ok(simulation),
-        }
+            .map_err(|reason| SimulationError::Cosimulation { reason, dir: None })?;
+        let result = self.run_session(deck, Some(&mut session));
+        // The error of the session comes first: an error of ngspice may follow from it.
+        let Some(reason) = session.take_error() else {
+            return result;
+        };
+        let dir = match result {
+            Ok(simulation) => Some(simulation.keep_dir()),
+            Err(SimulationError::Ngspice { dir, .. }) => Some(dir),
+            Err(_) => None,
+        };
+        Err(SimulationError::Cosimulation { reason, dir })
     }
 }
 

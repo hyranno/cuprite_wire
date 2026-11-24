@@ -305,7 +305,7 @@ fn test_models_must_match_devices() {
         1e-6,
     );
     let error = |models| match deck.deck.run_with(models) {
-        Err(SimulationError::Cosimulation(reason)) => reason,
+        Err(SimulationError::Cosimulation { reason, dir: None }) => reason,
         other => panic!("{other:?}"),
     };
     assert_eq!(
@@ -463,8 +463,14 @@ fn test_pin_not_saved() {
         }
     }
     match deck.run_with(DeviceModels::new().with("mcu", &mut Probe)) {
-        Err(SimulationError::Cosimulation(reason)) => {
-            assert!(reason.contains("/sense"), "{reason}")
+        Err(SimulationError::Cosimulation {
+            reason,
+            dir: Some(dir),
+        }) => {
+            assert!(reason.contains("/sense"), "{reason}");
+            // The run directory is kept for inspection.
+            assert!(dir.join("deck.cir").is_file());
+            std::fs::remove_dir_all(dir).unwrap();
         }
         other => panic!("{other:?}"),
     }
@@ -506,11 +512,27 @@ fn analysis_error(analysis: &[&str]) -> (SimulationError, Vec<f64>) {
 #[test]
 fn test_tstart_rejected() {
     let (error, times) = analysis_error(&["tran 10n 1u 0.5u"]);
-    let SimulationError::Cosimulation(reason) = &error else {
+    let SimulationError::Cosimulation { reason, .. } = &error else {
         panic!("{error:?}");
     };
     assert!(reason.contains("tstart"), "{reason}");
     assert!(times.is_empty(), "{times:?}");
+}
+
+/// An error of the session is reported even if ngspice also fails after it.
+#[test]
+fn test_session_error_comes_before_ngspice_error() {
+    let (error, _) = analysis_error(&["tran 10n 1u 0.5u", "let y = no_such_vector + 1"]);
+    let SimulationError::Cosimulation {
+        reason,
+        dir: Some(dir),
+    } = &error
+    else {
+        panic!("{error:?}");
+    };
+    assert!(reason.contains("tstart"), "{reason}");
+    assert!(dir.join("deck.cir").is_file());
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// With `option interp`, ngspice gives the interpolated points, the same one many times: an error
@@ -518,7 +540,7 @@ fn test_tstart_rejected() {
 #[test]
 fn test_interp_rejected() {
     let (error, times) = analysis_error(&["option interp", "tran 100n 1u"]);
-    let SimulationError::Cosimulation(reason) = &error else {
+    let SimulationError::Cosimulation { reason, .. } = &error else {
         panic!("{error:?}");
     };
     assert!(reason.contains("interp"), "{reason}");

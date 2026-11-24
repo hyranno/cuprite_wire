@@ -62,7 +62,8 @@ impl Netlist {
     ///
     /// # Errors
     /// The problems found in the KiCad information (a part without KiCad information or without
-    /// a footprint, a pin without KiCad pin information, pins sharing a pad, ...). All errors are collected, each with
+    /// a footprint, a pin without KiCad pin information, pins sharing a pad, a NUL character in a
+    /// text, ...). All errors are collected, each with
     /// the trace of the component.
     pub fn to_kicad(&self) -> Result<KicadNetlist, CircuitErrors> {
         let mut errors = Vec::new();
@@ -209,7 +210,25 @@ fn check_component<'a>(
                     unit,
                 },
             });
-        footprint.into_iter().chain(pins).collect()
+        let value = component.part.value();
+        let texts = [&value]
+            .into_iter()
+            .chain(info.fields.iter().flat_map(|(name, value)| [name, value]))
+            .chain(info.datasheet.iter().chain(&info.description))
+            .chain(&info.units)
+            .chain(
+                info.pins
+                    .values()
+                    .flat_map(|pin| std::iter::once(&pin.pad).chain(&pin.name)),
+            );
+        let nul = texts
+            .filter(|text| text.contains('\0'))
+            .map(|text| CircuitErrorKind::KicadNulCharacter {
+                ref_name: ref_name(),
+                text: text.clone(),
+            })
+            .collect::<Vec<_>>();
+        footprint.into_iter().chain(pins).chain(nul).collect()
     };
     component.checked_info(
         component.kicad.as_ref(),
@@ -221,8 +240,17 @@ fn check_component<'a>(
 
 impl KicadNetlist {
     /// Sets the `source` written in the `design` section (e.g. the name of the circuit description).
+    ///
+    /// # Panics
+    /// If `source` contains a NUL character, where KiCad would end it.
+    #[track_caller]
     pub fn with_source(mut self, source: impl Into<String>) -> Self {
-        self.source = Some(source.into());
+        let source = source.into();
+        assert!(
+            !source.contains('\0'),
+            "the source of a netlist must not contain a NUL character: {source:?}"
+        );
+        self.source = Some(source);
         self
     }
 
@@ -679,6 +707,8 @@ mod tests {
         };
         let mut duplicate_pad = valid().kicad.unwrap();
         duplicate_pad.pins.get_mut("2").unwrap().pad = "1".into();
+        let mut nul = valid().kicad.unwrap();
+        nul.fields.push(("Note".into(), "a\0b".into()));
 
         add(&mut circuit, IndependentSource::voltage(5.0), &mut lines);
         add(
@@ -713,6 +743,14 @@ mod tests {
             },
             &mut lines,
         );
+        add(
+            &mut circuit,
+            CustomPart {
+                kicad: Some(nul),
+                ..valid()
+            },
+            &mut lines,
+        );
 
         // Parts without KiCad information do not prevent creating the netlist.
         let netlist = circuit.build(&()).to_netlist().unwrap();
@@ -739,13 +777,17 @@ mod tests {
                     ref_name: "X4".into(),
                     pad: "1".into()
                 },
+                CircuitErrorKind::KicadNulCharacter {
+                    ref_name: "X5".into(),
+                    text: "a\0b".into()
+                },
             ]
         );
         let error_lines: Vec<_> = errors
             .iter()
             .map(|e| e.trace.innermost().unwrap().line())
             .collect();
-        // Components are sorted by reference: V1, X1, X2, X3, X4.
+        // Components are sorted by reference: V1, X1, ..., X5.
         assert_eq!(error_lines, lines);
         let message = CircuitErrors::into_result(errors, &[], ())
             .unwrap_err()

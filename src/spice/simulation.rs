@@ -177,6 +177,12 @@ impl Simulation {
         self.dir.path()
     }
 
+    /// Keeps the run directory instead of removing it, and returns its path.
+    #[cfg(feature = "shared-ngspice")]
+    pub(crate) fn keep_dir(self) -> PathBuf {
+        self.dir.keep()
+    }
+
     /// Reads a file written by `wrdata` in the control block.
     ///
     /// # Errors
@@ -196,7 +202,7 @@ impl Simulation {
     ///
     /// # Errors
     /// [`SimulationError::Analysis`] if the deck did not have the analysis or it has no probes,
-    /// and [`SimulationError::Table`] if its output cannot be read.
+    /// and [`SimulationError::Table`] if its output cannot be read or has no rows.
     pub fn result<A: Analysis>(&self, analysis: &A) -> Result<A::Output, SimulationError> {
         let error =
             |reason: &str| SimulationError::Analysis(format!("{}: {reason}", analysis.command()));
@@ -210,16 +216,20 @@ impl Simulation {
             .ok_or_else(|| error("the analysis has no probes"))?;
         let table = self.table(file)?;
         let expected = column_count(analysis);
-        if table.columns.len() != expected {
-            return Err(SimulationError::Table {
-                file: file.to_string(),
-                reason: format!(
-                    "{} columns for {expected} (the scale and the probes)",
-                    table.columns.len()
-                ),
-            });
-        }
-        Ok(analysis.read(table.columns))
+        let reason = if table.columns.len() != expected {
+            format!(
+                "{} columns for {expected} (the scale and the probes)",
+                table.columns.len()
+            )
+        } else if table.columns[0].is_empty() {
+            "no rows".into()
+        } else {
+            return Ok(analysis.read(table.columns));
+        };
+        Err(SimulationError::Table {
+            file: file.to_string(),
+            reason,
+        })
     }
 
     /// A value printed as `name = value` (by `meas` or `print`), matched case-insensitively.
@@ -352,9 +362,17 @@ pub enum SimulationError {
     /// The ngspice shared library cannot be loaded or used.
     #[cfg(feature = "shared-ngspice")]
     SharedLibrary(String),
-    /// The models of a co-simulation do not match the devices of the deck.
+    /// The models of a co-simulation do not match the devices of the deck, or the run cannot be
+    /// co-simulated (e.g. a pin's node is not saved). Reported instead of an error of ngspice the
+    /// run may also have had. The run directory, if the run started, is kept.
     #[cfg(feature = "shared-ngspice")]
-    Cosimulation(String),
+    Cosimulation {
+        /// What is wrong.
+        reason: String,
+        /// The run directory, with the deck to reproduce the run; `None` if the run did not
+        /// start.
+        dir: Option<PathBuf>,
+    },
 }
 
 impl fmt::Display for SimulationError {
@@ -375,7 +393,13 @@ impl fmt::Display for SimulationError {
                 write!(f, "cannot use the ngspice shared library: {reason}")
             }
             #[cfg(feature = "shared-ngspice")]
-            SimulationError::Cosimulation(reason) => write!(f, "cannot co-simulate: {reason}"),
+            SimulationError::Cosimulation { reason, dir } => {
+                write!(f, "cannot co-simulate: {reason}")?;
+                if let Some(dir) = dir {
+                    write!(f, " (run directory: {})", dir.display())?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -412,6 +436,25 @@ mod tests {
     #[should_panic(expected = "gain not found in the output of ngspice:\nNote: ...")]
     fn test_expect_value_panics_with_the_log() {
         simulation("Note: ...\n").expect_value("gain");
+    }
+
+    /// A table without rows (e.g. from an analysis that stopped) is an error, not a panic.
+    #[test]
+    fn test_result_without_rows() {
+        use crate::spice::analysis::{Op, Probe};
+        fn id_of(analysis: &impl Analysis) -> u64 {
+            analysis.id()
+        }
+        let op = Op::new().probe(&Probe::of_expression("v(out)"));
+        let mut sim = simulation("");
+        sim.analyses = vec![(id_of(&op), Some("op.txt".into()))];
+        fs::write(sim.dir().join("op.txt"), "v(out) v(out)\n").unwrap();
+        match sim.result(&op) {
+            Err(SimulationError::Table { file, reason }) => {
+                assert_eq!((file.as_str(), reason.as_str()), ("op.txt", "no rows"));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     /// The run directory is kept when ngspice reports an error.

@@ -52,8 +52,8 @@ impl NodeInfo {
 /// Nodes carry their creation location and labels, and edges carry the location where they were connected.
 pub(crate) type NetGraph = UnGraph<NodeInfo, Loc>;
 
-/// Identifies a [`CircuitBuilder`] (its clones share it), so that the nodes of other builders are
-/// detected.
+/// Identifies a [`CircuitBuilder`], so that the nodes of other builders are detected. A clone
+/// gets a new id and remembers the ids it was cloned from (see [`CircuitBuilder::ancestors`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct BuilderId(u64);
 
@@ -66,7 +66,9 @@ impl BuilderId {
 
 /// A node of a circuit: a point that pins and other nodes can be connected to. Created by a
 /// [`CircuitBuilder`] and usable only with it; a node of another builder (e.g. of the circuit
-/// around a subcircuit, used inside it) is reported as [`CircuitErrorKind::ForeignNode`].
+/// around a subcircuit, used inside it) is reported as [`CircuitErrorKind::ForeignNode`]. A clone
+/// of a builder also takes the nodes the builder had when it was cloned, but not those either of
+/// them makes afterwards.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Node {
     builder: BuilderId,
@@ -132,6 +134,9 @@ impl NameRegistry {
 /// to the generators of its subcircuits.
 pub struct CircuitBuilder<B = ()> {
     id: BuilderId,
+    /// The builders this one was cloned from, oldest first, with their node count at the time of
+    /// cloning: their nodes created before that are also nodes of this builder.
+    ancestors: Vec<(BuilderId, usize)>,
     pub(crate) parts: Vec<PartInstance>,
     pub(crate) subcircuits: Vec<SubcircuitInstance<B>>,
     pub(crate) nets: NetGraph,
@@ -142,8 +147,11 @@ pub struct CircuitBuilder<B = ()> {
 
 impl<B> Clone for CircuitBuilder<B> {
     fn clone(&self) -> Self {
+        let mut ancestors = self.ancestors.clone();
+        ancestors.push((self.id, self.nets.node_count()));
         Self {
-            id: self.id,
+            id: BuilderId::new(),
+            ancestors,
             parts: self.parts.clone(),
             subcircuits: self.subcircuits.clone(),
             nets: self.nets.clone(),
@@ -170,6 +178,7 @@ impl<B> CircuitBuilder<B> {
     pub fn new() -> Self {
         CircuitBuilder {
             id: BuilderId::new(),
+            ancestors: Vec::new(),
             parts: Vec::new(),
             subcircuits: Vec::new(),
             nets: NetGraph::new_undirected(),
@@ -188,6 +197,7 @@ impl<B> CircuitBuilder<B> {
     pub(crate) fn expand(self, options: &B) -> ExpandedCircuit {
         let CircuitBuilder {
             id: _,
+            ancestors: _,
             parts,
             subcircuits,
             nets,
@@ -228,9 +238,16 @@ impl<B> CircuitBuilder<B> {
     }
 
     /// The index of `node` in this circuit, or `None` (reported as
-    /// [`CircuitErrorKind::ForeignNode`] at `location`) if another builder created it.
+    /// [`CircuitErrorKind::ForeignNode`] at `location`) if another builder created it. The nodes
+    /// a builder had when it was cloned belong to both the builder and the clone; nodes created
+    /// afterwards belong to only one of them.
     fn index_of(&mut self, node: Node, location: Loc) -> Option<NodeIndex> {
-        if node.builder == self.id {
+        let owned = node.builder == self.id
+            || self
+                .ancestors
+                .iter()
+                .any(|&(id, count)| node.builder == id && node.index.index() < count);
+        if owned {
             return Some(node.index);
         }
         self.errors.push(CircuitError::new(
@@ -1364,6 +1381,42 @@ mod tests {
         // The uses are ignored: the inner node is not connected to the outer one, nor labeled.
         assert!(built.nets.node_weights().all(|node| node.labels.is_empty()));
         assert_eq!(built.nets.edge_count(), 0);
+    }
+
+    #[test]
+    fn test_nodes_created_after_cloning_are_foreign_to_the_other_builder() {
+        let mut circuit = CircuitBuilder::<()>::new();
+        let shared = circuit.add_node();
+        let mut clone = circuit.clone();
+        let mut grandchild = clone.clone();
+        let original_node = circuit.add_node();
+        let clone_node = clone.add_node();
+        // Nodes made before cloning belong to every descendant.
+        grandchild.no_connect(shared);
+        assert!(grandchild.errors.is_empty());
+
+        let clone_line = line!() + 1;
+        circuit.connect(shared, clone_node);
+        let original_line = line!() + 1;
+        clone.label(original_node, NetLabel::local("X"));
+        let grandchild_line = line!() + 1;
+        grandchild.no_connect(clone_node);
+
+        for (builder, line) in [
+            (&circuit, clone_line),
+            (&clone, original_line),
+            (&grandchild, grandchild_line),
+        ] {
+            let built = builder.build(&());
+            assert_eq!(built.errors().len(), 1, "{:?}", built.errors());
+            assert!(matches!(
+                built.errors()[0].kind,
+                CircuitErrorKind::ForeignNode
+            ));
+            assert_eq!(lines(&built.errors()[0].trace), vec![line]);
+            assert_eq!(built.nets.edge_count(), 0);
+            assert!(built.nets.node_weights().all(|node| node.labels.is_empty()));
+        }
     }
 
     /// The pin connected to `node` through the net it belongs to.

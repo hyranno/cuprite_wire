@@ -250,6 +250,12 @@ fn test_diff_buffer() {
 }
 
 #[test]
+#[should_panic(expected = "must be finite")]
+fn test_diff_buffer_rejects_nan() {
+    IbisDiffBuffer::new(buffer("8"), buffer("9"), Some(f64::NAN), 0.0);
+}
+
+#[test]
 fn test_diff_driver_subcircuit() {
     let tx = IbisDiffBuffer::of_pin(&ibs(), "Chip", "8", Corner::Typ).unwrap();
     let driver = IbisDiffDriver::new(

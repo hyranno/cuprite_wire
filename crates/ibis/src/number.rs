@@ -2,7 +2,8 @@
 
 /// Parses a number: a decimal number with an optional exponent, an optional scale suffix
 /// (`T` `G` `M` `k` `m` `u` `n` `p` `f`, case-sensitive) and ignored trailing letters, the units
-/// (`1.0pF`, `5.0V`, `55mOhm`). `None` if it is not a number.
+/// (`1.0pF`, `5.0V`, `55mOhm`). `None` if it is not a number or is out of the range of `f64`
+/// (`1e999`).
 pub(crate) fn parse_number(s: &str) -> Option<f64> {
     let bytes = s.as_bytes();
     let digits = |mut i: usize| {
@@ -43,10 +44,8 @@ pub(crate) fn parse_number(s: &str) -> Option<f64> {
         Some(b'f') => 1e-15,
         _ => 1.0,
     };
-    s[i..]
-        .bytes()
-        .all(|b| b.is_ascii_alphabetic())
-        .then_some(mantissa * scale)
+    let value = mantissa * scale;
+    (value.is_finite() && s[i..].bytes().all(|b| b.is_ascii_alphabetic())).then_some(value)
 }
 
 /// Parses a number or `NA` (not available, `Some(None)`). `None` if it is neither.
@@ -90,7 +89,9 @@ mod tests {
         approx("6f", 6e-15);
         // An `e` without digits is a unit, not an exponent.
         approx("1e", 1.0);
-        for s in ["", "-", ".", "V", "NA", "1.2.3", "3.0/30n", "1-2"] {
+        for s in [
+            "", "-", ".", "V", "NA", "1.2.3", "3.0/30n", "1-2", "1e999", "1e300T",
+        ] {
             assert_eq!(parse_number(s), None, "{s}");
         }
     }

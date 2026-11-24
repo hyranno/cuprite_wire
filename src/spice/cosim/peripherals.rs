@@ -182,7 +182,12 @@ impl Pwm {
     }
 
     /// Sets the duty for the next periods, clamped to 0..=1.
+    ///
+    /// # Panics
+    /// If `duty` is NaN.
+    #[track_caller]
     pub fn set_duty(&mut self, duty: f64) {
+        assert!(!duty.is_nan(), "the duty of a PWM must be a number");
         self.duty = duty.clamp(0.0, 1.0);
     }
 
@@ -259,6 +264,12 @@ mod tests {
             assert_eq!(adc.read(&io), code, "{voltage} V");
         }
         assert_eq!(adc.voltage_of(500), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "the duty of a PWM must be a number")]
+    fn test_pwm_rejects_nan_duty() {
+        Pwm::new("pwm", 1.0, 0.0).set_duty(f64::NAN);
     }
 
     #[test]
