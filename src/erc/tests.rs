@@ -161,6 +161,7 @@ fn ground_pins_part() -> CustomPart {
         ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![],
+        global_labels: vec![],
         kicad: Some(KicadPartInfo {
             pins: pins
                 .into_iter()
@@ -272,6 +273,7 @@ fn test_overlapping_internal_connections() {
         ref_prefix: "U",
         pin_ids: pins.iter().map(|pin| pin.0).collect(),
         internal_connections: vec![vec!["4", "5"], vec!["4", "ep"]],
+        global_labels: vec![],
         kicad: Some(KicadPartInfo {
             pins: pins
                 .into_iter()

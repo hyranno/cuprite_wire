@@ -245,6 +245,14 @@ impl BuiltCircuit {
                     pin_id: pin_id.clone(),
                 }));
             }
+            for (pin_id, _) in component.part.global_labels() {
+                if !component.pins.contains(&pin_id) {
+                    errors.push(error(CircuitErrorKind::UnknownPinId {
+                        ref_name: ref_name(),
+                        pin_id,
+                    }));
+                }
+            }
             for pin_id in component.part.extra_pin_types().into_keys() {
                 if component
                     .kicad
@@ -759,6 +767,35 @@ mod tests {
             .collect();
         assert_eq!(lines[..2], [line1, line2]);
         assert!(lines[2] == line3 || errors[2].notes[0].trace.innermost().unwrap().line() == line3);
+    }
+
+    /// The pins of [`Part::global_labels`] get global labels: unknown pin IDs and invalid names
+    /// are reported.
+    #[test]
+    fn test_global_labels_of_parts() {
+        let mut circuit = CircuitBuilder::<()>::new();
+        let a = circuit.instantiate_part(CustomPart {
+            global_labels: vec![("2", "GND")],
+            ..CustomPart::valid()
+        });
+        circuit.label(a["1"], NetLabel::global("GND"));
+        let netlist = circuit.build(&()).to_netlist().unwrap();
+        assert_eq!(summary(&netlist), expected(&[("GND", &["X1.1", "X1.2"])]));
+
+        let mut circuit = CircuitBuilder::<()>::new();
+        circuit.instantiate_part(CustomPart {
+            global_labels: vec![("3", "VCC"), ("1", "{x}")],
+            ..CustomPart::valid()
+        });
+        let errors = circuit.build(&()).to_netlist().unwrap_err().0;
+        let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
+        assert!(
+            matches!(&kinds[..], [
+                CircuitErrorKind::InvalidName { name, .. },
+                CircuitErrorKind::UnknownPinId { pin_id, .. },
+            ] if name == "{x}" && pin_id == "3"),
+            "{kinds:?}"
+        );
     }
 
     #[test]

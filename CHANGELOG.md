@@ -12,6 +12,10 @@ break the API).
 
 ### Added
 
+- `Part::global_labels` (empty by default): pins that each instance connects to a global net.
+  `kicad_part!` accepts symbols with hidden `power_in` pins (older and third-party libraries)
+  and connects them to the global net named after the pin, as KiCad does; they were a compile
+  error.
 - `cuprite_wire_embedded_hal`: `Board::open_drain_pin` for a bidirectional pin driven open-drain
   (I2C, wired-OR lines): `set_low` drives it low, `set_high` releases it, and it is an `InputPin`
   reading the line whatever drives it.

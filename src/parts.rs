@@ -41,6 +41,13 @@ pub trait Part: Debug + DynClone {
     fn internal_connections(&self) -> Vec<Vec<String>> {
         vec![]
     }
+    /// Pins connected to global nets, as `(pin ID, net name)`: each pin gets the label
+    /// [`NetLabel::global`](crate::naming::NetLabel::global) of the name when the part is
+    /// instantiated, as KiCad connects a hidden `power_in` pin to the global net named after the
+    /// pin. Empty by default.
+    fn global_labels(&self) -> Vec<(String, String)> {
+        vec![]
+    }
     /// The KiCad information (symbol, footprint, pins) of the part, or `None` if it cannot be
     /// exported to a KiCad netlist.
     fn kicad(&self) -> Option<KicadPartInfo> {

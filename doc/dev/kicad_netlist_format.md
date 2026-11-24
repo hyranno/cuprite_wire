@@ -227,6 +227,29 @@ an ERC error anyway, and the rule picking the pin was not worked out.
 `tools/compare_kicad_cli_netlist.py` places a no-connect flag on every pin whose type has the
 suffix, so the golden `multi_pin_ic.net` checks the suffix against kicad-cli.
 
+### 6.3 Hidden power input pins
+
+Observed with KiCad 10.0 (`kicad-cli sch export netlist` and `kicad-cli sch erc`) on hand-written
+schematics: a symbol with input/output pins and hidden `power_in` pins `VCC` and `GND`
+(`(pin power_in line ... (hide yes) (name "VCC") ...)`), placed several times, with resistors
+wired to labels.
+
+- A hidden `power_in` pin is connected to the global net named after the pin (`VCC`, `GND`), with
+  no wire or label: the pins of every instance and a global label `VCC` are on one net `VCC`.
+- What is wired to the pin joins that net too: a pin wired to a local label `X` puts `X`'s net on
+  `VCC`, named `VCC` (ERC `multiple_net_names`).
+- ERC treats the pins as other `power_in` pins: `power_pin_not_driven` once per net, and
+  `pin_not_connected` for a pin alone on its net, shown as "Hidden pin 2 [VCC, Power input, Line]".
+- A local label of the root sheet with the same name (`VCC`) is on the same net, with ERC
+  `same_local_global_label`. This is not specific to hidden pins: a root local label `A` and a
+  global label `A` are one net `A` as well. cuprite_wire keeps local and global labels apart
+  (`/A` and `A` are different nets).
+
+The KiCad 10 libraries have no hidden `power_in` pins outside power symbols (counted over all
+`symbols/*.kicad_sym`, `extends` resolved; KLC forbids them), and the pins of their power symbols
+(`(power)`) are not hidden. Older and third-party libraries still have them. `kicad_part!` gives
+such a part `Part::global_labels`, a global label on each of these pins.
+
 ## 7. Minimal form
 
 The minimal netlist that pcbnew can read looks like this

@@ -119,8 +119,14 @@ with the same nickname.
   The netlist then has a pad that is not a pin of the symbol, which a KiCad schematic cannot
   produce; pcbnew imports it and connects the pad (checked with
   `tools/check_netlist_import.py tests/golden/kicad_libraries_ep.net`).
-- Not supported (compile errors): power symbols (`power:GND`; use `NetLabel::global`), and hidden
-  `power_in` pins, which KiCad connects to a global net named after the pin.
+- **Hidden `power_in` pins** (in older and third-party libraries; the KiCad 10 libraries have
+  none) are connected to the global net named after the pin, as KiCad connects them: the part
+  returns them from `Part::global_labels`, and each instance puts `NetLabel::global(<pin name>)`
+  on them. What is connected to such a pin joins that net. ERC treats them as other `power_in`
+  pins (the net needs a `power_out` pin or `power_flag`). A hidden `power_in` pin without a name,
+  or whose name has `{` (markup such as `~{VCC}`), is an error. The generated documentation lists
+  them.
+- Not supported (compile error): power symbols (`power:GND`; use `NetLabel::global`).
 
 ## 4. Simulation (`spice()`)
 

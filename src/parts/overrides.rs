@@ -85,6 +85,9 @@ impl Part for Overridden {
     fn internal_connections(&self) -> Vec<Vec<String>> {
         self.part.internal_connections()
     }
+    fn global_labels(&self) -> Vec<(String, String)> {
+        self.part.global_labels()
+    }
     fn kicad(&self) -> Option<KicadPartInfo> {
         self.part.kicad().map(|info| self.overrides.apply(info))
     }

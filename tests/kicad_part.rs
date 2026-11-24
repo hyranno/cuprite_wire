@@ -7,10 +7,11 @@ use std::collections::BTreeMap;
 use common::{check_golden, strings};
 use cuprite_wire::{
     circuit::{CircuitBuilder, Named},
+    erc::{ErcSettings, ErcViolationKind},
     kicad::{KicadPartInfo, KicadPinInfo, LibId, PartFlags},
     kicad_part,
     naming::NetLabel,
-    parts::{Part, PartPins, PinType},
+    parts::{Part, PartExt, PartPins, PinType},
     spice::{ModelSource, SpiceElement, SpicePartInfo},
 };
 
@@ -67,6 +68,16 @@ kicad_part! {
         symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
         footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
         sim_library_dir: "crates/kicad_lib/tests/fixtures",
+    }
+}
+
+kicad_part! {
+    /// A gate whose GND and VCC pins are hidden power inputs.
+    struct HiddenPowerGate {
+        symbol: "test:HIDDEN_PWR_GATE",
+        pins: { "2" => "gnd" },
+        symbol_dir: "crates/kicad_lib/tests/fixtures/symbols",
+        footprint_dir: "crates/kicad_lib/tests/fixtures/footprints",
     }
 }
 
@@ -276,6 +287,59 @@ fn test_export() {
     );
     // The amplifier has no SPICE model.
     assert!(netlist.to_spice().is_err());
+}
+
+/// Hidden power input pins are connected to the global nets named after them, as in KiCad: with
+/// a global label of the same name, and with what is wired to them (the net keeps the global
+/// name, with a warning for its other name).
+#[test]
+fn test_hidden_power_pins() {
+    assert_eq!(
+        HiddenPowerGate.global_labels(),
+        [("gnd", "GND"), ("5", "VCC"), ("6", "VCC")]
+            .map(|(id, net)| (id.to_string(), net.to_string()))
+    );
+    let mut circuit = CircuitBuilder::new();
+    let u1 = circuit.instantiate_part(Named("u1", HiddenPowerGate.with_field("MPN", "G-1")));
+    let u2 = circuit.instantiate_part(Named("u2", HiddenPowerGate));
+    let r1 = circuit.instantiate_part(Named("r1", Resistor::new("10k")));
+    let r2 = circuit.instantiate_part(Named("r2", Resistor::new("1k")));
+    circuit.label(r1["1"], NetLabel::global("VCC"));
+    circuit.connect(r2["1"], u2["gnd"]);
+    circuit.label(r2["1"], NetLabel::local("X"));
+    for pin in ["1", "3", "4"] {
+        circuit.connect(u1[pin], u2[pin]);
+    }
+    circuit.connect(r1["2"], u1["1"]);
+    circuit.connect(r2["2"], u1["3"]);
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    let net_pins = |name: &str| {
+        let net = netlist.nets.iter().find(|net| net.name == name).unwrap();
+        let pins: Vec<String> = net
+            .nodes
+            .iter()
+            .map(|node| {
+                let ref_name = &netlist.components[node.component].ref_name;
+                format!("{ref_name}-{}", node.pin_id)
+            })
+            .collect();
+        pins
+    };
+    assert_eq!(net_pins("VCC"), ["R1-1", "U1-5", "U1-6", "U2-5", "U2-6"]);
+    assert_eq!(net_pins("GND"), ["R2-1", "U1-gnd", "U2-gnd"]);
+    assert_eq!(netlist.warnings.len(), 1, "{:?}", netlist.warnings);
+
+    // The power nets need a driver, as in KiCad.
+    let report = netlist.erc(&ErcSettings::default());
+    let undriven: Vec<&str> = report
+        .violations
+        .iter()
+        .filter_map(|v| match v.kind() {
+            ErcViolationKind::PowerPinNotDriven { net, .. } => Some(net.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(undriven, ["GND", "VCC"]);
 }
 
 /// The generated code names everything by its full path, so it compiles where the user's names

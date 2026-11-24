@@ -470,6 +470,7 @@ fn simulate_pspice_model(simulator: &dyn Simulator) {
             ref_prefix: "U",
             pin_ids: vec!["in", "out"],
             internal_connections: vec![],
+            global_labels: vec![],
             kicad: None,
             spice: Some(SpicePartInfo::element(
                 SpiceElement::new('X', ["in", "out"], "WINDOW").with_model(model),

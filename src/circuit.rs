@@ -400,6 +400,17 @@ impl<B> CircuitBuilder<B> {
                 self.nets.add_edge(*pair[0], *pair[1], trace.0[0]);
             }
         }
+        // Unknown pin IDs are skipped here too.
+        for (pin, name) in part.global_labels() {
+            self.check_name(&name, check_label_name, trace.clone());
+            if let Some(&node) = pin_mapping.get(&pin) {
+                self.nets[node].labels.push(NodeLabel {
+                    label: NetLabel::Global(name),
+                    scope: HierPath::default(),
+                    trace: trace.clone(),
+                });
+            }
+        }
         let nodes = pin_mapping
             .iter()
             .map(|(pin, &index)| (pin.clone(), self.node(index)))
