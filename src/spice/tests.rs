@@ -928,7 +928,7 @@ fn typed_analyses(simulator: &dyn Simulator) {
     let current = deck.current(&source).unwrap();
     let tran = Tran::new(10e-6, 5e-3).probes([out.clone(), across.clone(), current.clone()]);
     let ac = Ac::decade(50, 1.0, 100e3).probes([out.clone(), current.clone()]);
-    let dc = Dc::new(&source, 0.0, 2.0, 0.5).probe(&out);
+    let dc = Dc::new(&deck.source(&source).unwrap(), 0.0, 2.0, 0.5).probe(&out);
     let deck = deck
         .analysis(&tran)
         .analysis(&ac)
@@ -989,6 +989,11 @@ fn typed_operating_point(simulator: &dyn Simulator) {
     );
     assert_eq!(
         deck.current("R1"),
+        Err(ProbeError::UnknownVoltageSource("R1".into()))
+    );
+    assert_eq!(deck.source("v1").unwrap().element(), "V1");
+    assert_eq!(
+        deck.source("R1"),
         Err(ProbeError::UnknownSource("R1".into()))
     );
     let ground = deck.voltage_between("GND", "/MID").unwrap();
@@ -999,4 +1004,13 @@ fn typed_operating_point(simulator: &dyn Simulator) {
     assert!((result.get(&mid).unwrap() - 7.5).abs() < 1e-6);
     assert!((result.get(&current).unwrap() - 2.5e-3).abs() < 1e-9);
     assert!((result.get(&ground).unwrap() + 7.5).abs() < 1e-6);
+}
+
+#[test]
+#[should_panic(expected = "the deck already has the analysis tran 1e-5 0.001")]
+fn test_analysis_added_twice() {
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)));
+    let out = deck.voltage("/OUT").unwrap();
+    let tran = crate::spice::analysis::Tran::new(10e-6, 1e-3).probe(&out);
+    let _ = deck.analysis(&tran).analysis(&tran);
 }

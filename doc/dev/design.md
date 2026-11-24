@@ -32,10 +32,12 @@ reads their results without file or column names. The string commands of `SpiceD
 stay, and both go into the `.control` block in the order they are added, so `meas`, `let`,
 `setplot` and analyses not covered by types can be mixed in.
 
-- Probes are made by the deck (`deck.voltage("/OUT")`, `voltage_between`, `current("V1")`), not by
+- Probes are made by the deck (`deck.voltage("/OUT")`, `voltage_between`, `current("V1")`), as is
+  the source a `Dc` sweeps (`deck.source("V1")`, a `V` or `I` element), not by
   the netlist or the analysis: the deck is the test bench, `deck.netlist()` knows the nets and
   elements to check the name against, and `SpiceDeck::run_with` of the co-simulation takes the same
-  deck. An unknown net or source is an error (`ProbeError`) naming it, before the run.
+  deck. An unknown net or source is an error (`ProbeError`) naming it, before the run, not an
+  ngspice error after it.
 - `SpiceDeck::analysis(&a)` appends the analysis command and a `wrdata analysis<n>.txt <probes>`
   right after it (`wrdata` writes the current plot). The deck records the analysis by an identity
   (`id`) with its file, and `Simulation` copies the record, so `sim.result(&a)` finds the file. The

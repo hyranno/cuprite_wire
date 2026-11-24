@@ -59,7 +59,9 @@ pub enum ProbeError {
         /// Its SPICE node name.
         node: String,
     },
-    /// The netlist has no voltage source (`V...`) of this name.
+    /// The netlist has no voltage source (`V...`) of this name, for a current.
+    UnknownVoltageSource(String),
+    /// The netlist has no independent source (`V...` or `I...`) of this name, for a sweep.
     UnknownSource(String),
 }
 
@@ -78,7 +80,12 @@ impl fmt::Display for ProbeError {
                 "the node {node:?} of the net {net:?} cannot be probed: ngspice reads `$` in \
                  commands as a variable"
             ),
-            ProbeError::UnknownSource(name) => write!(f, "no voltage source named {name:?}"),
+            ProbeError::UnknownVoltageSource(name) => {
+                write!(f, "no voltage source named {name:?}")
+            }
+            ProbeError::UnknownSource(name) => {
+                write!(f, "no independent source (`V` or `I`) named {name:?}")
+            }
         }
     }
 }
@@ -124,6 +131,19 @@ impl SpiceDeck {
             Some(element) if element.starts_with(['V', 'v']) => Ok(Probe {
                 expression: format!("i({element})"),
             }),
+            _ => Err(ProbeError::UnknownVoltageSource(name.to_string())),
+        }
+    }
+
+    /// The independent source `name` (a `V` or `I` element), to sweep with [`Dc`].
+    ///
+    /// # Errors
+    /// If the netlist has no voltage or current source of this name.
+    pub fn source(&self, name: &str) -> Result<Source, ProbeError> {
+        match self.netlist().element(name) {
+            Some(element) if element.starts_with(['V', 'v', 'I', 'i']) => Ok(Source {
+                element: element.to_string(),
+            }),
             _ => Err(ProbeError::UnknownSource(name.to_string())),
         }
     }
@@ -143,6 +163,19 @@ impl SpiceDeck {
         } else {
             Ok(format!("v(\"{node}\")"))
         }
+    }
+}
+
+/// An independent source of a deck, from [`SpiceDeck::source`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Source {
+    element: String,
+}
+
+impl Source {
+    /// The element name, e.g. `V1`.
+    pub fn element(&self) -> &str {
+        &self.element
     }
 }
 
@@ -321,10 +354,10 @@ pub struct Dc {
 }
 
 impl Dc {
-    /// Sweeps the source `source` (its element name, e.g. `V1`) from `start` to `stop` by `step`.
-    pub fn new(source: impl Into<String>, start: f64, stop: f64, step: f64) -> Self {
+    /// Sweeps the value of `source` from `start` to `stop` by `step`.
+    pub fn new(source: &Source, start: f64, stop: f64, step: f64) -> Self {
         Dc {
-            source: source.into(),
+            source: source.element.clone(),
             start,
             stop,
             step,
