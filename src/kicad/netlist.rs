@@ -30,6 +30,8 @@ pub(super) struct KicadComponent {
     pub(super) fields: Vec<(String, String)>,
     pub(super) lib_source: Option<LibId>,
     pub(super) flags: PartFlags,
+    pub(super) datasheet: String,
+    pub(super) description: String,
     pub(super) sheet_names: String,
     pub(super) sheet_tstamps: String,
     pub(super) uuid: Uuid,
@@ -67,6 +69,8 @@ impl Netlist {
             .map(|component| check_component(component, &mut errors))
             .collect();
 
+        // KiCad treats `~` as empty.
+        let text = |text: &Option<String>| text.clone().filter(|t| t != "~").unwrap_or_default();
         let components = self
             .components
             .iter()
@@ -79,6 +83,8 @@ impl Netlist {
                     footprint: info.footprint.clone()?,
                     fields: info.fields.clone(),
                     lib_source: info.lib_source.clone(),
+                    datasheet: text(&info.datasheet),
+                    description: text(&info.description),
                     flags: info.flags,
                     sheet_names: component.path.to_string(),
                     sheet_tstamps: component.path.tstamps(),
@@ -259,6 +265,15 @@ impl KicadComponent {
             SExpr::kv("value", value),
             SExpr::kv("footprint", self.footprint.to_string()),
         ];
+        // Eeschema omits them when empty.
+        for (name, text) in [
+            ("datasheet", &self.datasheet),
+            ("description", &self.description),
+        ] {
+            if !text.is_empty() {
+                items.push(SExpr::kv(name, text));
+            }
+        }
         if !self.fields.is_empty() {
             items.push(SExpr::node(
                 "fields",
@@ -373,6 +388,27 @@ mod tests {
                 .unwrap()
                 .starts_with("(export (version \"E\")")
         );
+    }
+
+    /// As Eeschema: `datasheet` and `description` after `footprint`, omitted when empty or `~`.
+    #[test]
+    fn test_datasheet_and_description() {
+        let mut circuit = CircuitBuilder::new();
+        let mut part = CustomPart::valid();
+        let info = part.kicad.as_mut().unwrap();
+        info.datasheet = Some("https://example.com/x.pdf".into());
+        info.description = Some("A part".into());
+        circuit.instantiate_part(part);
+        let mut tilde = CustomPart::valid();
+        tilde.kicad.as_mut().unwrap().datasheet = Some("~".into());
+        circuit.instantiate_part(tilde);
+        let text = export(&circuit).to_string();
+        assert!(text.contains(
+            "(footprint \"Custom:Footprint\")\n      \
+             (datasheet \"https://example.com/x.pdf\")\n      \
+             (description \"A part\")\n"
+        ));
+        assert_eq!(text.matches("(datasheet").count(), 1);
     }
 
     #[test]

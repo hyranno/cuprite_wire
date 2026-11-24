@@ -88,6 +88,8 @@ fn test_resistor() {
             lib_source: Some(LibId::new("test", "R").unwrap()),
             fields: vec![],
             flags: PartFlags::default(),
+            datasheet: None,
+            description: Some("Resistor".into()),
         })
     );
     assert_eq!(

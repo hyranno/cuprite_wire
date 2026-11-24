@@ -404,6 +404,14 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
         .iter()
         .map(|(key, value)| quote!((::std::string::String::from(#key), ::std::string::String::from(#value))));
     let (exclude_from_bom, exclude_from_board) = (kicad.exclude_from_bom, kicad.exclude_from_board);
+    let optional_text = |text: &Option<String>| match text {
+        Some(text) => quote!(::core::option::Option::Some(::std::string::String::from(#text))),
+        None => quote!(::core::option::Option::None),
+    };
+    let (datasheet, description) = (
+        optional_text(&kicad.datasheet),
+        optional_text(&kicad.description),
+    );
     Some(quote! {
         fn kicad(&self) -> ::core::option::Option<#krate::kicad::KicadPartInfo> {
             ::core::option::Option::Some(#krate::kicad::KicadPartInfo {
@@ -416,6 +424,8 @@ fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
                     exclude_from_bom: #exclude_from_bom,
                     exclude_from_board: #exclude_from_board,
                 },
+                datasheet: #datasheet,
+                description: #description,
             })
         }
     })

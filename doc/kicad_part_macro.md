@@ -77,8 +77,9 @@ with the same nickname.
 - The documentation of the type gets the symbol, the footprint, the symbol's description and
   datasheet, and a table of the pins (ID, pad, name, electrical type, unit), shown by rust-analyzer.
 - `impl Part`: the reference prefix, the pins, the value, the internal connections, `kicad()`
-  (footprint, pin numbers / names / types, `lib_source`, `fields`, and the `in_bom` / `on_board`
-  flags of the symbol), and `spice()` (section 4).
+  (footprint, pin numbers / names / types, `lib_source`, `fields`, the `in_bom` / `on_board`
+  flags, and the `Datasheet` / `Description` fields of the symbol, written to the netlist and
+  shown in the BOM), and `spice()` (section 4).
 
 ## 3. Pins and pads
 

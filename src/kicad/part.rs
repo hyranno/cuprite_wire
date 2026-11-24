@@ -52,6 +52,10 @@ pub struct KicadPartInfo {
     pub fields: Vec<(String, String)>,
     /// The flags of the component.
     pub flags: PartFlags,
+    /// The datasheet (usually a URL), written as `datasheet` and shown in the BOM.
+    pub datasheet: Option<String>,
+    /// The description, written as `description` and shown in the BOM.
+    pub description: Option<String>,
 }
 
 /// A mismatch between the pin IDs of a part and its KiCad pin information.
