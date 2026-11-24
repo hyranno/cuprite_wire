@@ -323,6 +323,14 @@ fn generate(
         .internal_connections
         .iter()
         .map(|group| quote!(::std::vec![#(::std::string::String::from(#group)),*]));
+    let global_labels_fn = (!part.global_labels.is_empty()).then(|| {
+        let (ids, nets): (Vec<_>, Vec<_>) = part.global_labels.iter().cloned().unzip();
+        quote! {
+            fn global_labels(&self) -> ::std::vec::Vec<(::std::string::String, ::std::string::String)> {
+                ::std::vec![#((::std::string::String::from(#ids), ::std::string::String::from(#nets))),*]
+            }
+        }
+    });
     let kicad_fn = kicad_fn(part, &krate);
     let mut spice_fn = spice_fn(part, &krate);
     let mut eq = Some(quote!(::core::cmp::Eq,));
@@ -369,6 +377,7 @@ fn generate(
             fn internal_connections(&self) -> ::std::vec::Vec<::std::vec::Vec<::std::string::String>> {
                 ::std::vec![#(#groups),*]
             }
+            #global_labels_fn
             #kicad_fn
             #spice_fn
         }
@@ -582,6 +591,18 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                     unit
                 ));
             }
+            if !part.global_labels.is_empty() {
+                let labels: Vec<String> = part
+                    .global_labels
+                    .iter()
+                    .map(|(id, net)| format!("`{}` to `{}`", escape(id), escape(net)))
+                    .collect();
+                lines.push(String::new());
+                lines.push(format!(
+                    "Hidden power input pins, connected to global nets as in KiCad: {}.",
+                    labels.join(", ")
+                ));
+            }
         }
         None => {
             lines.push(
@@ -692,6 +713,7 @@ mod tests {
                 unit: 0,
             }],
             internal_connections: Vec::new(),
+            global_labels: Vec::new(),
             spice: SpiceDef::Unsupported,
         };
         let lines = doc_lines(&part);

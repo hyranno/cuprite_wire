@@ -232,6 +232,8 @@ pub struct CustomPart {
     pub ref_prefix: &'static str,
     pub pin_ids: Vec<&'static str>,
     pub internal_connections: Vec<Vec<&'static str>>,
+    /// `(pin ID, net name)`.
+    pub global_labels: Vec<(&'static str, &'static str)>,
     pub kicad: Option<KicadPartInfo>,
     pub spice: Option<SpicePartInfo>,
 }
@@ -243,6 +245,7 @@ impl CustomPart {
             ref_prefix: "X",
             pin_ids: vec!["1", "2"],
             internal_connections: vec![],
+            global_labels: vec![],
             kicad: Some(two_pin_kicad_info("Custom:Footprint", "Custom:Symbol")),
             spice: Some(SpicePartInfo::element(SpiceElement::new(
                 'X',
@@ -267,6 +270,12 @@ impl Part for CustomPart {
         self.internal_connections
             .iter()
             .map(|group| group.iter().map(|s| s.to_string()).collect())
+            .collect()
+    }
+    fn global_labels(&self) -> Vec<(String, String)> {
+        self.global_labels
+            .iter()
+            .map(|(pin, net)| (pin.to_string(), net.to_string()))
             .collect()
     }
     fn kicad(&self) -> Option<KicadPartInfo> {

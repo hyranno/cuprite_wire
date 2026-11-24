@@ -39,6 +39,7 @@ impl Part for Passive {
     fn kicad(&self) -> Option<KicadPartInfo> { ... }         // doc/kicad_netlist_usage.md section 2
     fn spice(&self) -> Option<SpicePartInfo> { ... }         // doc/spice_netlist_usage.md section 2
     // fn internal_connections(&self) -> Vec<Vec<String>>   (empty by default)
+    // fn global_labels(&self) -> Vec<(String, String)>     (empty by default)
     // fn extra_pin_types(&self) -> BTreeMap<String, PinType> (doc/erc.md section 2)
 }
 ```
@@ -50,6 +51,9 @@ impl Part for Passive {
   when the part is instantiated (like stacked pins in a KiCad symbol). Groups sharing a pin are
   merged into one. `PartPins::of(&part)` gives the pin IDs and the merged groups, as the netlist
   sees them (`Component::pins`); the checks of the format-specific information take it.
+- Pins connected to global nets by the part itself are declared with `global_labels()` as
+  `(pin ID, net name)`: each instance puts `NetLabel::global(<net name>)` on them, as KiCad
+  connects hidden `power_in` pins (`kicad_part!` generates it for them).
 - Parts supporting different formats may be mixed in one circuit (e.g. a simulation-only voltage
   source next to a connector that has no SPICE model). Only exporting such a circuit to the
   unsupported format is an error (`KicadUnsupported`, `SpiceUnsupported`). There is no option to
@@ -181,7 +185,7 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 | `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label; a reference prefix (`Part::ref_prefix`) that is empty, ends with a digit, or contains whitespace, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#` or `{` |
 | `DuplicateInstanceName` | the same explicit name twice in one (sub)circuit (the note points at the first) |
 | `ForeignNode` | a node created by another builder (section 3) |
-| `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections or in the keys of `Part::extra_pin_types` |
+| `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections, in `Part::global_labels` or in the keys of `Part::extra_pin_types` |
 | `DuplicatePinType` | a pin with a type both in its KiCad pin information and in `Part::extra_pin_types` |
 | `DuplicateRef` | two parts with the same reference designator |
 | `DuplicateNetName` | two nets with the same name |

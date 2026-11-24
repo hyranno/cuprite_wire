@@ -154,6 +154,9 @@ pub struct PartDef {
     pub pins: Vec<PinDef>,
     /// Groups of pin IDs.
     pub internal_connections: Vec<Vec<String>>,
+    /// Pins connected to global nets, as `(pin ID, net name)`: hidden `power_in` pins, which KiCad
+    /// connects to the global net named after the pin.
+    pub global_labels: Vec<(String, String)>,
     /// The SPICE description, with pin IDs.
     pub spice: SpiceDef,
 }
@@ -213,7 +216,17 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
     };
 
     // Pins: a pin per pad of the symbol pins, then extra pads; IDs default to the pad numbers
-    // (see `default_pin_ids` for duplicate pins).
+    // (see `default_pin_ids` for duplicate pins). The global net of each pin, in the same order.
+    let global_nets: Vec<Option<String>> = symbol
+        .pins
+        .iter()
+        .flat_map(|pin| {
+            let net = (pin.hidden && pin.electrical_type == ElectricalType::PowerIn)
+                .then(|| pin.name.clone())
+                .flatten();
+            pin.pads.iter().map(move |_| net.clone())
+        })
+        .collect();
     let mut pins: Vec<PinDef> = symbol
         .pins
         .iter()
@@ -239,6 +252,11 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         pin.id.clone_from(id);
     }
     rename_pins(&mut pins, &common.pins, PinKeys::PadNumbers)?;
+    let global_labels: Vec<(String, String)> = pins
+        .iter()
+        .zip(&global_nets)
+        .filter_map(|(pin, net)| Some((pin.id.clone(), net.clone()?)))
+        .collect();
     let ids = PinIds::new(&pins, &symbol);
     // The pads of a stacked pin notation, then pins at the same position.
     let mut internal_connections: Vec<Vec<String>> = symbol
@@ -384,6 +402,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         value,
         pins,
         internal_connections,
+        global_labels,
         spice,
     })
 }
@@ -583,6 +602,7 @@ pub fn load_spice_part(
         value: common.value.clone().unwrap_or(Value::Fixed(info.name)),
         pins,
         internal_connections,
+        global_labels: Vec::new(),
         spice: SpiceDef::Elements(Elements {
             elements,
             unused_pins: Vec::new(),
@@ -616,18 +636,26 @@ fn check_symbol(symbol: &Symbol) -> Result<(), Error> {
     if symbol.pins.is_empty() {
         return Err(Error::new("the symbol has no pins"));
     }
-    let hidden_power: Vec<&str> = symbol
-        .pins
-        .iter()
-        .filter(|pin| pin.hidden && pin.electrical_type == ElectricalType::PowerIn)
-        .map(|pin| pin.number.as_str())
-        .collect();
-    if !hidden_power.is_empty() {
-        return Err(Error::new(format!(
-            "hidden power input pins ({}) are connected to global nets implicitly by KiCad; \
-             this is not supported",
-            hidden_power.join(", ")
-        )));
+    // KiCad connects a hidden power input pin to the global net named after the pin.
+    for pin in &symbol.pins {
+        if !pin.hidden || pin.electrical_type != ElectricalType::PowerIn {
+            continue;
+        }
+        let number = &pin.number;
+        match &pin.name {
+            None => {
+                return Err(Error::new(format!(
+                    "hidden power input pin {number} has no name to connect it to a global net"
+                )));
+            }
+            Some(name) if name.contains('{') => {
+                return Err(Error::new(format!(
+                    "hidden power input pin {number} is named {name:?}, which cannot be a net \
+                     label ('{{' is reserved)"
+                )));
+            }
+            Some(_) => {}
+        }
     }
     Ok(())
 }
@@ -732,6 +760,15 @@ mod tests {
         let (key, message) = error(options("test:GND", "test:R_0603"));
         assert_eq!(key, OptionKey::Symbol);
         assert!(message.contains("power symbols"), "{message}");
+        let (key, message) = error(options("test:HIDDEN_PWR_NO_NAME", "test:R_0603"));
+        assert_eq!(key, OptionKey::Symbol);
+        assert_eq!(
+            message,
+            "hidden power input pin 2 has no name to connect it to a global net"
+        );
+        let (key, message) = error(options("test:HIDDEN_PWR_MARKUP", "test:R_0603"));
+        assert_eq!(key, OptionKey::Symbol);
+        assert!(message.contains("cannot be a net label"), "{message}");
         let (key, message) = error(options("test:NOPE", "test:R_0603"));
         assert_eq!(key, OptionKey::Symbol);
         assert!(message.contains("\"NOPE\" not found"), "{message}");
@@ -760,6 +797,21 @@ mod tests {
                 "invalid reference prefix \"U1\"".into()
             )
         );
+    }
+
+    /// Hidden power input pins are connected to the global nets named after them, by the pad
+    /// (each pad of a stacked pin notation) and with the renamed pin IDs.
+    #[test]
+    fn test_hidden_power_pins() {
+        let mut opts = options("test:HIDDEN_PWR_GATE", "test:SOT-23-6");
+        opts.common.pins = vec![("2".into(), "gnd".into())];
+        let part = load_part(&opts, &mut resolver()).unwrap();
+        assert_eq!(
+            part.global_labels,
+            [("gnd", "GND"), ("5", "VCC"), ("6", "VCC")]
+                .map(|(id, net)| (id.to_string(), net.to_string()))
+        );
+        assert_eq!(part.internal_connections, vec![strings(&["5", "6"])]);
     }
 
     #[test]
