@@ -308,6 +308,8 @@ Notes (verified with ngspice 44.2):
 - `meas ... WHEN` takes a vector or `vdb(<node>)`, not an expression like `db(v("/out"))`
   (`Error: no such vector as db(v("/out"))`).
 - `write` without a file writes `rawspice.raw` in the working directory.
+- `wrdata` after a `tran` with a `tstart` writes only the points from `tstart` on. With `uic` and no initial conditions, the first point of an RC low-pass driven by
+  1 V DC through 10 kΩ is 1e-4 V at the capacitor, not exactly 0.
 - A lossless transmission line (`T1 p1 n1 p2 n2 z0=50 td=1n`) does not limit the time step by
   its delay: a `tran` gave the same number of points with `td` of 1 ps and of 10 ns.
 

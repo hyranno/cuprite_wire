@@ -230,6 +230,11 @@ impl Probes {
 
     fn add(mut self, probes: impl IntoIterator<Item = Probe>) -> Self {
         self.probes.extend(probes);
+        self.renew()
+    }
+
+    /// The same probes with a new identity, for a change of the analysis.
+    fn renew(mut self) -> Self {
         self.id = next_id();
         self
     }
@@ -298,23 +303,52 @@ impl Analysis for Op {
     }
 }
 
-/// A transient analysis, `tran <step> <stop>`.
+/// A transient analysis, `tran <step> <stop> [<start> [<max step>]] [uic]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tran {
     step: f64,
     stop: f64,
+    start: Option<f64>,
+    max_step: Option<f64>,
+    uic: bool,
     probes: Probes,
 }
 
 impl Tran {
     /// From 0 to `stop` seconds, printing every `step` seconds (ngspice also limits its time step
-    /// to `step` or to `(stop - 0) / 50`, whichever is smaller).
+    /// to `step` or to `(stop - start) / 50`, whichever is smaller).
     pub fn new(step: f64, stop: f64) -> Self {
         Tran {
             step,
             stop,
+            start: None,
+            max_step: None,
+            uic: false,
             probes: Probes::new(),
         }
+    }
+
+    /// Records the points from `start` seconds on; the simulation still starts at 0.
+    pub fn with_start(mut self, start: f64) -> Self {
+        self.start = Some(start);
+        self.probes = self.probes.renew();
+        self
+    }
+
+    /// Limits the internal time step of ngspice to `max_step` seconds, instead of the smaller of
+    /// `step` and `(stop - start) / 50`.
+    pub fn with_max_step(mut self, max_step: f64) -> Self {
+        self.max_step = Some(max_step);
+        self.probes = self.probes.renew();
+        self
+    }
+
+    /// Skips the operating point before the analysis (`uic`): it starts from the initial
+    /// conditions of the elements (`IC=`) and of `.ic` directives, and from 0 elsewhere.
+    pub fn with_uic(mut self) -> Self {
+        self.uic = true;
+        self.probes = self.probes.renew();
+        self
     }
 }
 
@@ -325,11 +359,22 @@ impl sealed::Sealed for Tran {
         self.probes.id
     }
     fn command(&self) -> String {
-        format!(
+        let mut command = format!(
             "tran {} {}",
             spice_number(self.step),
             spice_number(self.stop)
-        )
+        );
+        // The maximum step is the fourth argument, after the start.
+        if self.start.is_some() || self.max_step.is_some() {
+            command.push_str(&format!(" {}", spice_number(self.start.unwrap_or(0.0))));
+        }
+        if let Some(max_step) = self.max_step {
+            command.push_str(&format!(" {}", spice_number(max_step)));
+        }
+        if self.uic {
+            command.push_str(" uic");
+        }
+        command
     }
     fn probes(&self) -> &[Probe] {
         &self.probes.probes
@@ -500,7 +545,7 @@ pub(crate) fn column_count(analysis: &dyn sealed::Sealed) -> usize {
 }
 
 fn missing_probe(probe: &Probe) -> SimulationError {
-    SimulationError::Analysis(format!("{probe} is not a probe of the analysis"))
+    SimulationError::Analysis(format!("the analysis: {probe} is not one of its probes"))
 }
 
 fn index_of(probes: &[Probe], probe: &Probe) -> Result<usize, SimulationError> {
