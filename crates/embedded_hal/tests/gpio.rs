@@ -8,7 +8,7 @@ use cuprite_wire::{
         cosim::{CosimDevice, DeviceModels},
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
-            OutputCharacteristics,
+            OutputCharacteristics, Pull,
         },
     },
 };
@@ -146,6 +146,64 @@ fn output_deck(analyses: &[&str]) -> SpiceDeck {
         .control([format!("wrdata out.txt {OUT}")])
 }
 
+/// An open-drain line with a pull-up, shared by the firmware and another open-drain driver: the
+/// line is low while either pulls it low, and the firmware reads it whatever drives it.
+#[test]
+fn test_open_drain_wired_and() {
+    struct Pulse<P> {
+        line: P,
+        reads: Vec<bool>,
+        released: Vec<bool>,
+    }
+    fn step<P: InputPin + StatefulOutputPin>(task: &mut Pulse<P>) {
+        task.reads.push(task.line.is_high().unwrap());
+        task.released.push(task.line.is_set_high().unwrap());
+        // Pulls the line low at the step at 2 us, releases it at 3 us.
+        match task.reads.len() {
+            3 => task.line.set_low().unwrap(),
+            4 => task.line.set_high().unwrap(),
+            _ => {}
+        }
+    }
+    let mut bench = CircuitBuilder::new();
+    let output = OutputCharacteristics::cmos(3.3);
+    // The other device pulls the line low from 4.5 to 6.5 us.
+    let other = DigitalSequence::new(Level::HiZ)
+        .at(4.5e-6, Level::Low)
+        .at(6.5e-6, Level::HiZ);
+    let driver = bench.instantiate_part(DigitalDriver::new(output.clone(), other));
+    let pull_up = InputCharacteristics::cmos(3.3).with_pull(Pull::up(3.3, 4.7e3));
+    let mcu = bench.instantiate_part(CosimDevice::new("mcu").bidirectional("sda", output, pull_up));
+    bench.connect(driver[DigitalDriver::OUT], mcu["sda"]);
+    for gnd in [driver[DigitalDriver::GND], mcu[CosimDevice::GND]] {
+        bench.label(gnd, NetLabel::global("GND"));
+    }
+    let deck = bench
+        .build(&())
+        .to_netlist()
+        .unwrap()
+        .to_spice()
+        .unwrap()
+        .deck()
+        .control(["tran 10n 8u"]);
+
+    let board = Board::new();
+    let pulse = Pulse {
+        line: board.open_drain_pin("sda"),
+        reads: Vec::new(),
+        released: Vec::new(),
+    };
+    let mut firmware = Firmware::new(&board, 1e-6, pulse, step);
+    deck.run_with(DeviceModels::new().with("mcu", &mut firmware))
+        .unwrap();
+    let pulse = firmware.into_task();
+    // Steps at 0, 1, ..., 8 us: low at 3 us by the firmware, at 5 and 6 us by the other device.
+    let reads = [true, true, true, false, true, false, false, true, true];
+    assert_eq!(pulse.reads, reads);
+    let released = [true, true, true, false, true, true, true, true, true];
+    assert_eq!(pulse.released, released);
+}
+
 /// A duty set by a step at the time a PWM period starts takes effect at the next period, as with
 /// the buffered compare register of a timer whose interrupt is at the start of the period.
 #[test]
@@ -184,4 +242,10 @@ fn test_pins_outside_a_run() {
     assert!(!output.is_set_low().unwrap());
     output.set_low().unwrap();
     assert!(output.is_set_low().unwrap());
+    // An open-drain pin starts released.
+    let mut line = board.open_drain_pin("sda");
+    assert!(line.is_set_high().unwrap());
+    line.set_low().unwrap();
+    assert!(line.is_set_low().unwrap());
+    assert!(!line.is_set_high().unwrap());
 }
