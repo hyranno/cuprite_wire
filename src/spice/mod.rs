@@ -20,7 +20,7 @@ pub mod value;
 pub mod xspice;
 
 pub use deck::SpiceDeck;
-pub use netlist::{GROUND, SpiceNetlist, spice_node_name};
+pub use netlist::{GROUND, SpiceNetlist, SpiceOptions, spice_node_name};
 pub use part::{ModelSource, SpiceDialect, SpiceElement, SpicePartInfo, SpiceProblem};
 #[cfg(feature = "shared-ngspice")]
 pub use shared::SharedNgspice;

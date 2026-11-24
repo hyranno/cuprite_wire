@@ -7,8 +7,8 @@ use crate::{
     error::CircuitErrorKind,
     naming::NetLabel,
     spice::{
-        Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpicePartInfo, Table,
-        Waveform,
+        Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpiceOptions,
+        SpicePartInfo, Table, Waveform,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics, Pull,
@@ -282,6 +282,59 @@ fn test_ground_is_required() {
         .0;
     let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
     assert_eq!(kinds, vec![CircuitErrorKind::GroundMissing]);
+}
+
+/// Nets added by `SpiceOptions::ground_net` become the ground, also next to `GND`, by their exact
+/// net names.
+#[test]
+fn test_extra_ground_nets() {
+    let mut circuit = CircuitBuilder::new();
+    let source = circuit.instantiate_part(IndependentSource::voltage(1.0));
+    circuit.label(source[IndependentSource::P], NetLabel::local("IN"));
+    circuit.label(source[IndependentSource::N], NetLabel::global("AGND"));
+    let r = circuit.instantiate_part(Resistor("1k"));
+    circuit.connect(r["1"], source[IndependentSource::P]);
+    circuit.label(r["2"], NetLabel::global("GND"));
+    let load = circuit.instantiate_part(Resistor("1k"));
+    circuit.connect(load["1"], source[IndependentSource::P]);
+    circuit.label(load["2"], NetLabel::global("agnd"));
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+
+    let spice = netlist
+        .to_spice_with(&SpiceOptions::new().ground_net("AGND"))
+        .unwrap();
+    assert_eq!(spice.node("AGND"), Some("0"));
+    assert_eq!(spice.node("GND"), Some("0"));
+    // Not the same net name: converted as usual, and colliding with `AGND` is not reported.
+    assert_eq!(spice.node("agnd"), Some("agnd"));
+
+    // Without the option, `AGND` and `agnd` collide.
+    let kinds: Vec<_> = netlist
+        .to_spice()
+        .unwrap_err()
+        .0
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![CircuitErrorKind::SpiceNodeCollision {
+            name: "agnd".into(),
+            other: "AGND".into(),
+            node: "agnd".into(),
+        }]
+    );
+
+    // An extra ground alone is enough.
+    let mut circuit = CircuitBuilder::new();
+    let r = circuit.instantiate_part(Resistor("1k"));
+    circuit.label(r["1"], NetLabel::local("A"));
+    circuit.label(r["2"], NetLabel::local("AGND"));
+    let netlist = circuit.build(&()).to_netlist().unwrap();
+    let spice = netlist
+        .to_spice_with(&SpiceOptions::new().ground_net("/AGND"))
+        .unwrap();
+    assert_eq!(spice.node("/AGND"), Some("0"));
 }
 
 #[test]
