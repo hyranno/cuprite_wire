@@ -295,6 +295,18 @@ Notes (verified with ngspice 44.2):
 - Without a `.control` block, `ngspice -b` runs the analyses of the dot directives and prints the
   `.meas` results. With one, only the commands of the block run
   (`Note: Simulation executed from .control section`).
+- With `wr_singlescale`, `wrdata` after `op` writes the first vector of the plot (a node voltage) as
+  the scale column, before the requested vectors.
+- The header of `wrdata` keeps the case of the expression but drops the quotes (`v("/OUT")` is
+  written as `v(/OUT)`), and a complex vector (AC) is written as two columns under the same name.
+  `real(v("/OUT")) imag(v("/OUT"))` writes the parts as two named real columns.
+- `wrdata` reads its vectors as one expression list: `v(a) -v(b)` is the single vector
+  `v(a)-v(b)`. Parenthesize a negated vector: `(-v(b))`.
+- `$` in a node name starts a variable in front-end commands even inside quotes
+  (`v("/a$b")` fails with `Error: b: no such variable.`), so such a node cannot be probed.
+  The ground `0` has no vector (`v(0)`: `Error: no such vector 0`).
+- `meas ... WHEN` takes a vector or `vdb(<node>)`, not an expression like `db(v("/out"))`
+  (`Error: no such vector as db(v("/out"))`).
 - `write` without a file writes `rawspice.raw` in the working directory.
 - A lossless transmission line (`T1 p1 n1 p2 n2 z0=50 td=1n`) does not limit the time step by
   its delay: a `tran` gave the same number of points with `td` of 1 ps and of 10 ns.

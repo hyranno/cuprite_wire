@@ -61,13 +61,21 @@ fn test_output_at_breakpoint() {
     let device = CosimDevice::new("mcu")
         .output("out", OutputCharacteristics::cmos(3.3).with_resistance(1e3));
     let deck = line_deck(device, "out", DigitalLoad::new(input.clone()), 6e-6);
+    // The same analysis, typed.
+    let deck = deck.netlist().clone().deck();
+    let line = deck.voltage("/LINE").unwrap();
+    let tran = crate::spice::analysis::Tran::new(10e-9, 6e-6).probe(&line);
     let mut player = Player {
         sequence: DigitalSequence::new(Level::Low).at(1e-6, Level::High),
         steps: 0,
     };
-    let table = table(&deck, DeviceModels::new().with("mcu", &mut player));
+    let sim = deck
+        .analysis(&tran)
+        .run_with(DeviceModels::new().with("mcu", &mut player))
+        .unwrap();
     assert!(player.steps > 10, "{}", player.steps);
-    let read = input.decode(table.scale(), table.column(LINE).unwrap());
+    let result = sim.result(&tran).unwrap();
+    let read = input.decode(result.scale(), result.get(&line).unwrap());
     let [(t, Level::High)] = read.events() else {
         panic!("{read:?}");
     };

@@ -465,6 +465,14 @@ impl SpiceNetlist {
         self.nodes.get(net_name).map(String::as_str)
     }
 
+    /// The name of the element `name` (matched case-insensitively, as ngspice does).
+    pub(crate) fn element(&self, name: &str) -> Option<&str> {
+        self.elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .map(|element| element.name.as_str())
+    }
+
     /// The value of ngspice's `ngbehavior` the models need (`ps`, `psa`, `lt`, ...; see
     /// [`SpiceDialect::ngbehavior`]), or `None` for the default mode. [`Ngspice::run`](crate::spice::Ngspice::run) sets it; to run the deck
     /// yourself, put `set ngbehavior=<value>` into `.spiceinit` in the working directory

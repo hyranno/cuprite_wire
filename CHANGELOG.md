@@ -12,6 +12,11 @@ break the API).
 
 ### Added
 
+- `spice::analysis`: typed `Op`, `Tran`, `Dc` and `Ac` analyses with probes made by the deck
+  (`SpiceDeck::voltage`, `voltage_between`, `current`, and `source` for a DC sweep), added with
+  `SpiceDeck::analysis` among the string commands of the control block and read with
+  `Simulation::result` without file or column names (AC values as `Complex`).
+
 - `Part::global_labels` (empty by default): pins that each instance connects to a global net.
   `kicad_part!` accepts symbols with hidden `power_in` pins (older and third-party libraries)
   and connects them to the global net named after the pin, as KiCad does; they were a compile

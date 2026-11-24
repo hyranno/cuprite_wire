@@ -8,7 +8,10 @@ use std::path::Path;
 #[cfg(feature = "shared-ngspice")]
 use crate::spice::spice_path;
 
-use crate::spice::{Ngspice, Simulation, SimulationError, SpiceNetlist};
+use crate::spice::{
+    Ngspice, Simulation, SimulationError, SpiceNetlist,
+    analysis::{Analysis, AnalysisCommand, wrdata_command},
+};
 
 /// Front-end settings written at the start of the control block, so that `wrdata` writes
 /// a header line and one shared scale column ([`Simulation::table`] reads that form).
@@ -26,6 +29,9 @@ pub struct SpiceDeck {
     netlist: SpiceNetlist,
     directives: Vec<String>,
     control: Vec<String>,
+    /// The identity of each typed analysis with the file `wrdata` writes its probes into
+    /// (`None` without probes).
+    analyses: Vec<(u64, Option<String>)>,
 }
 
 impl SpiceDeck {
@@ -35,6 +41,7 @@ impl SpiceDeck {
             netlist,
             directives: Vec::new(),
             control: Vec::new(),
+            analyses: Vec::new(),
         }
     }
 
@@ -57,6 +64,42 @@ impl SpiceDeck {
     pub fn control<S: Into<String>>(mut self, commands: impl IntoIterator<Item = S>) -> Self {
         self.control.extend(commands.into_iter().map(Into::into));
         self
+    }
+
+    /// Adds `analysis` to the `.control` block, after the commands added before it, with a `wrdata`
+    /// command recording its probes. Read the result with [`Simulation::result`].
+    ///
+    /// # Panics
+    /// If the deck already has the analysis.
+    pub fn analysis(mut self, analysis: &impl Analysis) -> Self {
+        assert!(
+            self.analysis_file(analysis).is_none(),
+            "the deck already has the analysis {}",
+            analysis.command()
+        );
+        let file = format!("analysis{}.txt", self.analyses.len() + 1);
+        self.control.push(analysis.command());
+        let wrdata = wrdata_command(analysis, &file);
+        let file = wrdata.map(|wrdata| {
+            self.control.push(wrdata);
+            file
+        });
+        self.analyses.push((analysis.id(), file));
+        self
+    }
+
+    /// The file `wrdata` writes the probes of `analysis` into: `None` if the deck does not have the
+    /// analysis, `Some(None)` if it has no probes.
+    pub(crate) fn analysis_file(&self, analysis: &dyn AnalysisCommand) -> Option<Option<&str>> {
+        self.analyses
+            .iter()
+            .find(|(id, _)| *id == analysis.id())
+            .map(|(_, file)| file.as_deref())
+    }
+
+    /// The typed analyses with their output files, as [`Self::analysis_file`].
+    pub(crate) fn analyses(&self) -> &[(u64, Option<String>)] {
+        &self.analyses
     }
 
     pub(crate) fn has_control(&self) -> bool {
