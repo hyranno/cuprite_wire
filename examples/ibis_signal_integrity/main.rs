@@ -25,7 +25,8 @@ use cuprite_wire::{
     ibis_part,
     naming::NetLabel,
     spice::{
-        SpiceDeck, Table, TransmissionLine,
+        SpiceDeck, SpiceNetlist, TransmissionLine,
+        analysis::{Probe, ProbeError, Tran},
         digital::{DigitalSequence, InputCharacteristics, Level},
         ibis::{IbisDiffDriver, IbisDiffReceiver, IbisDriver, IbisReceiver},
     },
@@ -51,11 +52,37 @@ const TRACE_DELAY: f64 = 1e-9;
 /// between them).
 const Z0: f64 = 50.0;
 
-/// The voltage at the receiver's pin, in the tables of the clock link.
-const RX: &str = r#"v("/RX")"#;
-/// The voltages at the receiver's pins, in the tables of the differential link.
-const RX_P: &str = r#"v("/RX_P")"#;
-const RX_N: &str = r#"v("/RX_N")"#;
+/// A link's deck with a transient analysis recording the voltage at the receiver's input.
+struct Link {
+    deck: SpiceDeck,
+    tran: Tran,
+    /// The voltage at the receiver's pin, or between its pins.
+    rx: Probe,
+}
+
+impl Link {
+    /// A transient analysis of `stop` seconds of `netlist`, recording the probe made by `rx`.
+    fn new(
+        netlist: SpiceNetlist,
+        stop: f64,
+        rx: impl FnOnce(&SpiceDeck) -> Result<Probe, ProbeError>,
+    ) -> Result<Self, Error> {
+        let deck = netlist.deck();
+        let rx = rx(&deck)?;
+        let tran = Tran::new(10e-12, stop).probe(&rx);
+        Ok(Link {
+            deck: deck.analysis(&tran),
+            tran,
+            rx,
+        })
+    }
+
+    /// Runs the deck: the time and the voltage at the receiver.
+    fn run(&self) -> Result<(Vec<f64>, Vec<f64>), Error> {
+        let result = self.deck.run()?.result(&self.tran)?;
+        Ok((result.scale().to_vec(), result.get(&self.rx)?.to_vec()))
+    }
+}
 
 /// Four periods of a 50 MHz clock from 5 ns.
 fn clock() -> DigitalSequence {
@@ -78,8 +105,8 @@ fn bits() -> DigitalSequence {
 
 /// The clock from `CLK_OUT` of one chip through a trace to `CLK_IN` of the other, through a
 /// series resistor of `series` (KiCad's notation, `"33"`) at the driver if given. The pins of the
-/// driver and the receiver are probed as `TX` and `RX`.
-fn clock_link(corner: Corner, series: Option<&str>) -> Result<SpiceDeck, Error> {
+/// receiver is probed as `RX`.
+fn clock_link(corner: Corner, series: Option<&str>) -> Result<Link, Error> {
     let mut bench = CircuitBuilder::new();
     let gnd = bench.add_node();
     bench.label(gnd, NetLabel::global("GND"));
@@ -103,19 +130,16 @@ fn clock_link(corner: Corner, series: Option<&str>) -> Result<SpiceDeck, Error> 
     ] {
         bench.connect(pin, gnd);
     }
-    bench.label(driver[IbisDriver::OUT], NetLabel::local("TX"));
     bench.label(receiver[IbisReceiver::IN], NetLabel::local("RX"));
     let title = format!("clock link, series {}", series.unwrap_or("none"));
     let netlist = bench.build(&()).to_netlist()?.to_spice()?.with_title(title);
-    Ok(netlist.deck().control([
-        "tran 10p 90n".to_string(),
-        format!(r#"wrdata link.txt v("/TX") {RX}"#),
-    ]))
+    Link::new(netlist, 90e-9, |deck| deck.voltage("/RX"))
 }
 
 /// The bit pattern from `TX_P`/`TX_N` of one chip through a pair of traces to `RX_P`/`RX_N` of
-/// the other, where the receiver's termination joins the pins.
-fn differential_link(corner: Corner) -> Result<SpiceDeck, Error> {
+/// the other, where the receiver's termination joins the pins. The receiver is probed between its
+/// pins.
+fn differential_link(corner: Corner) -> Result<Link, Error> {
     let mut bench = CircuitBuilder::new();
     let gnd = bench.add_node();
     bench.label(gnd, NetLabel::global("GND"));
@@ -139,33 +163,29 @@ fn differential_link(corner: Corner) -> Result<SpiceDeck, Error> {
         .to_netlist()?
         .to_spice()?
         .with_title("differential link");
-    Ok(netlist.deck().control([
-        "tran 10p 40n".to_string(),
-        format!("wrdata link.txt {RX_P} {RX_N}"),
-    ]))
+    Link::new(netlist, 40e-9, |deck| {
+        deck.voltage_between("/RX_P", "/RX_N")
+    })
 }
 
-/// What the clock's receiver read at the pin, with the thresholds of its model.
-fn read_clock(corner: Corner, table: &Table) -> Result<DigitalSequence, Error> {
+/// What the clock's receiver read from the voltage `rx` at its pin over `time`, with the
+/// thresholds of its model.
+fn read_clock(corner: Corner, time: &[f64], rx: &[f64]) -> Result<DigitalSequence, Error> {
     let buffer = DemoIo::clk_in(corner)?;
     let input = buffer.input().ok_or("the input model has Vinl and Vinh")?;
-    let rx = table.column(RX).ok_or("the table has the receiver")?;
-    Ok(input.decode(table.scale(), rx))
+    Ok(input.decode(time, rx))
 }
 
-/// What the differential receiver read: high above `vdiff` between its pins, low below
-/// `-vdiff`, unchanged in between.
-fn read_bits(corner: Corner, table: &Table) -> Result<DigitalSequence, Error> {
+/// What the differential receiver read from the voltage `rx` between its pins over `time`: high
+/// above `vdiff`, low below `-vdiff`, unchanged in between.
+fn read_bits(corner: Corner, time: &[f64], rx: &[f64]) -> Result<DigitalSequence, Error> {
     let vdiff = DemoIo::lvds_in(corner)?
         .vdiff()
         .ok_or("the receiver's [Diff Pin] row has vdiff")?;
     let mut comparator = InputCharacteristics::cmos(0.0);
     comparator.threshold_low = -vdiff;
     comparator.threshold_high = vdiff;
-    let (p, n) = (table.column(RX_P), table.column(RX_N));
-    let (p, n) = p.zip(n).ok_or("the table has the receiver's pins")?;
-    let difference: Vec<f64> = p.iter().zip(n).map(|(p, n)| p - n).collect();
-    Ok(comparator.decode(table.scale(), &difference))
+    Ok(comparator.decode(time, rx))
 }
 
 /// The delay of each change of `read` after the same change of `sent`, if `read` has the same
@@ -213,14 +233,14 @@ fn main() -> Result<(), Error> {
     let print_decks = std::env::args().any(|arg| arg == "--deck");
     for corner in CORNERS {
         for series in [None, Some("33")] {
-            let deck = clock_link(corner, series)?;
+            let link = clock_link(corner, series)?;
             if print_decks {
-                println!("{deck}");
+                println!("{}", link.deck);
                 continue;
             }
-            let table = deck.run()?.table("link.txt")?;
-            let (low, high) = range(table.column(RX).ok_or("the table has the receiver")?);
-            let read = describe(&clock(), &read_clock(corner, &table)?);
+            let (time, rx) = link.run()?;
+            let (low, high) = range(&rx);
+            let read = describe(&clock(), &read_clock(corner, &time, &rx)?);
             println!(
                 "clock, {corner:?}, series resistor {:>4}: {low:+.2} V to {high:+.2} V, {read}",
                 series.unwrap_or("none"),
@@ -228,15 +248,15 @@ fn main() -> Result<(), Error> {
         }
     }
     for corner in CORNERS {
-        let deck = differential_link(corner)?;
+        let link = differential_link(corner)?;
         if print_decks {
-            println!("{deck}");
+            println!("{}", link.deck);
             continue;
         }
-        let table = deck.run()?.table("link.txt")?;
+        let (time, rx) = link.run()?;
         println!(
             "bits, {corner:?}: {}",
-            describe(&bits(), &read_bits(corner, &table)?)
+            describe(&bits(), &read_bits(corner, &time, &rx)?)
         );
     }
     Ok(())
@@ -246,19 +266,19 @@ fn main() -> Result<(), Error> {
 mod tests {
     use super::*;
 
-    /// Runs the deck and returns its table.
-    fn run(deck: SpiceDeck) -> Table {
-        let simulation = deck.run().unwrap_or_else(|error| panic!("{error}\n{deck}"));
-        simulation.table("link.txt").unwrap()
+    /// Runs the link: the time and the voltage at the receiver.
+    fn run(link: Link) -> (Vec<f64>, Vec<f64>) {
+        link.run()
+            .unwrap_or_else(|error| panic!("{error}\n{}", link.deck))
     }
 
     /// The lowest and the highest voltage at the clock's receiver, and the delays of what it read
     /// (which must be what was sent).
     fn clock_at(corner: Corner, series: Option<&str>) -> ((f64, f64), Vec<f64>) {
-        let table = run(clock_link(corner, series).unwrap());
-        let read = read_clock(corner, &table).unwrap();
+        let (time, rx) = run(clock_link(corner, series).unwrap());
+        let read = read_clock(corner, &time, &rx).unwrap();
         let delays = delays(&clock(), &read).unwrap_or_else(|| panic!("{corner:?}: {read:?}"));
-        (range(table.column(RX).unwrap()), delays)
+        (range(&rx), delays)
     }
 
     /// Without termination, the edges reflect at the receiver and ring: they overshoot the supply
@@ -304,8 +324,8 @@ mod tests {
     #[test]
     fn differential_link_carries_the_bits() {
         for corner in CORNERS {
-            let table = run(differential_link(corner).unwrap());
-            let read = read_bits(corner, &table).unwrap();
+            let (time, rx) = run(differential_link(corner).unwrap());
+            let read = read_bits(corner, &time, &rx).unwrap();
             let delays = delays(&bits(), &read).unwrap_or_else(|| panic!("{corner:?}: {read:?}"));
             let (first, last) = range(&delays);
             assert!(
@@ -313,10 +333,10 @@ mod tests {
                 "{corner:?}: {delays:?}"
             );
         }
-        let table = run(differential_link(Corner::Typ).unwrap());
+        let link = differential_link(Corner::Typ).unwrap();
+        let result = link.deck.run().unwrap().result(&link.tran).unwrap();
         // At the end of the longest run of ones (16 to 24 ns), the trace's delay later.
-        let settled =
-            table.interpolate(RX_P, 24.9e-9).unwrap() - table.interpolate(RX_N, 24.9e-9).unwrap();
+        let settled = result.interpolate(&link.rx, 24.9e-9).unwrap().unwrap();
         assert!((settled - 0.35).abs() < 0.02, "{settled}");
     }
 }
