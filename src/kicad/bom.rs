@@ -2,7 +2,10 @@
 //!
 //! See the guide [Exporting a KiCad netlist](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_netlist_usage.md).
 
-use std::{collections::BTreeMap, fmt, io};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt, io,
+};
 
 use crate::{
     kicad::{KicadNetlist, netlist::KicadComponent},
@@ -21,6 +24,13 @@ pub enum BomField {
     Footprint,
     /// The symbol (`Library:Name`, empty if not set).
     LibSource,
+    /// The datasheet ([`KicadPartInfo::datasheet`](crate::kicad::KicadPartInfo::datasheet),
+    /// empty if not set).
+    Datasheet,
+    /// The description
+    /// ([`KicadPartInfo::description`](crate::kicad::KicadPartInfo::description), empty if not
+    /// set).
+    Description,
     /// The number of components in the row.
     Quantity,
     /// `DNP` if the components are not populated, empty otherwise.
@@ -48,19 +58,44 @@ impl BomColumn {
     }
 }
 
+/// Which components share a row of a BOM. Populated and not populated (DNP) components are
+/// never in the same row.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BomGrouping {
+    /// A row per component (kicad-cli's default).
+    None,
+    /// Components whose cells are all equal, except the references and the quantity, so a row
+    /// never hides a difference in a column.
+    #[default]
+    Columns,
+    /// Components whose given fields are equal, written or not (kicad-cli's `--group-by`). A cell
+    /// of a row whose components differ lists their values, without empty ones, sorted and
+    /// joined with `,` (`1nF,22uF`), as kicad-cli writes it. [`BomField::Reference`] and
+    /// [`BomField::Quantity`] are ignored.
+    Fields(Vec<BomField>),
+}
+
 /// How to make a BOM. The default is the default of `kicad-cli sch export bom`, with the components
-/// grouped: the columns `Refs`, `Value`, `Footprint`, `Qty` and `DNP`, and reference ranges.
+/// grouped: the columns `Refs`, `Value`, `Footprint`, `Qty` and `DNP`, reference ranges, and
+/// cells quoted with `"` and separated by `,`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BomOptions {
     /// The columns, in order.
     pub columns: Vec<BomColumn>,
-    /// Groups the components whose cells are all equal (except the references and the quantity)
-    /// into one row. Populated and not populated (DNP) components are never in the same row.
-    pub group: bool,
+    /// Which components share a row.
+    pub group: BomGrouping,
     /// Leaves out the components that are not populated (DNP).
     pub exclude_dnp: bool,
-    /// Writes three or more consecutive references as a range (`R3-R5`).
-    pub ref_ranges: bool,
+    /// The separator of the cells (kicad-cli's `--field-delimiter`).
+    pub field_delimiter: String,
+    /// What surrounds every cell, doubled inside a cell (kicad-cli's `--string-delimiter`). Empty
+    /// for none: cells are then written as they are.
+    pub string_delimiter: String,
+    /// The separator of the references of a row (kicad-cli's `--ref-delimiter`).
+    pub ref_delimiter: String,
+    /// The separator of three or more consecutive references written as a range (`R3-R5`;
+    /// kicad-cli's `--ref-range-delimiter`). Empty to list them all.
+    pub ref_range_delimiter: String,
 }
 
 impl Default for BomOptions {
@@ -73,9 +108,12 @@ impl Default for BomOptions {
                 BomColumn::new(BomField::Quantity, "Qty"),
                 BomColumn::new(BomField::Dnp, "DNP"),
             ],
-            group: true,
+            group: BomGrouping::Columns,
             exclude_dnp: false,
-            ref_ranges: true,
+            field_delimiter: ",".into(),
+            string_delimiter: "\"".into(),
+            ref_delimiter: ",".into(),
+            ref_range_delimiter: "-".into(),
         }
     }
 }
@@ -95,6 +133,8 @@ impl BomOptions {
 pub struct KicadBom {
     columns: Vec<BomColumn>,
     rows: Vec<BomRow>,
+    field_delimiter: String,
+    string_delimiter: String,
 }
 
 /// A row of a BOM: components with the same cells.
@@ -118,23 +158,24 @@ impl KicadNetlist {
             .components
             .iter()
             .filter(|c| !c.flags.exclude_from_bom && !(options.exclude_dnp && c.flags.dnp));
-        // The cells that do not depend on the group, `None` for the references and the quantity.
+        let key_fields: Vec<&BomField> = match &options.group {
+            BomGrouping::None => Vec::new(),
+            BomGrouping::Columns => options.columns.iter().map(|c| &c.field).collect(),
+            BomGrouping::Fields(fields) => fields.iter().collect(),
+        };
+        // The cells of the fields of the key, `None` for the references and the quantity.
         let key = |c: &KicadComponent| -> (bool, Vec<Option<String>>) {
-            let cells = options
-                .columns
-                .iter()
-                .map(|column| component_cell(c, &column.field))
-                .collect();
+            let cells = key_fields.iter().map(|f| component_cell(c, f)).collect();
             (c.flags.dnp, cells)
         };
-        let mut groups: Vec<Vec<&KicadComponent>> = if options.group {
+        let mut groups: Vec<Vec<&KicadComponent>> = if options.group == BomGrouping::None {
+            components.map(|c| vec![c]).collect()
+        } else {
             let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
             for c in components {
                 groups.entry(key(c)).or_default().push(c);
             }
             groups.into_values().collect()
-        } else {
-            components.map(|c| vec![c]).collect()
         };
         for group in &mut groups {
             group.sort_by(|a, b| natural_cmp(&a.ref_name, &b.ref_name));
@@ -149,9 +190,17 @@ impl KicadNetlist {
                     .columns
                     .iter()
                     .map(|column| match &column.field {
-                        BomField::Reference => shorthand(&references, options.ref_ranges),
+                        BomField::Reference => shorthand(&references, options),
                         BomField::Quantity => references.len().to_string(),
-                        field => component_cell(group[0], field).unwrap_or_default(),
+                        field => {
+                            // Equal in every component unless grouped by other fields.
+                            let values: BTreeSet<String> = group
+                                .iter()
+                                .filter_map(|c| component_cell(c, field))
+                                .filter(|value| !value.is_empty())
+                                .collect();
+                            values.into_iter().collect::<Vec<_>>().join(",")
+                        }
                     })
                     .collect();
                 BomRow {
@@ -164,6 +213,8 @@ impl KicadNetlist {
         KicadBom {
             columns: options.columns.clone(),
             rows,
+            field_delimiter: options.field_delimiter.clone(),
+            string_delimiter: options.string_delimiter.clone(),
         }
     }
 }
@@ -179,6 +230,8 @@ fn component_cell(c: &KicadComponent, field: &BomField) -> Option<String> {
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_default(),
+        BomField::Datasheet => c.datasheet.clone(),
+        BomField::Description => c.description.clone(),
         BomField::Dnp => if c.flags.dnp { "DNP" } else { "" }.to_string(),
         BomField::Field(name) => c
             .fields
@@ -189,9 +242,11 @@ fn component_cell(c: &KicadComponent, field: &BomField) -> Option<String> {
     })
 }
 
-/// Joins references sorted in natural order with `,`, writing runs of three or more consecutive
-/// numbers with the same prefix as `first-last` if `ranges` (as KiCad does: `R1,R2,R4-R6`).
-fn shorthand(references: &[String], ranges: bool) -> String {
+/// Joins references sorted in natural order with the `ref_delimiter` of `options`, writing runs of
+/// three or more consecutive numbers with the same prefix as `first-last` with its
+/// `ref_range_delimiter` unless that is empty (as KiCad does: `R1,R2,R4-R6`).
+fn shorthand(references: &[String], options: &BomOptions) -> String {
+    let ranges = !options.ref_range_delimiter.is_empty();
     let split = |reference: &str| {
         let prefix = reference.trim_end_matches(|c: char| c.is_ascii_digit());
         let number = reference[prefix.len()..].parse::<u64>().ok()?;
@@ -210,13 +265,18 @@ fn shorthand(references: &[String], ranges: bool) -> String {
             }
         }
         if end - i >= 3 {
-            parts.push(format!("{}-{}", references[i], references[end - 1]));
+            parts.push(format!(
+                "{}{}{}",
+                references[i],
+                options.ref_range_delimiter,
+                references[end - 1]
+            ));
         } else {
             parts.extend(references[i..end].iter().cloned());
         }
         i = end;
     }
-    parts.join(",")
+    parts.join(&options.ref_delimiter)
 }
 
 impl KicadBom {
@@ -231,8 +291,9 @@ impl KicadBom {
     }
 
     /// Writes the BOM to `writer` as CSV, as `kicad-cli sch export bom` does: a header with the
-    /// labels, then a line per row, every cell quoted with `"` (doubled inside), tabs and line
-    /// breaks removed.
+    /// labels, then a line per row, every cell surrounded by the `string_delimiter` of the
+    /// options (doubled inside) and separated by their `field_delimiter`, tabs and line breaks
+    /// removed.
     ///
     /// # Errors
     /// The error of `writer`.
@@ -250,10 +311,15 @@ impl fmt::Display for KicadBom {
                         .chars()
                         .filter(|c| !matches!(c, '\t' | '\r' | '\n'))
                         .collect();
-                    format!("\"{}\"", cell.replace('"', "\"\""))
+                    let quote = &self.string_delimiter;
+                    if quote.is_empty() {
+                        cell
+                    } else {
+                        format!("{quote}{}{quote}", cell.replace(quote, &quote.repeat(2)))
+                    }
                 })
                 .collect();
-            writeln!(f, "{}", cells.join(","))
+            writeln!(f, "{}", cells.join(&self.field_delimiter))
         };
         line(f, &mut self.columns.iter().map(|c| c.label.as_str()))?;
         for row in &self.rows {
@@ -353,7 +419,7 @@ mod tests {
                 BomColumn::new(BomField::LibSource, "Symbol"),
                 BomColumn::new(BomField::Quantity, "Qty"),
             ],
-            group: false,
+            group: BomGrouping::None,
             exclude_dnp: true,
             ..Default::default()
         };
@@ -368,10 +434,24 @@ mod tests {
     fn test_shorthand() {
         let refs = |list: &[&str]| list.iter().map(|r| r.to_string()).collect::<Vec<_>>();
         let list = refs(&["R1", "R2", "R4", "R5", "R6", "R8", "U1", "U2", "U3", "X"]);
-        assert_eq!(shorthand(&list, true), "R1,R2,R4-R6,R8,U1-U3,X");
-        assert_eq!(shorthand(&list, false), "R1,R2,R4,R5,R6,R8,U1,U2,U3,X");
+        let options = BomOptions::default();
+        assert_eq!(shorthand(&list, &options), "R1,R2,R4-R6,R8,U1-U3,X");
+        let no_ranges = BomOptions {
+            ref_delimiter: " ".into(),
+            ref_range_delimiter: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(shorthand(&list, &no_ranges), "R1 R2 R4 R5 R6 R8 U1 U2 U3 X");
+        let ranges = BomOptions {
+            ref_range_delimiter: "..".into(),
+            ..Default::default()
+        };
+        assert_eq!(shorthand(&list, &ranges), "R1,R2,R4..R6,R8,U1..U3,X");
         // A run does not continue into another prefix.
-        assert_eq!(shorthand(&refs(&["R1", "R2", "RN3"]), true), "R1,R2,RN3");
+        assert_eq!(
+            shorthand(&refs(&["R1", "R2", "RN3"]), &options),
+            "R1,R2,RN3"
+        );
     }
 
     /// As kicad-cli: `"` is doubled, tabs and line breaks are removed.
@@ -384,7 +464,83 @@ mod tests {
                 dnp: false,
                 cells: vec!["6\t8\r\n0n, \"x\"".into()],
             }],
+            field_delimiter: ",".into(),
+            string_delimiter: "\"".into(),
         };
         assert_eq!(bom.to_string(), "\"Va\"\"lue\"\n\"680n, \"\"x\"\"\"\n");
+    }
+
+    /// As kicad-cli: the string delimiter is doubled inside a cell; without one, cells are written
+    /// as they are.
+    #[test]
+    fn test_delimiters() {
+        let options = |string_delimiter: &str| BomOptions {
+            columns: vec![
+                BomColumn::new(BomField::Reference, "Refs"),
+                BomColumn::new(BomField::Field("MPN".into()), "M'PN"),
+            ],
+            field_delimiter: ";".into(),
+            string_delimiter: string_delimiter.into(),
+            ..Default::default()
+        };
+        let lines = |string_delimiter| {
+            let bom = board().bom(&options(string_delimiter)).to_string();
+            bom.lines().take(2).map(str::to_string).collect::<Vec<_>>()
+        };
+        assert_eq!(lines("'"), ["'Refs';'M''PN'", "'C1,C2,R1-R6';''"]);
+        assert_eq!(lines(""), ["Refs;M'PN", "C1,C2,R1-R6;"]);
+    }
+
+    #[test]
+    fn test_datasheet_and_description() {
+        let mut circuit = CircuitBuilder::new();
+        let mut part = CustomPart::valid();
+        let info = part.kicad.as_mut().unwrap();
+        info.datasheet = Some("https://example.com/x.pdf".into());
+        info.description = Some("A part".into());
+        circuit.instantiate_part(part);
+        let mut tilde = CustomPart::valid();
+        tilde.kicad.as_mut().unwrap().datasheet = Some("~".into());
+        circuit.instantiate_part(tilde);
+        let netlist = circuit.build(&()).to_netlist().unwrap().to_kicad().unwrap();
+        let options = BomOptions {
+            columns: vec![
+                BomColumn::new(BomField::Reference, "Refs"),
+                BomColumn::new(BomField::Datasheet, "Datasheet"),
+                BomColumn::new(BomField::Description, "Description"),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            netlist.bom(&options).to_string(),
+            r#""Refs","Datasheet","Description"
+"X1","https://example.com/x.pdf","A part"
+"X2","",""
+"#
+        );
+    }
+
+    /// As kicad-cli's `--group-by`: the other cells list the distinct values that are not empty.
+    #[test]
+    fn test_group_by_fields() {
+        let options = BomOptions {
+            columns: vec![
+                BomColumn::new(BomField::Reference, "Refs"),
+                BomColumn::new(BomField::Value, "Value"),
+                BomColumn::new(BomField::Field("MPN".into()), "MPN"),
+                BomColumn::new(BomField::Quantity, "Qty"),
+            ],
+            group: BomGrouping::Fields(vec![BomField::Footprint]),
+            ..Default::default()
+        };
+        assert_eq!(
+            board().bom(&options).to_string(),
+            r#""Refs","Value","MPN","Qty"
+"C1,C2","100n","","2"
+"R1-R6","10k,1k","","6"
+"X1-X3","custom","A,B","3"
+"X4","custom","A","1"
+"#
+        );
     }
 }

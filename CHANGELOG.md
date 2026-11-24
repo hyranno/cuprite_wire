@@ -12,6 +12,16 @@ break the API).
 
 ### Added
 
+- `KicadPartInfo::datasheet` and `description`, which `kicad_part!` takes from the symbol's
+  `Datasheet` and `Description` fields. The KiCad netlist writes them as the `datasheet` and
+  `description` of a component when set (a `~` datasheet is left out, as Eeschema does).
+- BOM: `BomField::Datasheet` and `BomField::Description` columns;
+  `BomGrouping::Fields`, kicad-cli's `--group-by` (grouping by fields that need not be written,
+  a cell listing the differing values of a row); and the delimiters of kicad-cli
+  (`field_delimiter`, `string_delimiter`, `ref_delimiter`, `ref_range_delimiter`) in
+  `BomOptions`, whose `group` is now a `BomGrouping` and whose `ref_ranges` is replaced by an
+  empty `ref_range_delimiter`.
+
 - The KiCad netlist writes the pin type of the only pin of a net marked with
   `CircuitBuilder::no_connect` with the suffix `+no_connect` (e.g. `input+no_connect`), as
   Eeschema writes a pin with a no-connect flag.
@@ -74,6 +84,13 @@ break the API).
   resolved relative to the library, checked and tracked for rebuilds. `sim_model: inline` writes
   them as absolute paths; with `sim_model: include`, a relative path is a compile error, since
   ngspice would look for it in the directory it runs in.
+
+### Changed
+
+- **Breaking:** `KicadPartInfo` has the fields `datasheet` and `description`; struct literals
+  without `..Default::default()` must set them.
+- The KiCad netlist of parts from `kicad_part!` (and `cuprite_wire::basic`) has the `description`
+  (and `datasheet`) of their symbols.
 
 ## [0.3.0] - 2026-11-22
 

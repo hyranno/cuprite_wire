@@ -33,7 +33,8 @@ fn kicad(&self) -> Option<KicadPartInfo> {
             ("2".into(), KicadPinInfo::new("2", None, PinType::Passive)),
         ]),
         lib_source: Some("Device:R".parse().unwrap()),
-        ..Default::default()   // fields, flags (dnp, exclude_from_bom, exclude_from_board)
+        ..Default::default()   // fields, flags (dnp, exclude_from_bom, exclude_from_board),
+                               // datasheet, description
     })
 }
 ```
@@ -73,8 +74,8 @@ note in `doc/circuits.md` section 4.
 
 ## 4. Output
 
-- `components`: `ref`, `value` (`~` if empty), `footprint`, `fields` (if any), `libsource` (if
-  set), value-less `property` flags (`exclude_from_board`, `exclude_from_bom`, `dnp`), `sheetpath`
+- `components`: `ref`, `value` (`~` if empty), `footprint`, `datasheet` and `description` (if set
+  and not `~` or empty, as Eeschema omits them), `fields` (if any), `libsource` (if set), value-less `property` flags (`exclude_from_board`, `exclude_from_bom`, `dnp`), `sheetpath`
   and `tstamps`. Components are written subcircuit instance by subcircuit instance, as Eeschema writes them
   sheet by sheet in page order: the root first, then each instance followed by the ones inside it,
   in instantiation order. In each, they are sorted by reference in natural order (`R2` before `R10`).
@@ -86,8 +87,8 @@ note in `doc/circuits.md` section 4.
   (as KiCad does).
 - `design` has only `source` (if set with `with_source`) and `tool`. No date is written, so the
   output does not change between exports.
-- Not written: `libparts`, `libraries`, `datasheet`, `description`, and the `Sheetname` /
-  `Sheetfile` properties. Custom fields are written in `fields` only, not repeated as `property`
+- Not written: `libparts`, `libraries`, the `Footprint` / `Datasheet` / `Description` fields, the
+  `description` of `libsource`, and the `Sheetname` / `Sheetfile` properties. Custom fields are written in `fields` only, not repeated as `property`
   (pcbnew reads `fields`).
 - Multi-unit parts are one component with all the pins of the symbol and a single `tstamps`
   (Eeschema writes one UUID per unit).
@@ -128,10 +129,17 @@ bom.write(&mut file)?;            // or `bom.to_string()`; `bom.rows()` for the 
 - Components with `exclude_from_bom` are left out. DNP components are listed in rows of their own,
   marked `DNP` (mark an instance with `part.dnp()`, section 2); `exclude_dnp` leaves them out.
 - Components are grouped into one row when all their cells are equal, except the references and
-  the quantity. Add the fields that tell parts apart (`with_field("MPN")`), or they are grouped by
-  value and footprint only. `group: false` writes a row per component.
-- Three or more consecutive references are written as a range (`R1-R5`); `ref_ranges: false`
-  lists them all.
+  the quantity (`BomGrouping::Columns`). Add the fields that tell parts apart
+  (`with_field("MPN")`), or they are grouped by value and footprint only.
+  `group: BomGrouping::None` writes a row per component. `BomGrouping::Fields(vec![..])` groups by
+  the given fields, written or not, as kicad-cli's `--group-by`: a cell whose components differ
+  lists their values (`1nF,22uF`).
+- Three or more consecutive references are written as a range (`R1-R5`). As with kicad-cli,
+  `ref_delimiter` and `ref_range_delimiter` change the separators (an empty
+  `ref_range_delimiter` lists them all), and `field_delimiter` and `string_delimiter` the CSV
+  separator and quote (e.g. `"\t"` and `""` for tab-separated values without quotes).
 - The columns (`BomOptions::columns`) can show the references, the value, the footprint, the
-  symbol (`LibSource`), the quantity, the DNP flag and any part field, with any label.
+  symbol (`LibSource`), the datasheet and the description (`KicadPartInfo::datasheet` /
+  `description`, which `kicad_part!` takes from the symbol), the quantity, the DNP flag and any
+  part field, with any label.
 - Rows are sorted by their first reference in natural order.

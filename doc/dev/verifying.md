@@ -106,7 +106,8 @@ equivalent to each netlist, exports it with `kicad-cli`, and compares the result
   global or local label for each named net; unnamed nets are left for KiCad to name. It is exported
   with `kicad-cli sch export netlist`, and the differences in element order, quoting, omission
   rules and net names are printed. What cuprite_wire intentionally omits (`libparts`, the
-  `Footprint`/`Datasheet`/`Description` fields, properties repeating fields, ...) is ignored.
+  `Footprint`/`Datasheet`/`Description` fields, properties repeating fields, ...) is ignored; the
+  `datasheet` and `description` of components are compared (the synthesized symbols get them).
   Each subcircuit instance becomes a sheet; local nets reaching other sheets are connected through
   hierarchical labels. Two cases are not checked: an unnamed net crossing sheets (Eeschema needs a
   label to connect sheets, so it is connected by global labels named after it), and the choice

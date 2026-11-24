@@ -14,6 +14,9 @@ export XDG_CONFIG_HOME=$TMPDIR/kicad/config XDG_CACHE_HOME=$TMPDIR/kicad/cache X
 S=/usr/share/kicad/demos/openair-max/One-Air-Max.kicad_sch   # has DNP and grouped parts
 kicad-cli sch export bom -o $TMPDIR/bom.csv $S
 kicad-cli sch export bom --group-by 'Value,Footprint' -o $TMPDIR/grouped.csv $S
+kicad-cli sch export bom --group-by Footprint --fields 'Reference,Value,Datasheet,QUANTITY' -o $TMPDIR/fp.csv $S
+kicad-cli sch export bom --field-delimiter ';' --string-delimiter "'" --ref-delimiter ' ' \
+  --ref-range-delimiter '' -o $TMPDIR/delims.csv $S
 kicad-cli sch export bom --help        # the defaults of every option
 ```
 
@@ -38,16 +41,28 @@ kicad-cli sch export bom --help        # the defaults of every option
   prefix are written as a range with `-` (`R8,R74-R78`, but `C6,C7`).
 - With `--group-by Value,Footprint`, DNP and populated components with the same value and
   footprint share a row, and the row shows `DNP` (e.g. `C41,C71,C72` where only some are DNP).
+- The group-by fields need not be output columns. A cell of a column the components of a row
+  differ in lists their distinct values, without empty ones, sorted in string order and joined
+  with `,` whatever `--ref-delimiter` is (with `--group-by Footprint`:
+  `"0.1uF,10nF,1nF,1uF,..."`; with `--group-by Value`: `"easyeda2kicad:C0402,easyeda2kicad:C0603"`).
+- `Datasheet` and `Description` columns show the symbol's fields; a `~` datasheet is an empty
+  cell (as in the `.net`, which omits it: `doc/dev/kicad_netlist_format.md` section 3).
+- `--field-delimiter` separates the cells, `--string-delimiter` surrounds them and is doubled
+  inside (`'6''8"0,n'` with `'`); an empty string delimiter writes the cells as they are, with
+  nothing escaped. `--ref-delimiter` separates the references and `--ref-range-delimiter` joins a
+  range; an empty range delimiter lists every reference. The delimiters are taken literally
+  (`'\t'` is the two characters; pass a real tab).
 
 ## 3. What cuprite_wire writes
 
 - The format of section 2, with the default columns. `BomOptions` chooses the columns (also
-  `LibSource` and the part fields, e.g. `MPN`), whether to group and to write ranges, and whether to
-  leave out DNP components.
+  `LibSource`, `Datasheet`, `Description` and the part fields, e.g. `MPN`), the grouping, the four
+  delimiters, and whether to leave out DNP components.
 - Grouping is on by default (kicad-cli's is off) because a BOM for ordering is usually grouped.
-  Components are grouped when all their cells are equal except the references and the quantity,
-  so a grouped row never hides a difference in a column that is written. Unlike KiCad, DNP and
-  populated components are never in the same row, even without a DNP column: KiCad's mixed row
-  would mark populated components as DNP.
-- Only the information of the netlist is available: there are no `Datasheet` / `Description`
-  columns, and a value-less field is an empty cell.
+  By default (`BomGrouping::Columns`) components are grouped when all their cells are equal
+  except the references and the quantity, so a grouped row never hides a difference in a column
+  that is written. `BomGrouping::Fields` is kicad-cli's `--group-by`, with the cells of section 2.
+  Unlike KiCad, DNP and populated components are never in the same row, even without a DNP
+  column: KiCad's mixed row would mark populated components as DNP.
+- Only the information of the netlist is available (no `ki_*` fields or variants), and a
+  value-less field is an empty cell.

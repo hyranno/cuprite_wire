@@ -63,7 +63,7 @@ Write one `comp` per component (i.e. per reference designator).
 (comp (ref "R1")
   (value "10k")
   (footprint "Resistor_SMD:R_0603_1608Metric")
-  (datasheet "~")                                   ; optional
+  (datasheet "https://example.com/r.pdf")          ; optional
   (description "Resistor")                          ; optional
   (fields
     (field (name "Footprint") "Resistor_SMD:R_0603_1608Metric")
@@ -82,7 +82,7 @@ Write one `comp` per component (i.e. per reference designator).
 | `ref` | required | Reference designator (e.g. `R1`). Referenced by `node` in nets. Must be unique on the board. |
 | `value` | recommended | Becomes the footprint's Value. Eeschema writes `"~"` when empty. |
 | `footprint` | effectively required | `Library:Footprint` (LIB_ID). Must exist in pcbnew's footprint library table to be placed. If empty, the component is reported as having no footprint assigned. A malformed LIB_ID is a read error. |
-| `datasheet`, `description` | optional | Eeschema omits them when empty. |
+| `datasheet`, `description` | optional | The symbol's `Datasheet` / `Description` fields. Eeschema omits them when empty, and a `~` datasheet too (KiCad 10.0: `F2` of `demos/openair-max/Battery-Holder.kicad_sch`, a `Device:Fuse` with `~`). |
 | `fields` / `field` | optional | `(field (name "NAME") "VALUE")`; the value is omitted when empty. pcbnew imports them as footprint fields. |
 | `libsource` | optional | Only `lib` / `part` / `description` children are allowed (any other child is a read error). Serves as the key to match `libparts`. |
 | `property` | optional | `(property (name "NAME") (value "VALUE"))`. Some are value-less flags (see below). |

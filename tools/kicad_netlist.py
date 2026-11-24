@@ -138,6 +138,8 @@ class Component:
     sheet_names: str
     fields: dict  # name -> text ("" for a field without a value)
     properties: dict  # name -> value (None for a flag such as `dnp`)
+    datasheet: str  # "" if absent
+    description: str  # "" if absent
 
 
 @dataclass
@@ -169,6 +171,8 @@ def read(path):
             fields={value(f, "name"): (f[2] if len(f) > 2 else "")
                     for f in (children(fields[0], "field") if fields else [])},
             properties={value(p, "name"): value(p, "value") for p in children(comp, "property")},
+            datasheet=value(comp, "datasheet") or "",
+            description=value(comp, "description") or "",
         )
     for net in children(children(root, "nets")[0], "net"):
         for node in children(net, "node"):

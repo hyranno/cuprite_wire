@@ -78,7 +78,7 @@ DROPPED_FIELDS = {'"Footprint"', '"Datasheet"', '"Description"'}
 LIBRARY_KNOWN_DIFFERENCES = {
     "Sim.* fields and properties": "not written to the .net (except for the `sim` block of kicad_part!)",
     "tstamps of units 2..": "multi-unit components have one unique id (one symbol instance)",
-    "datasheet / description of components, ki_* fields": "not written",
+    "ki_* fields": "not written",
 }
 SIM_PROPERTY = re.compile(r'"Sim[._][^"]*"')
 # KiCad 10 writes a newer form of the format; cuprite_wire writes the KiCad 9 form, which KiCad 10 reads.
@@ -286,6 +286,8 @@ def sheet_text(s, project, netlist, pins, libsources, lib_symbols, sim=None):
         out.append(prop("Reference", ref, (x, y + 5), hidden=False))
         out.append(prop("Value", comp.value, (x, y + 7.5)))
         out.append(prop("Footprint", comp.footprint, (x, y)))
+        out.append(prop("Datasheet", comp.datasheet, (x, y)))
+        out.append(prop("Description", comp.description, (x, y)))
         for field_name, text in [*comp.fields.items(), *sim_fields.get(ref, [])]:
             out.append(prop(field_name, text, (x, y)))
         for i, (pad, _, _) in enumerate(sorted(pins[ref])):
@@ -373,8 +375,6 @@ def normalize(tree, ours, library_symbols=False):
                 ours_tstamps = children(our_comps[ref], "tstamps") if ref in our_comps else []
                 mine = ours_tstamps[0][1] if ours_tstamps else None
                 kept.append([item[0], mine if mine in item[1:] else item[1]])
-            elif library_symbols and item[0] in ("datasheet", "description"):
-                pass
             elif kicad10 and item[0] == "units":
                 pass
             elif item[0] == "property" and library_symbols and SIM_PROPERTY.fullmatch(value(item, "name") or ""):
@@ -636,8 +636,9 @@ def synthesize_library(path, project, sim_excluded=None):
         lib_id = lib_ids[ref]
         symbol = symbols[lib_id]
         properties = {unquote(p[1]): unquote(p[2]) for p in children(symbol, "property")}
-        properties.update({"Reference": ref, "Value": netlist.components[ref].value,
-                           "Footprint": netlist.components[ref].footprint})
+        component = netlist.components[ref]
+        properties.update({"Reference": ref, "Value": component.value, "Footprint": component.footprint,
+                           "Datasheet": component.datasheet, "Description": component.description})
         properties.update(netlist.components[ref].fields)
         if lib_id[0] in project_libs and "Sim.Library" in properties:
             # The project's models are next to its symbol library, not in KiCad's symbol directory.
