@@ -43,8 +43,9 @@ fn kicad(&self) -> Option<KicadPartInfo> {
   electrical type (`pintype`). `KicadPartInfo::pins` needs exactly one entry per pin ID, and pads
   must be unique within a part.
 - `LibId` (`Library:Name`) is checked when it is parsed or created with `LibId::new`.
-- An instance can override the value, footprint, fields and flags of its part with the methods of
-  `PartExt` (implemented for every part and `Box<dyn Part>`), without writing a new part:
+- An instance can override the value, footprint, fields, flags and SPICE description of its part
+  with the methods of `PartExt` (implemented for every part and `Box<dyn Part>`), without writing
+  a new part:
 
   ```rust
   use cuprite_wire::parts::PartExt;
@@ -54,9 +55,22 @@ fn kicad(&self) -> Option<KicadPartInfo> {
   ```
 
   `with_value`, `with_footprint`, `with_field` (replaces a field of the part or appends one),
-  `dnp`, `exclude_from_bom` and `exclude_from_board` return an `Overridden`, on which they can be
-  chained. Pins and the SPICE information are not overridden: a DNP part is still simulated, and
-  `with_value` does not change the simulated value.
+  `dnp`, `exclude_from_bom`, `exclude_from_board` and `with_spice` return an `Overridden`, on
+  which they can be chained. The KiCad overrides do not change what is simulated: a DNP part is
+  still simulated, and `with_value` does not change the simulated value. `with_spice` replaces the
+  SPICE description (`SpicePartInfo`, with pin IDs as in a hand-written part,
+  `doc/spice_netlist_usage.md` section 2), e.g. of a part whose model `kicad_part!` cannot convert:
+
+  ```rust
+  // An ideal amplifier for the first unit of a dual op-amp without a model (`spice: none`).
+  let amp = Lm358Soic::new().with_spice(
+      SpicePartInfo::element(SpiceElement::new('E', ["1", "4", "3", "2"], "100k"))
+          .with_unused_pins(["5", "6", "7", "8"]),
+  );
+  ```
+
+  The pins cannot be overridden: they are what the part is (its pin ID constants, the checks
+  against the symbol and footprint), and a different pin set is a different part.
 - For hand-written parts, whether a pad number exists in the footprint is not checked (it would
   require reading the footprint libraries; `kicad_part!` does it). Use
   `tools/check_netlist_footprints.py` (`doc/dev/verifying.md`).
