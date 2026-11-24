@@ -20,7 +20,7 @@ netlist.erc(&ErcSettings::default());   // ErcReport (doc/erc.md)
 - `build()` always succeeds. Problems found while describing the circuit (invalid names, ...) are
   kept and reported by `to_netlist()`.
 - `to_netlist()`, `to_kicad()` and `to_spice()` return `Err(CircuitErrors)` with **all** errors
-  found, not just the first.
+  found, not just the first, and the warnings found so far (section 6).
 - The output is deterministic: the same circuit always gives the same bytes.
 
 ## 2. Parts
@@ -198,5 +198,8 @@ Errors specific to a format are listed in `doc/kicad_netlist_usage.md` section 5
 
 Warnings (`MultipleNetNames`, `LabelOnlyNet`) are kept in `Netlist::warnings` and in the ERC report,
 and are also emitted with `log::warn!` (target `cuprite_wire::error`); nothing is printed unless
-the program installs a logger such as `env_logger`.
+the program installs a logger such as `env_logger`. When a conversion fails, `CircuitErrors` keeps
+them next to the errors (`errors` and `warnings` fields), and its `Display` prints the errors, then
+the warnings, since a warning may explain an error (a net with several names next to a duplicate
+net name).
 Checks based on the electrical types of pins (ERC) are a separate step, `Netlist::erc`; see `doc/erc.md`.

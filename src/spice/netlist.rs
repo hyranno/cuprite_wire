@@ -302,6 +302,7 @@ impl Netlist {
             .collect();
         CircuitErrors::into_result(
             errors,
+            &self.warnings,
             SpiceNetlist {
                 title: env!("CARGO_PKG_NAME").to_string(),
                 includes: models.includes,

@@ -170,15 +170,15 @@ impl BuiltCircuit {
         for warning in &warnings {
             warn(warning);
         }
-        CircuitErrors::into_result(
-            errors,
-            Netlist {
-                components,
-                nets,
-                pinless_nets,
-                warnings,
-            },
-        )
+        if !errors.is_empty() {
+            return Err(CircuitErrors { errors, warnings });
+        }
+        Ok(Netlist {
+            components,
+            nets,
+            pinless_nets,
+            warnings,
+        })
     }
 
     /// Components in the order of the netlist, after checking the parts,
@@ -789,6 +789,42 @@ mod tests {
     }
 
     #[test]
+    fn test_errors_keep_warnings() {
+        let mut circuit = CircuitBuilder::<()>::new();
+        let r = circuit.instantiate_part(Resistor("1k"));
+        circuit.label(r["1"], NetLabel::global("A"));
+        circuit.label(r["1"], NetLabel::global("B"));
+        circuit.instantiate_part(Named("X", Resistor("1k")));
+        circuit.instantiate_part(Named("X", Resistor("1k")));
+        let errors = circuit.build(&()).to_netlist().unwrap_err();
+
+        assert!(matches!(
+            errors.errors[..],
+            [CircuitError {
+                kind: CircuitErrorKind::DuplicateInstanceName { .. },
+                ..
+            }]
+        ));
+        assert_eq!(
+            errors
+                .warnings
+                .iter()
+                .map(|w| w.kind.clone())
+                .collect::<Vec<_>>(),
+            vec![CircuitWarningKind::MultipleNetNames {
+                used: "A".into(),
+                others: vec!["B".into()],
+            }]
+        );
+        let message = errors.to_string();
+        let error = message.find("error: ").unwrap();
+        let warning = message
+            .find("\nwarning: net \"A\" is also named \"B\"")
+            .unwrap();
+        assert!(error < warning, "{message}");
+    }
+
+    #[test]
     fn test_parts_without_kicad_info_use_pin_ids() {
         let mut circuit = CircuitBuilder::<()>::new();
         let v = circuit.instantiate_part(IndependentSource::voltage(5.0));
@@ -824,7 +860,7 @@ mod tests {
         // Collides with the name of the unnamed net of a["2"].
         let line3 = line!() + 1;
         circuit.label(a["1"], NetLabel::global("unconnected-(X1-Pad2)"));
-        let errors = circuit.build(&()).to_netlist().unwrap_err().0;
+        let errors = circuit.build(&()).to_netlist().unwrap_err().errors;
 
         let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
         assert_eq!(
@@ -869,7 +905,7 @@ mod tests {
             global_labels: vec![("3", "VCC"), ("1", "{x}")],
             ..CustomPart::valid()
         });
-        let errors = circuit.build(&()).to_netlist().unwrap_err().0;
+        let errors = circuit.build(&()).to_netlist().unwrap_err().errors;
         let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
         assert!(
             matches!(&kinds[..], [

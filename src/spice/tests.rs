@@ -4,7 +4,7 @@
 
 use crate::{
     circuit::{CircuitBuilder, Named},
-    error::CircuitErrorKind,
+    error::{CircuitErrorKind, CircuitWarningKind},
     naming::NetLabel,
     spice::{
         Ammeter, IndependentSource, ModelSource, Simulator, SpiceElement, SpiceOptions,
@@ -227,7 +227,7 @@ fn test_spice_errors_are_collected() {
     circuit.label(u["io"], NetLabel::local("n0"));
 
     let netlist = circuit.build(&()).to_netlist().unwrap();
-    let errors = netlist.to_spice().unwrap_err().0;
+    let errors = netlist.to_spice().unwrap_err().errors;
     let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
     assert_eq!(
         kinds,
@@ -273,15 +273,24 @@ fn test_ground_is_required() {
     let r = circuit.instantiate_part(Resistor("1k"));
     circuit.label(r["1"], NetLabel::local("A"));
     circuit.label(r["2"], NetLabel::local("GND"));
+    circuit.label(r["2"], NetLabel::local("B"));
     let errors = circuit
         .build(&())
         .to_netlist()
         .unwrap()
         .to_spice()
-        .unwrap_err()
-        .0;
-    let kinds: Vec<_> = errors.iter().map(|e| e.kind.clone()).collect();
+        .unwrap_err();
+    let kinds: Vec<_> = errors.errors.iter().map(|e| e.kind.clone()).collect();
     assert_eq!(kinds, vec![CircuitErrorKind::GroundMissing]);
+    // The warnings of the netlist are kept.
+    let warnings: Vec<_> = errors.warnings.iter().map(|w| w.kind.clone()).collect();
+    assert_eq!(
+        warnings,
+        vec![CircuitWarningKind::MultipleNetNames {
+            used: "/B".into(),
+            others: vec!["/GND".into()],
+        }]
+    );
 }
 
 /// Nets added by `SpiceOptions::ground_net` become the ground, also next to `GND`, by their exact
@@ -312,7 +321,7 @@ fn test_extra_ground_nets() {
     let kinds: Vec<_> = netlist
         .to_spice()
         .unwrap_err()
-        .0
+        .errors
         .into_iter()
         .map(|e| e.kind)
         .collect();
