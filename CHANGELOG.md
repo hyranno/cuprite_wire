@@ -12,6 +12,10 @@ break the API).
 
 ### Added
 
+- `cuprite_wire::parts::PartExt` overrides the value, footprint, fields and flags of a part
+  instance without writing a new part: `part.dnp()`, `exclude_from_bom()`,
+  `exclude_from_board()`, `with_value(..)`, `with_footprint(..)` and `with_field(..)` return an
+  `Overridden` part (chainable), so parts from `kicad_part!` can be marked DNP for the BOM.
 - `KicadNetlist::bom` makes a bill of materials (`cuprite_wire::kicad::KicadBom`) and writes it
   as CSV in the format of `kicad-cli sch export bom`: components excluded from the BOM are left
   out, equal components are grouped into one row with reference ranges (`R1-R5`), and DNP

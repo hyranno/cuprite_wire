@@ -42,6 +42,20 @@ fn kicad(&self) -> Option<KicadPartInfo> {
   electrical type (`pintype`). `KicadPartInfo::pins` needs exactly one entry per pin ID, and pads
   must be unique within a part.
 - `LibId` (`Library:Name`) is checked when it is parsed or created with `LibId::new`.
+- An instance can override the value, footprint, fields and flags of its part with the methods of
+  `PartExt` (implemented for every part and `Box<dyn Part>`), without writing a new part:
+
+  ```rust
+  use cuprite_wire::parts::PartExt;
+
+  c.instantiate_part(Resistor0603::new("10k").dnp());
+  c.instantiate_part(Resistor0603::new("10k").with_field("MPN", "RC0603FR-0710KL"));
+  ```
+
+  `with_value`, `with_footprint`, `with_field` (replaces a field of the part or appends one),
+  `dnp`, `exclude_from_bom` and `exclude_from_board` return an `Overridden`, on which they can be
+  chained. Pins and the SPICE information are not overridden: a DNP part is still simulated, and
+  `with_value` does not change the simulated value.
 - For hand-written parts, whether a pad number exists in the footprint is not checked (it would
   require reading the footprint libraries; `kicad_part!` does it). Use
   `tools/check_netlist_footprints.py` (`doc/dev/verifying.md`).
@@ -110,7 +124,7 @@ bom.write(&mut file)?;            // or `bom.to_string()`; `bom.rows()` for the 
 ```
 
 - Components with `exclude_from_bom` are left out. DNP components are listed in rows of their own,
-  marked `DNP`; `exclude_dnp` leaves them out.
+  marked `DNP` (mark an instance with `part.dnp()`, section 2); `exclude_dnp` leaves them out.
 - Components are grouped into one row when all their cells are equal, except the references and
   the quantity. Add the fields that tell parts apart (`with_field("MPN")`), or they are grouped by
   value and footprint only. `group: false` writes a row per component.
