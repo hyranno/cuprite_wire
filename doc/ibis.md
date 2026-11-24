@@ -124,8 +124,9 @@ The supported model types are:
 - `IbisReceiver::new(buffer)` (pins `in`, `gnd`; `XRX1`) is the package, `C_comp` and the clamps
   (and the termination of a `Terminator`).
 - `buffer.input()` gives `InputCharacteristics` with the model's `Vinl` / `Vinh` (those of
-  `[Model Spec]` at the corner if given) as the thresholds, to `decode` the voltage of the pin
-  (`None` if the model lacks them). Decode the voltage at the receiver's pin, where the device
+  `[Model Spec]` at the corner if given) as the thresholds, to `decode` the voltage of the pin.
+  An `Input`, `I/O` or `I/O_open_*` model without them takes the defaults of the specification,
+  0.8 V and 2.0 V, listed in `buffer.notes()`; for other types (ECL, differential) it is `None`. Decode the voltage at the receiver's pin, where the device
   sees it.
 - Both are subcircuits named after a hash of their definition (`cuprite_ibis_model_<hash>` for the
   model, `cuprite_ibis_<hash>` for the driver with its weights). The model has the ports `ku` and

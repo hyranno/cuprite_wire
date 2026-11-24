@@ -173,7 +173,13 @@ fn test_output_model() {
     approx(c_comp.typ, 3e-12);
     approx(c_comp.get(Corner::Min), 2.5e-12);
     assert_eq!(c_comp.max, None);
+    // An output has no default thresholds, unlike the input types.
     assert_eq!(m.thresholds(Corner::Typ), None);
+    assert_eq!(
+        ModelType::IoOpenDrain.default_thresholds(),
+        Some((0.8, 2.0))
+    );
+    assert_eq!(ModelType::InputEcl.default_thresholds(), None);
     assert_eq!(
         (m.vmeas, m.cref, m.rref, m.vref),
         (Some(1.65), Some(0.0), Some(50.0), Some(0.0))
