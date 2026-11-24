@@ -18,7 +18,9 @@ break the API).
   `Simulation::result` without file or column names (AC values as `Complex`). `Tran` takes the
   start of the recording (`with_start`), the maximum time step (`with_max_step`) and `uic`
   (`with_uic`). `Complex::phase_degrees`, and `AcResult::continuous_phase` and `group_delay`
-  (as `cph()` and `group_delay()` of ngspice).
+  (as `cph()` and `group_delay()` of ngspice). `doc/spice_netlist_usage.md` section 3 describes
+  them; the examples (`spice_rc_filter`, `sensor_frontend`, `pwm_dac_feedback`,
+  `ibis_signal_integrity`, and `pwm_dac_firmware` of `cuprite_wire_embedded_hal`) use them.
 
 - `Part::global_labels` (empty by default): pins that each instance connects to a global net.
   `kicad_part!` accepts symbols with hidden `power_in` pins (older and third-party libraries)

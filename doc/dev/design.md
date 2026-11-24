@@ -70,3 +70,11 @@ stay, and both go into the `.control` block in the order they are added, so `mea
   internal, and new analyses are added in the crate.
 - `Probe::expression()` gives the ngspice expression (`v("/OUT")`, `v("/IN")-v("/OUT")`, `i(V1)`)
   for string commands. `meas ... WHEN` does not take expressions, only vectors and `vdb(<node>)`.
+- The examples and the tests recording a line over time (`LineDeck` in `tests/common/mod.rs`,
+  shared by the unit tests through `src/test_parts.rs`) use the typed analyses. Some tests keep
+  `wrdata` and `Simulation::table` on purpose: those of `Table` itself (column names, quoting,
+  the same table from both backends, the paths the shared library rewrites, decks that ngspice
+  rejects), those comparing with vectors of ngspice (`vp()`, `cph()`, `group_delay()`), and
+  those measuring with `meas` (`WHEN`, `FIND ... AT`), which needs the node name in `vdb(...)`.
+  The tests of XSpice models, vendor IBIS files and `cuprite_wire_embedded_hal` still write
+  `wrdata`; they work, and are rewritten when they are changed for another reason.

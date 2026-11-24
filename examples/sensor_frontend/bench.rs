@@ -3,7 +3,7 @@
 use cuprite_wire::{
     circuit::{CircuitBuilder, Named, Node},
     naming::NetLabel,
-    spice::{IndependentSource, Simulation},
+    spice::{IndependentSource, Simulation, SpiceDeck},
 };
 
 /// The nodes of a signal stage (the preamp, the filter) for [`Bench::stage`].
@@ -67,18 +67,21 @@ impl Bench {
         self.circuit.label(node, NetLabel::local(name));
     }
 
+    /// The deck of the bench, to add analyses to.
+    pub fn deck(&self) -> SpiceDeck {
+        let netlist = self.circuit.build(&()).to_netlist().unwrap();
+        netlist.to_spice().unwrap().deck()
+    }
+
     /// Runs ngspice with the front-end `commands`; panics with the log on failure.
     pub fn simulate<S: Into<String>>(&self, commands: impl IntoIterator<Item = S>) -> Simulation {
-        let netlist = self
-            .circuit
-            .build(&())
-            .to_netlist()
-            .unwrap()
-            .to_spice()
-            .unwrap();
-        let deck = netlist.deck().control(commands);
-        deck.run().unwrap_or_else(|error| panic!("{error}\n{deck}"))
+        run(&self.deck().control(commands))
     }
+}
+
+/// Runs `deck`; panics with the log on failure.
+pub fn run(deck: &SpiceDeck) -> Simulation {
+    deck.run().unwrap_or_else(|error| panic!("{error}\n{deck}"))
 }
 
 /// Asserts that `actual` is within `tolerance` of `expected`.

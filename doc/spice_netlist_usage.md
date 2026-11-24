@@ -14,12 +14,15 @@ let netlist = bench               // CircuitBuilder: the test bench (section 3)
     .to_netlist()?                // Netlist: the same as for KiCad
     .to_spice()?                  // SpiceNetlist: SPICE information resolved and checked
     .with_title("rc_filter");     // optional title line (default: "cuprite_wire")
-let out = netlist.node("/OUT").unwrap().to_string();   // SPICE node name of a net
-let simulation = netlist
-    .deck()                       // SpiceDeck: the netlist with analyses
+let deck = netlist.deck();        // SpiceDeck: the netlist with analyses
+let out = deck.voltage("/OUT")?;  // Probe: the voltage of a net (section 3)
+let ac = Ac::decade(20, 1.0, 100e3).probe(&out);
+let deck = deck
     .directive(".options reltol=1e-4")
-    .control(["ac dec 20 1 100k".to_string(), format!(r#"meas ac f3db WHEN vdb("{out}")=-3"#)])
-    .run()?;                      // runs ngspice (section 5)
+    .analysis(&ac)                // typed analysis (section 3)
+    .control([r#"meas ac f3db WHEN vdb("/OUT")=-3"#]);   // ngspice front-end commands
+let simulation = deck.run()?;     // runs ngspice (section 5)
+let gain = simulation.result(&ac)?.get(&out)?[0].db();   // the result of a typed analysis
 let f3db = simulation.value("f3db");   // Option<f64>; `expect_value` panics with the log instead
 ```
 
@@ -95,9 +98,58 @@ Analyses and stimuli belong to the test, not to the circuit:
 
   These parts have no KiCad information, so the bench cannot be exported to KiCad; the circuit
   under test still can.
-- Add analyses to a `SpiceDeck`: `directive(...)` for dot lines (`.options`, `.ic`, `.tran`) and
-  `control([...])` for ngspice front-end commands. The `.control` block starts with
-  `set filetype=ascii`, `set wr_singlescale` and `set wr_vecnames` and ends with `quit`.
+- Add analyses to a `SpiceDeck`: typed analyses with `analysis(&a)` (below), `directive(...)` for
+  dot lines (`.options`, `.ic`, `.tran`) and `control([...])` for ngspice front-end commands. The
+  `.control` block starts with `set filetype=ascii`, `set wr_singlescale` and `set wr_vecnames`,
+  has the typed analyses and the commands in the order they were added, and ends with `quit`.
+
+### Typed analyses and probes
+
+`cuprite_wire::spice::analysis` writes `op`, `tran`, `dc` and `ac` with the vectors to record, and
+reads their results without file or column names:
+
+```rust
+use cuprite_wire::spice::analysis::{Ac, Dc, Op, Tran};
+
+let deck = netlist.deck();
+let out = deck.voltage("/OUT")?;                       // v("/OUT")
+let diff = deck.voltage_between("/RX_P", "/RX_N")?;    // v("/RX_P")-v("/RX_N")
+let supply = deck.current("V1")?;                      // i(V1), into the source's positive pin
+let op = Op::new().probe(&out).probe(&supply);
+let tran = Tran::new(1e-6, 5e-3).probe(&out);          // step, stop
+let dc = Dc::new(&deck.source("V1")?, 0.0, 5.0, 0.1).probe(&out);
+let ac = Ac::decade(50, 10.0, 100e3).probes([out.clone(), diff]);
+let simulation = deck.analysis(&op).analysis(&tran).analysis(&dc).analysis(&ac).run()?;
+
+let vout: f64 = simulation.result(&op)?.get(&out)?;
+let tran = simulation.result(&tran)?;                  // SweepResult
+let (time, v): (&[f64], &[f64]) = (tran.scale(), tran.get(&out)?);
+let v_1ms: Option<f64> = tran.interpolate(&out, 1e-3)?;
+let ac = simulation.result(&ac)?;                      // AcResult
+let gain_db: Vec<f64> = ac.get(&out)?.iter().map(|v| v.db()).collect();
+```
+
+- **Probes** come from the deck, which checks the net names: `voltage`, `voltage_between` and
+  `current` (an `IndependentSource` or an `Ammeter`) return `ProbeError` for a net no element
+  uses, the ground alone, a node with `$` (ngspice reads it as a variable even in quotes) or an
+  unknown voltage source. `Probe::expression()` is the ngspice expression, e.g. for `meas`.
+- **Analyses**: `Op::new()`; `Tran::new(step, stop)` with `with_start`, `with_max_step` and
+  `with_uic`; `Dc::new(&source, start, stop, step)` sweeping a source from `deck.source(name)`;
+  `Ac::decade`, `Ac::octave` and `Ac::linear(points, start, stop)`. Add the probes with `probe` or
+  `probes`, then add the analysis to the deck. A deck writes each typed analysis with a `wrdata`
+  of its probes to `analysis<n>.txt`; avoid those names in your own commands.
+- **Results**: `Simulation::result(&analysis)` returns `OpResult` (`get` gives `f64`),
+  `SweepResult` for `Tran` and `Dc` (`scale()` is the time or the swept value; `get`,
+  `interpolate`) or `AcResult` (`frequency()`; `get` gives `Complex` values with `re`, `im`,
+  `norm()`, `db()`, `phase()` and `phase_degrees()`; `continuous_phase` and `group_delay`). The
+  result belongs to the analysis value the deck ran: a changed copy (another `probe`) or an
+  analysis the deck did not have is `SimulationError::Analysis`, as is a probe the analysis does
+  not record. Adding the same analysis to a deck twice panics.
+- Mix them with string commands: `meas`, `let`/`print` and other commands stay in `control`. A
+  `meas ... WHEN` condition needs a vector, not an expression: write `vdb("/OUT")` with the node
+  name (`db(v("/OUT"))` fails), so `Probe::expression()` does not fit there.
+- The typed analyses run on both backends and with co-simulation models (`run_with`; a `Tran`
+  with `with_start` is rejected there, `doc/cosimulation.md`).
 
 ### Digital stimuli
 
@@ -178,7 +230,7 @@ let spice = netlist.to_spice_with(&SpiceOptions::new().ground_net("AGND").ground
 ```
 
 `SpiceNetlist::node(net_name)` returns the node name. In front-end commands quote names containing
-`/` or `-`: `v("/OUT")`.
+`/` or `-`: `v("/OUT")`. The probes of typed analyses (section 3) do this for you.
 
 Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_spice` reports (each with the
 trace of the part or the label):
@@ -200,7 +252,8 @@ trace of the part or the label):
 `SpiceDeck::run()` writes the deck to a new directory under the system temporary directory
 (`$TMPDIR`), runs ngspice there and returns a `Simulation`:
 
-- `table("ac.txt")` reads a `wrdata` file: `names()`, `scale()`, `column(name)` and
+- `result(&analysis)` reads the result of a typed analysis (section 3).
+- `table("ac.txt")` reads a `wrdata` file of your own commands: `names()`, `scale()`, `column(name)` and
   `interpolate(name, x)`. Column names are matched case-insensitively and ignoring double quotes
   (ngspice writes `v("/OUT")` as `v(/OUT)` but keeps the quotes of `vdb("/OUT")`). Write complex
   AC vectors through `vdb()`, `vm()`, `vp()`, `real()` or `imag()`.

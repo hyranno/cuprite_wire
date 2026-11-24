@@ -15,14 +15,24 @@ use cuprite_wire::{
     naming::NetLabel,
     spice::{
         SpiceDeck,
+        analysis::{Probe, Tran},
         cosim::CosimDevice,
         digital::{InputCharacteristics, OutputCharacteristics},
     },
 };
 
+/// The deck of the bench with its transient analysis and the probe of `OUT`.
+pub struct Bench {
+    pub deck: SpiceDeck,
+    /// The transient analysis recording `out`.
+    pub tran: Tran,
+    /// The voltage of `OUT`.
+    pub out: Probe,
+}
+
 /// The microcontroller (`mcu`, a 3.3 V CMOS device with the pins `pwm` and `adc`), the RC filter,
-/// and a transient analysis of `stop` seconds writing `OUT` to `out.txt`.
-pub fn bench(stop: f64) -> Result<SpiceDeck, Box<dyn std::error::Error>> {
+/// and a transient analysis of `stop` seconds recording `OUT`.
+pub fn bench(stop: f64) -> Result<Bench, Box<dyn std::error::Error>> {
     let mcu = CosimDevice::new("mcu")
         .output("pwm", OutputCharacteristics::cmos(3.3))
         .input("adc", InputCharacteristics::cmos(3.3));
@@ -37,8 +47,12 @@ pub fn bench(stop: f64) -> Result<SpiceDeck, Box<dyn std::error::Error>> {
     bench.label(c["2"], NetLabel::global("GND"));
     bench.label(mcu[CosimDevice::GND], NetLabel::global("GND"));
     let netlist = bench.build(&()).to_netlist()?.to_spice()?;
-    Ok(netlist.deck().control([
-        format!("tran 100n {stop:e}"),
-        r#"wrdata out.txt v("/OUT")"#.to_string(),
-    ]))
+    let deck = netlist.deck();
+    let out = deck.voltage("/OUT")?;
+    let tran = Tran::new(100e-9, stop).probe(&out);
+    Ok(Bench {
+        deck: deck.analysis(&tran),
+        tran,
+        out,
+    })
 }

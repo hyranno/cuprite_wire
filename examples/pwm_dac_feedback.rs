@@ -55,13 +55,19 @@ impl DeviceModel for Controller {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let deck = bench(3e-3)?;
+    let bench = bench(3e-3)?;
     let mut controller = Controller::new();
-    deck.run_with(DeviceModels::new().with("mcu", &mut controller))?;
+    let sim = bench
+        .deck
+        .run_with(DeviceModels::new().with("mcu", &mut controller))?;
     for &(time, volts) in controller.measured.iter().step_by(10) {
         println!("{:7.0} us  {volts:.3} V", time * 1e6);
     }
     println!("duty: {:.3}", controller.pwm.duty());
+    let tran = sim.result(&bench.tran)?;
+    let end = *tran.scale().last().ok_or("no time points")?;
+    let out = tran.interpolate(&bench.out, end)?.ok_or("no OUT")?;
+    println!("OUT at the end: {out:.3} V");
     Ok(())
 }
 
@@ -72,9 +78,10 @@ mod tests {
     /// `OUT` settles at the target, with the duty at TARGET / 3.3 V.
     #[test]
     fn test_regulates_to_target() {
-        let deck = bench(3e-3).unwrap();
+        let bench = bench(3e-3).unwrap();
         let mut controller = Controller::new();
-        let sim = deck
+        let sim = bench
+            .deck
             .run_with(DeviceModels::new().with("mcu", &mut controller))
             .unwrap();
         let &(_, last) = controller.measured.last().unwrap();
@@ -82,10 +89,10 @@ mod tests {
         let duty = controller.pwm.duty();
         assert!((duty - TARGET / 3.3).abs() < 0.03, "{duty}");
         // The ripple of the filtered PWM over the last period.
-        let table = sim.table("out.txt").unwrap();
-        let end = *table.scale().last().unwrap();
-        let out = table.column(r#"v("/OUT")"#).unwrap();
-        let ripple = table
+        let tran = sim.result(&bench.tran).unwrap();
+        let end = *tran.scale().last().unwrap();
+        let out = tran.get(&bench.out).unwrap();
+        let ripple = tran
             .scale()
             .iter()
             .zip(out)

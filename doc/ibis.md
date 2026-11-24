@@ -24,7 +24,7 @@ cargo run --example ibis_signal_integrity --features ibis
 use cuprite_wire::{
     ibis::Corner,
     ibis_part,
-    spice::{TransmissionLine, digital::*, ibis::*},
+    spice::{TransmissionLine, analysis::Tran, digital::*, ibis::*},
 };
 
 ibis_part! {
@@ -40,8 +40,11 @@ let driver = bench.instantiate_part(IbisDriver::new(Mcu::tx(Corner::Typ)?, seq))
 let trace = bench.instantiate_part(TransmissionLine::new(50.0, 1e-9));
 let receiver = bench.instantiate_part(IbisReceiver::new(rx.clone()));
 // ... connect driver[IbisDriver::OUT] - trace - receiver[IbisReceiver::IN], the grounds,
-//     label the receiver's pin `RX`, run a transient analysis ...
-let read = rx.input().unwrap().decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
+//     label the receiver's pin `RX`, build the deck ...
+let pin = deck.voltage("/RX")?;
+let tran = Tran::new(1e-10, 25e-6).probe(&pin);
+let result = deck.analysis(&tran).run()?.result(&tran)?;
+let read = rx.input().unwrap().decode(result.scale(), result.get(&pin)?);
 ```
 
 - The feature `ibis` of `cuprite_wire` enables `spice::ibis`, `ibis_part!` and the IBIS symbols
@@ -140,7 +143,8 @@ let tx = IbisDiffBuffer::of_pin(&ibs, "PHY", "A5", Corner::Typ)?; // either pin 
 let rx = IbisDiffBuffer::of_pin(&ibs, "FPGA", "B7", Corner::Typ)?;
 let driver = bench.instantiate_part(IbisDiffDriver::new(tx, seq));
 let receiver = bench.instantiate_part(IbisDiffReceiver::new(rx.clone()));
-// ... connect `p` to `p` and `n` to `n` (through a pair of traces), run a transient analysis ...
+// ... connect `p` to `p` and `n` to `n` (through a pair of traces), label the receiver's pins
+//     `RX_P` and `RX_N`, and record deck.voltage_between("/RX_P", "/RX_N")? in a transient analysis ...
 let vdiff = rx.vdiff().unwrap(); // high above +vdiff, low below -vdiff
 ```
 
