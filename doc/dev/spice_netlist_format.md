@@ -173,6 +173,10 @@ comment and the `F` after the suffix is ignored), but cuprite_wire emits clean n
 
 - `.include "path"` inserts a file verbatim. **Relative paths are resolved against ngspice's
   current working directory, not the deck's directory.** KiCad therefore emits absolute paths.
+- The same holds for the files named by parameters of XSPICE code models (such as the state file
+  of `d_state`): ngspice 44.2 opens them relative to its working directory, even when
+  `sourcepath` is set. cuprite_wire makes them absolute when it copies a `.subckt`
+  (`sim_model: inline`, `doc/spice_part_macro.md`).
 - `.lib "path" section` includes one section of a library file.
 - `.model NAME TYPE( param=value ... )` defines a device model
   (types: `D NPN PNP NMOS PMOS NJF PJF VDMOS SW CSW R C L` ...; VDMOS takes `NCHAN`/`PCHAN`).
@@ -255,6 +259,8 @@ Notes (verified with ngspice 44.2):
   `.meas` results. With one, only the commands of the block run
   (`Note: Simulation executed from .control section`).
 - `write` without a file writes `rawspice.raw` in the working directory.
+- A lossless transmission line (`T1 p1 n1 p2 n2 z0=50 td=1n`) does not limit the time step by
+  its delay: a `tran` gave the same number of points with `td` of 1 ps and of 10 ns.
 
 KiCad copies `.control` blocks from schematic text items verbatim; cuprite_wire tests can instead
 append a generated control block to the netlist body.
