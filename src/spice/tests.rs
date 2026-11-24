@@ -57,6 +57,8 @@ on_each_simulator!(
     simulate_uart,
     typed_analyses,
     typed_operating_point,
+    typed_transient_options,
+    typed_result_errors,
 );
 
 fn check_golden(name: &str, text: &impl ToString) {
@@ -915,20 +917,10 @@ fn typed_analyses(simulator: &dyn Simulator) {
     ));
     let out = deck.voltage("/OUT").unwrap();
     let across = deck.voltage_between("/IN", "/OUT").unwrap();
-    let source = deck.netlist().to_string();
-    let source = source
-        .lines()
-        .find_map(|line| {
-            line.split_whitespace()
-                .next()
-                .filter(|n| n.starts_with('V'))
-        })
-        .unwrap()
-        .to_string();
-    let current = deck.current(&source).unwrap();
+    let current = deck.current("V1").unwrap();
     let tran = Tran::new(10e-6, 5e-3).probes([out.clone(), across.clone(), current.clone()]);
     let ac = Ac::decade(50, 1.0, 100e3).probes([out.clone(), current.clone()]);
-    let dc = Dc::new(&deck.source(&source).unwrap(), 0.0, 2.0, 0.5).probe(&out);
+    let dc = Dc::new(&deck.source("V1").unwrap(), 0.0, 2.0, 0.5).probe(&out);
     let deck = deck
         .analysis(&tran)
         .analysis(&ac)
@@ -1013,4 +1005,169 @@ fn test_analysis_added_twice() {
     let out = deck.voltage("/OUT").unwrap();
     let tran = crate::spice::analysis::Tran::new(10e-6, 1e-3).probe(&out);
     let _ = deck.analysis(&tran).analysis(&tran);
+}
+
+/// `with_uic` starts from the discharged capacitor instead of the operating point, `with_start`
+/// records from its time on, and `with_max_step` makes ngspice take more points.
+fn typed_transient_options(simulator: &dyn Simulator) {
+    use crate::spice::analysis::Tran;
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)));
+    let out = deck.voltage("/OUT").unwrap();
+    let from_op = Tran::new(10e-6, 2e-3).probe(&out);
+    let uic = Tran::new(10e-6, 2e-3).with_uic().probe(&out);
+    let late = Tran::new(10e-6, 2e-3)
+        .with_start(1e-3)
+        .with_uic()
+        .probe(&out);
+    let fine = Tran::new(10e-6, 2e-3)
+        .with_max_step(1e-6)
+        .with_uic()
+        .probe(&out);
+    let sim = simulator
+        .run(
+            &deck
+                .analysis(&from_op)
+                .analysis(&uic)
+                .analysis(&late)
+                .analysis(&fine),
+        )
+        .unwrap();
+
+    let from_op = sim.result(&from_op).unwrap();
+    assert!(
+        from_op
+            .get(&out)
+            .unwrap()
+            .iter()
+            .all(|v| (v - 1.0).abs() < 1e-6)
+    );
+    let uic = sim.result(&uic).unwrap();
+    // The capacitor starts discharged (ngspice gives 1e-4 V at the first point).
+    let v0 = uic.get(&out).unwrap()[0];
+    assert!(v0.abs() < 1e-3, "{v0}");
+    let v = uic.interpolate(&out, 1e-3).unwrap().unwrap();
+    assert!((v - 0.632).abs() < 0.01, "{v}");
+
+    let late = sim.result(&late).unwrap();
+    let first = late.scale()[0];
+    assert!((1e-3..1.01e-3).contains(&first), "{first}");
+    let v = late.interpolate(&out, 1.5e-3).unwrap().unwrap();
+    assert!((v - 0.777).abs() < 0.01, "{v}");
+
+    let fine = sim.result(&fine).unwrap();
+    assert!(
+        fine.scale().len() > 2 * uic.scale().len(),
+        "{} points for {}",
+        fine.scale().len(),
+        uic.scale().len()
+    );
+    assert!(fine.scale().windows(2).all(|t| t[1] - t[0] <= 1.000_001e-6));
+}
+
+#[test]
+fn test_transient_command() {
+    use crate::spice::analysis::{AnalysisCommand, Tran};
+    let tran = Tran::new(10e-6, 2e-3);
+    assert_eq!(tran.command(), "tran 1e-5 0.002");
+    assert_eq!(tran.clone().with_uic().command(), "tran 1e-5 0.002 uic");
+    assert_eq!(
+        tran.clone().with_start(1e-3).command(),
+        "tran 1e-5 0.002 0.001"
+    );
+    assert_eq!(
+        tran.clone().with_max_step(1e-6).with_uic().command(),
+        "tran 1e-5 0.002 0 1e-6 uic"
+    );
+    assert_eq!(
+        tran.clone().with_max_step(1e-6).with_start(1e-3).command(),
+        "tran 1e-5 0.002 0.001 1e-6"
+    );
+    // A changed analysis is another analysis.
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).analysis(&tran);
+    assert!(deck.analysis_file(&tran).is_some());
+    assert!(deck.analysis_file(&tran.clone().with_uic()).is_none());
+}
+
+/// The errors reading a typed result: an analysis without probes, a probe the analysis does not
+/// record, and an output file overwritten with other columns.
+fn typed_result_errors(simulator: &dyn Simulator) {
+    use crate::spice::{
+        SimulationError,
+        analysis::{Dc, Op, Tran},
+    };
+    let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0)));
+    let out = deck.voltage("/OUT").unwrap();
+    let input = deck.voltage("/IN").unwrap();
+    let bare = Op::new();
+    let op = Op::new().probe(&out);
+    let dc = Dc::new(&deck.source("V1").unwrap(), 0.0, 1.0, 0.5).probe(&out);
+    let tran = Tran::new(10e-6, 1e-3).probe(&out);
+    let deck = deck
+        .analysis(&bare)
+        .analysis(&op)
+        .analysis(&dc)
+        .analysis(&tran)
+        // Overwrites the output of `tran` with two probes.
+        .control([format!("wrdata analysis4.txt {out} {input}")]);
+    let sim = simulator.run(&deck).unwrap();
+
+    let message = |error: SimulationError| error.to_string();
+    assert_eq!(
+        message(sim.result(&bare).unwrap_err()),
+        "cannot read the result of op: the analysis has no probes"
+    );
+    let op = sim.result(&op).unwrap();
+    assert!((op.get(&out).unwrap() - 1.0).abs() < 1e-6);
+    assert_eq!(
+        message(op.get(&input).unwrap_err()),
+        r#"cannot read the result of the analysis: v("/IN") is not one of its probes"#
+    );
+    let dc = sim.result(&dc).unwrap();
+    assert!(matches!(dc.get(&input), Err(SimulationError::Analysis(_))));
+    assert!(matches!(
+        dc.interpolate(&input, 0.5),
+        Err(SimulationError::Analysis(_))
+    ));
+    assert_eq!(dc.interpolate(&out, 0.25).unwrap(), Some(0.25));
+    assert_eq!(dc.interpolate(&out, 2.0).unwrap(), None);
+    match sim.result(&tran) {
+        Err(SimulationError::Table { file, reason }) => {
+            assert_eq!(file, "analysis4.txt");
+            assert_eq!(reason, "3 columns for 2 (the scale and the probes)");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The probes that cannot be made.
+#[test]
+fn test_probe_errors() {
+    use crate::spice::analysis::ProbeError;
+    let mut circuit = rc_filter_bench(IndependentSource::voltage(1.0));
+    let r = circuit.instantiate_part(Resistor("1k"));
+    circuit.label(r["1"], NetLabel::local("a$b"));
+    circuit.label(r["2"], NetLabel::global("GND"));
+    let deck = deck_of(&circuit);
+    assert_eq!(
+        deck.voltage_between("GND", "GND"),
+        Err(ProbeError::Ground("GND".into()))
+    );
+    assert_eq!(
+        deck.voltage_between("/OUT", "/NONE"),
+        Err(ProbeError::UnknownNet("/NONE".into()))
+    );
+    assert_eq!(
+        deck.voltage_between("/NONE", "GND"),
+        Err(ProbeError::UnknownNet("/NONE".into()))
+    );
+    assert_eq!(
+        deck.voltage_between("/IN", "/OUT").unwrap().expression(),
+        r#"v("/IN")-v("/OUT")"#
+    );
+    let unsupported = ProbeError::UnsupportedNode {
+        net: "/a$b".into(),
+        node: "/a$b".into(),
+    };
+    assert_eq!(deck.voltage("/a$b"), Err(unsupported.clone()));
+    assert_eq!(deck.voltage_between("/OUT", "/a$b"), Err(unsupported));
 }

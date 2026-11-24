@@ -41,7 +41,7 @@ stay, and both go into the `.control` block in the order they are added, so `mea
 - `SpiceDeck::analysis(&a)` appends the analysis command and a `wrdata analysis<n>.txt <probes>`
   right after it (`wrdata` writes the current plot). The deck records the analysis by an identity
   (`id`) with its file, and `Simulation` copies the record, so `sim.result(&a)` finds the file. The
-  identity is a process-wide counter renewed by every builder method (`probe`, `probes`), so an
+  identity is a process-wide counter renewed by every builder method (`probe`, `probes`, the options of `Tran`), so an
   analysis that the deck did not run, including one of another deck or one changed after it was
   added, is an error (`SimulationError::Analysis`), not the result of another analysis. The file
   names count per deck, so the deck text is deterministic. Adding the same analysis twice panics.
@@ -55,6 +55,9 @@ stay, and both go into the `.control` block in the order they are added, so `mea
 - The result types are `OpResult` (`get -> f64`), `SweepResult` for `tran` and `dc` (`scale`,
   `get -> &[f64]`, `interpolate`) and `AcResult` (`frequency`, `get -> &[Complex]`). Asking for a
   probe the analysis does not record is a `SimulationError::Analysis`, so tests can use `?`.
+- `Tran` writes `tran <step> <stop> [<start> [<max step>]] [uic]`: a maximum step without a start
+  writes a start of 0, since the arguments are positional. A `Dc` sweeps one source; a nested
+  sweep (`dc V1 ... V2 ...`) would need a two-dimensional result and is left out until needed.
 - The `Analysis` trait is sealed: the identity, the command and the reading of the columns are
   internal, and new analyses are added in the crate.
 - `Probe::expression()` gives the ngspice expression (`v("/OUT")`, `v("/IN")-v("/OUT")`, `i(V1)`)

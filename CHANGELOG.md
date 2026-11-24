@@ -15,7 +15,9 @@ break the API).
 - `spice::analysis`: typed `Op`, `Tran`, `Dc` and `Ac` analyses with probes made by the deck
   (`SpiceDeck::voltage`, `voltage_between`, `current`, and `source` for a DC sweep), added with
   `SpiceDeck::analysis` among the string commands of the control block and read with
-  `Simulation::result` without file or column names (AC values as `Complex`).
+  `Simulation::result` without file or column names (AC values as `Complex`). `Tran` takes the
+  start of the recording (`with_start`), the maximum time step (`with_max_step`) and `uic`
+  (`with_uic`).
 
 - `Part::global_labels` (empty by default): pins that each instance connects to a global net.
   `kicad_part!` accepts symbols with hidden `power_in` pins (older and third-party libraries)
