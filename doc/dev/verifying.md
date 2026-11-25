@@ -8,7 +8,9 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. CI runs the c
 
 - **Golden files**: `tests/golden/*.net` and `tests/golden/*.cir` are the expected KiCad netlists
   and SPICE decks of small circuits defined in the tests. After an intended output change,
-  regenerate them with `UPDATE_GOLDEN=1 cargo test` and review the diff. Do not add outputs
+  regenerate them and review the diff. Some golden tests need features, so run the whole
+  workspace with them: `UPDATE_GOLDEN=1 cargo test --workspace --features ibis,shared-ngspice,kicad-libraries`
+  (or `--all-features` with `CUPRITE_VENDOR_MODELS_DIR` set, for the vendor models too). Do not add outputs
   generated from the KiCad demos (see the license notes in `doc/dev/kicad_netlist_format.md`).
   Golden files write the repository as `${CARGO_MANIFEST_DIR}`, which the tools below set for KiCad.
 - **Simulations**: `src/spice/tests.rs` checks analyses against hand-calculated results
@@ -16,10 +18,13 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. CI runs the c
   subcircuit model). They need `ngspice` (`doc/spice_netlist_usage.md` section 5).
   The CLI copies its input with glibc `tmpfile()`, which always writes to `/tmp` and ignores
   `$TMPDIR`; the devcontainer's `ngspice` wrapper (`.devcontainer/tmpfile_shim.c`) redirects it
-  to `$TMPDIR`, so the tests also run where `/tmp` is read-only, such as the Claude Code sandbox.
+  to `$TMPDIR`, so the tests also run where `/tmp` is read-only (e.g. the Claude Code sandbox).
 - **KiCad libraries**: `cargo test --features kicad-libraries --test kicad_libraries` generates
   parts from the installed KiCad libraries, compares the netlists of a circuit using them with
-  `tests/golden/kicad_libraries.*`, and simulates it with KiCad's models.
+  `tests/golden/kicad_libraries.*`, and simulates it with KiCad's models. The ignored tests of
+  `crates/kicad_lib/tests/kicad_libraries.rs` (`cargo test -p cuprite_wire_kicad_lib -- --ignored`,
+  run by `cargo xtask test` unless `--no-kicad`) read every symbol and footprint of the installed
+  libraries.
 - **SPICE models**: `tests/spice_part.rs` generates parts from the test model, checks that the
   nodes follow the `.subckt` order rather than the pin numbers, and simulates the supervisor in the
   PSpice mode: swapping two pins in the mapping changes the result, and without the PSpice mode
@@ -45,8 +50,10 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. CI runs the c
   (`doc/spice_part_macro.md` section 7). CI does not even compile `tests/vendor_models.rs` and
   `tests/vendor_ibis.rs` (their macros read the files), so a change of an API they use breaks
   them unnoticed: run both after such a change (`--features vendor-models,ibis`).
-- **Compile errors of the macros**: `tests/kicad_part_errors.rs` (trybuild); regenerate the
-  messages with `TRYBUILD=overwrite cargo test --test kicad_part_errors`.
+- **Compile errors of the macros**: `tests/kicad_part_errors.rs` (trybuild, `tests/ui/*.stderr`)
+  and, with the feature `ibis`, `tests/ibis_part_errors.rs` (`tests/ui/ibis/*.stderr`); regenerate
+  the messages with `TRYBUILD=overwrite cargo test --test kicad_part_errors` and
+  `TRYBUILD=overwrite cargo test --features ibis --test ibis_part_errors`.
 - **S-expression helpers of the tools**: `python3 -m doctest tools/kicad_netlist.py` checks the
   quoting and unescaping shared by the scripts in `tools/` (not run by CI).
 
@@ -77,9 +84,9 @@ The libraries of `libs/` and `examples/*/libs/` are added to its library tables.
    or moved (UUIDs are stable).
 
 `--keep DIR` keeps the boards, the import reports, a screenshot of the dialog (`report.png`) and
-the pcbnew logs. In the Claude Code sandbox, Unix sockets cannot be created, so Xvfb listens on
-TCP (`127.0.0.1`), and its keymap directory `/var/lib/xkb` must be writable
-(`sandbox.filesystem.allowWrite` in `.claude/settings.json`). KiCad 10 loads the libraries in the
+the pcbnew logs. Xvfb listens on TCP (`127.0.0.1`), so that the check also runs where Unix
+sockets cannot be created (e.g. the Claude Code sandbox); its keymap directory `/var/lib/xkb` must
+be writable. KiCad 10 loads the libraries in the
 background (a progress bar in the status bar), so the plugin waits for it before importing;
 otherwise footprints are "not found in any libraries" on a fresh configuration.
 

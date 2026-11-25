@@ -2,7 +2,7 @@
 //
 // glibc's tmpfile() always creates its file in /tmp and ignores $TMPDIR.
 // The ngspice CLI copies its input through tmpfile(), so it fails where /tmp is
-// read-only, e.g. in the Claude Code bash sandbox. The `ngspice` wrapper in
+// read-only (e.g. in the Claude Code sandbox). The `ngspice` wrapper in
 // /usr/local/bin preloads this library so the file goes to $TMPDIR instead.
 #define _GNU_SOURCE
 #include <stdio.h>

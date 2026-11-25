@@ -9,7 +9,8 @@ label (in its sheet) for every local one. Unnamed nets get no label, so KiCad na
 A pin whose type has the suffix `+no_connect` gets a no-connect flag.
 `kicad-cli sch export netlist --format kicadsexpr` then exports the schematic, and
 both netlists are compared after removing what cuprite_wire intentionally omits
-(see KNOWN_DIFFERENCES, and KICAD10_KNOWN_DIFFERENCES with KiCad 10). The remaining
+(see KNOWN_DIFFERENCES, LIBRARY_KNOWN_DIFFERENCES with --library-symbols, and
+KICAD10_KNOWN_DIFFERENCES with KiCad 10). The remaining
 differences in element order, quoting and omission rules are printed as a diff.
 
 Every sheet path becomes a sheet file, with the sheet's unique id from the
@@ -77,7 +78,7 @@ DROPPED_FIELDS = {'"Footprint"', '"Datasheet"', '"Description"'}
 # With --library-symbols: the simulation model is written to the SPICE deck, not to the .net.
 LIBRARY_KNOWN_DIFFERENCES = {
     "Sim.* fields and properties": "not written to the .net (except for the `sim` block of kicad_part!)",
-    "tstamps of units 2..": "multi-unit components have one unique id (one symbol instance)",
+    "tstamps of units 2..": "derived from the component's UUID; the synthesized units have their own",
     "ki_* fields": "not written",
 }
 SIM_PROPERTY = re.compile(r'"Sim[._][^"]*"')

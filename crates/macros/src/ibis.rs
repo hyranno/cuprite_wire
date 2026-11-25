@@ -323,10 +323,8 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
     };
     quote! {
         #[doc = #doc]
-        ///
-        /// # Errors
-        /// If the file cannot be read at run time, or no longer has the pins and models that
-        /// were checked when compiling.
+        #[doc = ""]
+        #[doc = #ERRORS_DOC]
         pub fn #name(
             corner: #krate::ibis::Corner,
         ) -> ::core::result::Result<
@@ -340,6 +338,11 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
 
 /// The call of `IbisBuffer` or `IbisDiffBuffer` making the buffer of `pin`, with the model chosen
 /// if any.
+/// The `# Errors` section of the functions generated for the IBIS buffers.
+pub(crate) const ERRORS_DOC: &str = "# Errors\n\
+    If the file cannot be read at run time, or no longer has the pins and models that were \
+    checked when compiling.";
+
 pub(crate) fn buffer_call(pin: TokenStream, model: Option<&String>) -> TokenStream {
     match model {
         Some(model) => quote!(of_pin_model(Self::file()?, Self::COMPONENT, #pin, #model, corner)),

@@ -1,9 +1,9 @@
 # SPICE Netlist Format
 
 This document describes the SPICE netlist that cuprite_wire emits to test circuits with ngspice.
-The target is ngspice 44 (the simulator bundled with KiCad 9), and the output follows the shape of
-KiCad 9's own SPICE export (`kicad-cli sch export netlist --format spice`) where it makes sense,
-so that the two can be compared directly.
+The target is ngspice 44.2 (Debian's package, installed in the devcontainer), and the output
+follows the shape of KiCad's own SPICE export (`kicad-cli sch export netlist --format spice`) where
+it makes sense, so that the two can be compared directly.
 
 > Sources:
 >

@@ -101,8 +101,7 @@ fn lint() -> Result<(), String> {
     cargo(&format!(
         "clippy --workspace --all-targets --features {FEATURES} -- -D warnings"
     ))?;
-    // cuprite_wire_embedded_hal turns shared-ngspice on for the whole workspace build;
-    // check cuprite_wire without it too.
+    // The run above has the optional features; check cuprite_wire without them too.
     cargo("clippy -p cuprite_wire --all-targets -- -D warnings")?;
     // Broken intra-doc links and other rustdoc warnings, with and without the optional features
     // (links to items behind a feature break without it).

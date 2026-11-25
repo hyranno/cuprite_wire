@@ -11,7 +11,7 @@ KiCad's. For using the IBIS support, see `doc/ibis.md`; for the tests that compa
 > 1. Actual runs of `kicad-cli sch export netlist --format spice` of KiCad 10.0 on copies of the
 >    demo `demos/simulation/ibis` (last checked with 10.0.8)
 > 2. Actual runs of ngspice 44.2 on the generated subcircuits
-> 3. The IBIS specification (version 7)
+> 3. The IBIS specification (up to version 8.0)
 >
 > See "References" at the end for details.
 
@@ -54,7 +54,7 @@ netlist includes it.
 
 ### 1.2 Reproducing the conversion
 
-The cache directory of the user may be read-only (it is in the Claude Code sandbox), so give the
+The cache directory of the user may be read-only (e.g. in the Claude Code sandbox), so give the
 export its own:
 
 ```sh

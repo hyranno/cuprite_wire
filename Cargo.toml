@@ -50,7 +50,7 @@ features = ["ibis", "shared-ngspice"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [package.metadata.cargo-shear]
-# Compile-fail cases for trybuild (tests/kicad_part_errors.rs), not modules.
+# Compile-fail cases for trybuild (tests/kicad_part_errors.rs, tests/ibis_part_errors.rs), not modules.
 ignored-paths = ["tests/ui/*.rs", "tests/ui/ibis/*.rs"]
 
 [dependencies]

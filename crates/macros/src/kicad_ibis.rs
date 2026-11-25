@@ -9,7 +9,7 @@ use cuprite_wire_kicad_lib::sim::{
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 
-use crate::ibis::{buffer_call, describe, file_items};
+use crate::ibis::{ERRORS_DOC, buffer_call, describe, file_items};
 
 /// What the generated type has in place of an ordinary part's.
 pub struct IbisItems {
@@ -66,10 +66,8 @@ pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
             pub const IBIS_PIN: &'static str = #pin;
 
             #[doc = #new_doc]
-            ///
-            /// # Errors
-            /// If the file cannot be read at run time, or no longer has the pins and models that
-            /// were checked when compiling.
+            #[doc = ""]
+            #[doc = #ERRORS_DOC]
             #panics
             pub fn new(
                 corner: #krate::ibis::Corner #sequence_param

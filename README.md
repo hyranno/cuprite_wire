@@ -113,7 +113,9 @@ program or shim with this note.
 
 The API reference is on [docs.rs](https://docs.rs/cuprite_wire).
 Smaller examples: `examples/kicad_rc_filter.rs` and `examples/spice_rc_filter.rs`;
-`examples/ibis_signal_integrity/` simulates links between chips with IBIS models.
+`examples/ibis_signal_integrity/` simulates links between chips with IBIS models, and
+`examples/pwm_dac_feedback.rs` (feature `shared-ngspice`) co-simulates a Rust model of a
+microcontroller regulating a PWM DAC.
 The changes in each release are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contributing

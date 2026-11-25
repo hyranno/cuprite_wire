@@ -29,7 +29,7 @@ prints it with the place in the source and writes no netlist, e.g. without the p
 ```text
 error: net "+5V": U1.vcc (power_in) is not driven by any power_out pin (add a `power_flag` if it is powered from outside)
   at examples/sensor_frontend/bias.rs:38:21
-  in subcircuit instantiated at examples/sensor_frontend/main.rs:48:22
+  in subcircuit instantiated at examples/sensor_frontend/main.rs:51:22
 ```
 
 To import the netlist into pcbnew, add these footprint libraries to the footprint library table:
@@ -46,6 +46,7 @@ find both: `python3 tools/check_netlist_import.py sensor_frontend.net`.
 | `bias.rs` | `MidSupply`: divider, filter and follower giving VREF |
 | `preamp.rs` | `Preamp`: AC-coupled non-inverting amplifier biased at VREF |
 | `filter.rs` | `LowPass`: unity-gain Sallen-Key low-pass filter around VREF |
+| `stage.rs` | `StagePorts`: the interface shared by the preamp and the filter |
 | `bench.rs` | the test bench shared by the tests (supply, sources, ngspice) |
 | `libs/symbols/sensor_frontend.kicad_sym` | symbols `OPAMP_RRIO` and `CONN_01x04` |
 | `libs/footprints/sensor_frontend.pretty/` | the footprint of the pin header |

@@ -1,6 +1,6 @@
 # KiCad Netlist (.net) Format
 
-This document describes the netlist that cuprite_wire emits for import into the KiCad 9 PCB editor (pcbnew).
+This document describes the netlist that cuprite_wire emits for import into the PCB editor (pcbnew) of KiCad 9 and 10.
 The format is KiCad's S-expression netlist (the "KiCad" format of Eeschema, `version "E"`).
 
 > KiCad publishes no official specification of this format
@@ -9,6 +9,7 @@ The format is KiCad's S-expression netlist (the "KiCad" format of Eeschema, `ver
 >
 > 1. Actual output of `kicad-cli sch export netlist --format kicadsexpr` from KiCad 9.0.2
 > 2. The behavior of the KiCad 9.0 source code (the Eeschema exporter and the pcbnew reader)
+> 3. For KiCad 10 (sections 6.1.1, 6.2 and 6.3), its output and source code
 >
 > See "References" at the end for details.
 
@@ -234,7 +235,7 @@ Observed with KiCad 10.0 on the `ecc83` demo (a three-unit valve) and on a copy 
   (its own pins and those of unit 0): another pin with the same shown name, a different shown
   number, and the same no-connect-ness as the net (`unconnected` iff the other pin is of type
   `no_connect`). So the K of each unit of `Diode:BAT54SDW` is not shared, and the net of pad 6 is
-  `Net-(D1A-K)` (cuprite_wire used to write `Net-(D1-A-Pad6)`, judging over all units).
+  `Net-(D1A-K)`.
 - Each placed unit has its own copies of the unit-0 pins (and of a pin repeated in several
   units), so each copy is a candidate and the smallest name wins as usual: `U1A-...` for letters.
 - cuprite_wire keeps one pin per pad with the **lowest** unit of a repeated pin

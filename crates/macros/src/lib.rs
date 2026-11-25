@@ -1,8 +1,9 @@
-//! Procedural macros generating cuprite_wire parts from KiCad libraries and SPICE models.
+//! Procedural macros generating cuprite_wire parts from KiCad libraries, SPICE models and IBIS
+//! files.
 //!
 //! Use them through the `cuprite_wire` crate (`cuprite_wire::kicad_part!`,
-//! `cuprite_wire::spice_part!`, `#[derive(cuprite_wire::subcircuit::Interface)]`), which documents
-//! them.
+//! `cuprite_wire::spice_part!`, `cuprite_wire::ibis_part!` with the feature `ibis`,
+//! `#[derive(cuprite_wire::subcircuit::Interface)]`), which documents them.
 
 mod ibis;
 mod input;

@@ -67,5 +67,6 @@ RUN \
   && \
   rustup toolchain install nightly --profile minimal && \
   rm -rf "$CARGO_HOME/registry"
-# To deny claude from writing to the cargo config
+# Keep the cargo config read-only for sandboxed tools (e.g. Claude Code): an existing file
+# can be protected, a missing one could be created.
 RUN touch "$CARGO_HOME/config.toml"

@@ -48,6 +48,9 @@ let simulation = deck.run_with(DeviceModels::new().with("mcu", &mut firmware))?;
   (`SharedNgspice::new(path).run_with(...)` for another library file) and returns the same
   `Simulation` as `run()`. Models are bound to devices by name. Every device needs a model and every
   model a device; a mismatch is `SimulationError::Cosimulation`.
+- `SimulationError::Cosimulation { reason, dir }` says what is wrong. Once the run has started,
+  the run directory is kept (with `deck.cir` to reproduce the run) and `dir` names it. This error
+  is reported even if ngspice failed too, since it usually explains the failure.
 
 ## 2. Writing a model
 
