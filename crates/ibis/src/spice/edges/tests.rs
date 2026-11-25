@@ -242,3 +242,18 @@ fn test_weights_follow_curves() {
     );
     assert_eq!(last[2].1, 1.0);
 }
+
+#[test]
+fn test_solve_pair() {
+    // ku + kd = 1 and ku - kd = 0.
+    assert_eq!(
+        solve_pair((1.0, 1.0, 1.0), (1.0, -1.0, 0.0)),
+        Some((0.5, 0.5))
+    );
+    // Dependent rows, exactly or up to rounding: no solution rather than a huge one.
+    assert_eq!(solve_pair((1.0, 2.0, 1.0), (2.0, 4.0, 3.0)), None);
+    assert_eq!(solve_pair((1.0, 2.0, 1.0), (1.0, 2.0 + 1e-12, 3.0)), None);
+    assert_eq!(solve_pair((0.0, 0.0, 1.0), (0.0, 0.0, 1.0)), None);
+    assert_eq!(divide(1.0, 0.0), None);
+    assert_eq!(divide(1.0, 4.0), Some(0.25));
+}

@@ -67,14 +67,18 @@ impl Resolver {
         (self.env)(name).filter(|value| !value.is_empty())
     }
 
+    /// The overridden directory, else the first variable set, else `default`. Relative paths are
+    /// relative to the crate, as for the other paths (rustc runs elsewhere, and `include_bytes!`
+    /// of the tracking resolves them against the source file).
     fn dir(&mut self, overridden: Option<PathBuf>, envs: &[&str], default: &str) -> PathBuf {
-        match overridden {
-            Some(dir) => self.manifest_dir.join(dir),
+        let dir = match overridden {
+            Some(dir) => dir,
             None => envs
                 .iter()
                 .find_map(|env| self.var(env))
                 .map_or_else(|| PathBuf::from(default), PathBuf::from),
-        }
+        };
+        self.manifest_dir.join(dir)
     }
 
     pub fn symbol_dir(&mut self) -> PathBuf {
@@ -288,5 +292,10 @@ mod tests {
         });
         assert_eq!(resolver.symbol_dir(), PathBuf::from("/sym9"));
         assert_eq!(resolver.footprint_dir(), PathBuf::from("/fp10"));
+        // A relative directory in a variable is relative to the crate.
+        let mut resolver = Resolver::new("/crate", |name| {
+            (name == "KICAD10_SYMBOL_DIR").then(|| "libs/sym".into())
+        });
+        assert_eq!(resolver.symbol_dir(), PathBuf::from("/crate/libs/sym"));
     }
 }

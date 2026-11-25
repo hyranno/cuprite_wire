@@ -104,6 +104,15 @@ compared with KiCad's in the tests.
   precedence over the defaults too. `Input_ECL` and `I/O_ECL` get no default: versions 4.2 and 5.0
   give -1.475 V and -1.165 V, while 8.0 repeats 0.8 V and 2.0 V, which looks like a copying error.
   Differential types get none either (`vdiff` of `[Diff Pin]` replaces the thresholds).
+- **Upper-case scale suffixes are units.** The suffixes are case-sensitive (`T G M k m u n p f`),
+  and other trailing letters are units, so `1.0PF` reads as 1.0 (farad). KIBIS does the same
+  (`IbisParser::parseDouble` in `eeschema/sim/kibis/ibis_parser.cpp` of KiCad 10, read for reference
+  only: an unknown letter is ignored because files write `3.0V`), and the specification lists only
+  those suffixes. The parser follows KIBIS and does not warn: a warning would need a channel for
+  every number of the file, and `IbisFile::skipped` is for keywords that are not read.
+- **Nearly dependent waveforms.** Where the equations of the weights are dependent up to rounding
+  (relative determinant below `1e-9`), the weights keep their previous values, as where there is no
+  solution: the rounding error, clamped to 0..=1, made a weight jump between 0 and 1.
 - **XSPICE file references are absolute.** A file parameter of a code model in a copied `.subckt`
   (`sim_model: inline`) is made absolute, because ngspice opens it relative to its working directory (`doc/dev/spice_netlist_format.md`
   section 5).

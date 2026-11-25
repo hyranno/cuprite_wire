@@ -50,7 +50,7 @@ once.
 | `ibis` | an IBIS model replacing the symbol's `Sim.*` fields: `{ library, component, pin, model, diff, driver }` (feature `ibis`, section 4) | the `Sim.*` fields |
 | `sim_model` | `include` or `inline` (section 4) | `include` |
 | `fields` | `{ "MPN" => "..." }`: fields written to the footprint; not `Sim.*`, which come from the symbol, `sim` or `ibis` | none |
-| `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD10_SYMBOL_DIR`, else `$KICAD9_SYMBOL_DIR`, else `/usr/share/kicad/symbols` (and `FOOTPRINT` / `footprints`) |
+| `symbol_dir` / `footprint_dir` | library directories, relative to the crate (`CARGO_MANIFEST_DIR`) | `$KICAD10_SYMBOL_DIR`, else `$KICAD9_SYMBOL_DIR` (relative to the crate if relative), else `/usr/share/kicad/symbols` (and `FOOTPRINT` / `footprints`) |
 | `sim_library_dir` | base of relative `Sim.Library` / `sim` / `ibis` library paths, relative to the crate | the crate |
 
 A library nickname is the file name: `Library:Name` is the symbol `Name` in
@@ -284,6 +284,8 @@ let tx = McuTx::new(Corner::Typ, DigitalSequence::new(Level::Low).at(5e-9, Level
 
 - Every file read and environment variable consulted is tracked (`include_bytes!` / `option_env!`
   in the generated code), so changing a library or `KICAD10_SYMBOL_DIR` rebuilds the parts.
+  A file that does not exist cannot be tracked: after creating a library that was missing, touch
+  the source using the macro (or `cargo clean -p <crate>`) to rebuild.
 - Errors are compile errors pointing at the option concerned, e.g.:
 
   ```

@@ -186,7 +186,9 @@ fn expand(
     result: Result<PartDef, PartError>,
     resolver: &Resolver,
 ) -> TokenStream {
-    // Track what was read even when it failed, so fixing a library file triggers a rebuild.
+    // Track what was read even when it failed, so fixing a library file triggers a rebuild. A file
+    // that does not exist cannot be tracked (`include_bytes!` fails, and stable Rust has no other
+    // way), so creating it does not: the source has to be touched.
     let tracking = tracking(resolver);
     match result {
         Ok(part) => generate(header, &part, tracking),
@@ -199,6 +201,7 @@ fn expand(
 }
 
 /// Makes the compiler rebuild when a file read or an environment variable consulted changes.
+/// Files that do not exist are left out (see [`expand`]).
 fn tracking(resolver: &Resolver) -> TokenStream {
     let files = resolver
         .files

@@ -154,7 +154,9 @@ from what the library (and the files it includes) uses, and record it in the ele
 
 - `dialect: auto` (default) chooses `pspice` if the library has PSpice constructs (`IF(`, `&`, `|`,
   `STP(`, `LIMIT(`, `.LIB file`), `ltspice` for `uplim(` / `dnlim(`, and `ngspice` otherwise;
-  both kinds are an error. The documentation of the generated type says what was found.
+  both kinds are an error. Only the model, the definitions it uses and the lines outside any
+  definition (of the sections read) count: ngspice translates a definition only when it is used,
+  so a library of many models may mix dialects. The documentation of the generated type says what was found.
   Give the dialect explicitly to override a wrong guess.
 - `.LIB file` in a library read with `sim_model: include` needs `dialect: pspice`; a library using
   `.lib file section` cannot be included in the PSpice mode (use `sim_model: inline`).

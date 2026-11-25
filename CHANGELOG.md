@@ -171,6 +171,18 @@ break the API).
   the first keyword"); the mark is skipped.
 - `cuprite_wire_embedded_hal`: the first `toggle` of an output pin not yet set left it low (the
   default `toggle` of embedded-hal sets a pin that is not set low to low); it drives it high.
+- `kicad_part!`: a relative directory in `KICAD10_SYMBOL_DIR` etc. was read relative to the
+  directory rustc runs in, while the rebuild tracking took it relative to the source file; it is
+  relative to the crate, like the other paths.
+- `dialect: auto` of `spice_part!` and the `sim` block chose the dialect from the constructs of the
+  whole library, so an unrelated subcircuit with `IF(` put a model in PSpice mode (or made it an
+  error next to one with `uplim(`). Only the model, the definitions it uses and the lines outside
+  any definition count.
+- `kicad_part!` limits what a broken library can make it do: a stacked pin number of more than
+  10000 pads (`[1-99999999]`) and lists nested more than 512 deep are errors instead of running
+  out of memory or stack.
+- `cuprite_wire_ibis`: where the equations of the weights of two waveforms were dependent up to
+  rounding, a weight could jump between 0 and 1; it keeps its previous value.
 
 ## [0.3.0] - 2026-11-22
 
