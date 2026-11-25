@@ -84,10 +84,15 @@ version" means a minor bump.
 - **Tag push**: a tag ruleset restricts tag creation, and the required status checks rejected
   the first push. The user pushes the tag.
 - **A crate never published before**: crates.io trusted publishing cannot do the first publish
-  (403), so `cargo publish --workspace` fails midway and the GitHub release job does not run.
-  Have the user publish the new crate manually first (`cargo publish -p <crate>` with their API
-  token) and configure its trusted publisher on crates.io; if needed, create the release by hand:
-  `gh release create vX.Y.Z --verify-tag --generate-notes`.
+  (403). Before pushing the tag, have the user publish the new crate by hand from the release
+  commit (`cargo publish -p <crate>` with their API token, scope `publish-new`) and configure its
+  trusted publisher on crates.io (repository `hyranno/cuprite_wire`, workflow `release.yml`,
+  and environment `crates-io` as the other crates). The workflow skips versions already on
+  crates.io and publishes the rest. Do not have the user publish the other crates by hand: they accept only trusted
+  publishing (403 "New versions of this crate can only be published using Trusted Publishing").
+- **Retrying a failed release**: re-running the failed job uses the workflow of the tag, so fix
+  the cause on `main` and run the workflow by hand: `gh workflow run release.yml -f tag=vX.Y.Z`.
+  It skips the CI jobs and the versions already on crates.io, and then creates the GitHub release.
 - **Workflow changes**: commits that change `.github/workflows/` cannot be pushed with Claude's
   token (no workflow scope). Commit on a separate branch, ask the user to push it, and open the
   PR yourself (creating the PR needs no workflow scope). Give `gh pr create` an explicit
