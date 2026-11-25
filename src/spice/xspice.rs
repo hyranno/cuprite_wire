@@ -237,7 +237,7 @@ impl Part for DCosim {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let (name, text) = self.subcircuit();
-        Some(subcircuit_part(self.pin_ids(), name, text))
+        Some(subcircuit_part(self.pin_ids(), name, text, []))
     }
 }
 

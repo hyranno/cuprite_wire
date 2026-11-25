@@ -72,25 +72,44 @@ pub(crate) fn subcircuit_text(name: &str, ports: &[&str], body: &str) -> String 
     format!("{header} {SUBCIRCUIT_REFERENCE}\n{body}.ends {name}\n")
 }
 
-/// The name `cuprite_<prefix>_<hash>` and the definition ([`subcircuit_text`]) of a subcircuit.
-/// The name is derived from the definition, so equal parts share one definition.
-pub(crate) fn hashed_subcircuit(prefix: &str, ports: &[&str], body: &str) -> (String, String) {
-    let hash = fnv1a(subcircuit_text("", ports, body).as_bytes());
+/// A definition named after itself: `define` writes it with a name, first with an empty one to
+/// hash, then with `cuprite_<prefix>_<hash>`, so equal definitions share one name. Returns the
+/// name and the second definition; `text` gives the text of a definition.
+pub(crate) fn hashed_definition<T, E>(
+    prefix: &str,
+    define: impl Fn(&str) -> Result<T, E>,
+    text: impl Fn(&T) -> &str,
+) -> Result<(String, T), E> {
+    let hash = fnv1a(text(&define("")?).as_bytes());
     let name = format!("cuprite_{prefix}_{hash:016x}");
-    let text = subcircuit_text(&name, ports, body);
-    (name, text)
+    let definition = define(&name)?;
+    Ok((name, definition))
+}
+
+/// The name `cuprite_<prefix>_<hash>` and the definition ([`subcircuit_text`]) of a subcircuit
+/// ([`hashed_definition`]).
+pub(crate) fn hashed_subcircuit(prefix: &str, ports: &[&str], body: &str) -> (String, String) {
+    let Ok(subcircuit) = hashed_definition(
+        prefix,
+        |name| Ok::<_, std::convert::Infallible>(subcircuit_text(name, ports, body)),
+        String::as_str,
+    );
+    subcircuit
 }
 
 /// The SPICE information of a part written as the subcircuit `name` defined by `text`, with the
-/// part's pins `pins` as its nodes.
+/// part's pins `pins` as its nodes, and the models `models` that the definition uses.
 pub(crate) fn subcircuit_part<S: Into<String>>(
     pins: impl IntoIterator<Item = S>,
     name: String,
     text: String,
+    models: impl IntoIterator<Item = ModelSource>,
 ) -> SpicePartInfo {
-    SpicePartInfo::element(
-        SpiceElement::new('X', pins, name.clone()).with_model(ModelSource::inline(name, text)),
-    )
+    let element = models.into_iter().fold(
+        SpiceElement::new('X', pins, name.clone()),
+        SpiceElement::with_model,
+    );
+    SpicePartInfo::element(element.with_model(ModelSource::inline(name, text)))
 }
 
 #[cfg(test)]

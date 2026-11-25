@@ -29,7 +29,7 @@ pub use subcircuit::check_subcircuit;
 use crate::{
     error::{CircuitWarningKind, Diagnostic, write_lines},
     naming::case_insensitive_duplicates,
-    netlist::{Net, Netlist},
+    netlist::{Net, Netlist, PinlessNet},
     parts::PinType,
     trace::Trace,
 };
@@ -622,7 +622,7 @@ impl Netlist {
                     ErcViolationKind::VirtualPinDangling { name: name.clone() },
                 ),
             };
-            if allows(&net.marks, rule) {
+            if net.allows(rule) {
                 continue;
             }
             report.push(
@@ -665,7 +665,7 @@ impl Netlist {
                 }
                 CircuitWarningKind::LabelOnlyNet { names } => {
                     let net = self.pinless_nets.iter().find(|net| &net.names == names);
-                    if net.is_some_and(|net| allows(&net.marks, ErcRule::LabelOnlyNet)) {
+                    if net.is_some_and(|net| net.allows(ErcRule::LabelOnlyNet)) {
                         continue;
                     }
                     ErcRule::LabelOnlyNet
@@ -801,14 +801,23 @@ fn is_ground_name(name: &str) -> bool {
         || upper == "VSSA"
 }
 
-/// Whether `marks` has an [`ErcMark::Allow`] mark for `rule`.
-fn allows(marks: &[NodeMark], rule: ErcRule) -> bool {
-    marks.iter().any(|mark| mark.mark == ErcMark::Allow(rule))
-}
-
 impl Net {
     /// Whether the net has an [`ErcMark::Allow`] mark for `rule`.
     fn allows(&self, rule: ErcRule) -> bool {
-        allows(&self.marks, rule)
+        self.marks.iter().any(|mark| mark.allows(rule))
+    }
+}
+
+impl PinlessNet {
+    /// Whether the net has an [`ErcMark::Allow`] mark for `rule`.
+    fn allows(&self, rule: ErcRule) -> bool {
+        self.marks.iter().any(|mark| mark.allows(rule))
+    }
+}
+
+impl NodeMark {
+    /// Whether this is an [`ErcMark::Allow`] mark for `rule`.
+    fn allows(&self, rule: ErcRule) -> bool {
+        self.mark == ErcMark::Allow(rule)
     }
 }

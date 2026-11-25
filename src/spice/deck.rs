@@ -29,9 +29,37 @@ pub struct SpiceDeck {
     netlist: SpiceNetlist,
     directives: Vec<String>,
     control: Vec<String>,
-    /// The identity of each typed analysis with the file `wrdata` writes its probes into
-    /// (`None` without probes).
-    analyses: Vec<(u64, Option<String>)>,
+    analyses: AnalysisFiles,
+}
+
+/// The typed analyses of a deck, each with the file `wrdata` writes its probes into.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct AnalysisFiles(
+    /// The identity of each analysis with its file (`None` without probes).
+    Vec<(u64, Option<String>)>,
+);
+
+impl AnalysisFiles {
+    /// Whether the deck has `analysis`.
+    pub(crate) fn contains(&self, analysis: &dyn AnalysisCommand) -> bool {
+        self.0.iter().any(|(id, _)| *id == analysis.id())
+    }
+
+    /// The file of the probes of `analysis`, or why there is none.
+    pub(crate) fn file(&self, analysis: &dyn AnalysisCommand) -> Result<&str, &'static str> {
+        self.0
+            .iter()
+            .find(|(id, _)| *id == analysis.id())
+            .ok_or("the deck did not have the analysis")?
+            .1
+            .as_deref()
+            .ok_or("the analysis has no probes")
+    }
+
+    /// Adds `analysis`, whose probes `wrdata` writes into `file`.
+    pub(crate) fn push(&mut self, analysis: &dyn AnalysisCommand, file: Option<String>) {
+        self.0.push((analysis.id(), file));
+    }
 }
 
 impl SpiceDeck {
@@ -41,7 +69,7 @@ impl SpiceDeck {
             netlist,
             directives: Vec::new(),
             control: Vec::new(),
-            analyses: Vec::new(),
+            analyses: AnalysisFiles::default(),
         }
     }
 
@@ -73,32 +101,23 @@ impl SpiceDeck {
     /// If the deck already has the analysis.
     pub fn analysis(mut self, analysis: &impl Analysis) -> Self {
         assert!(
-            self.analysis_file(analysis).is_none(),
+            !self.analyses.contains(analysis),
             "the deck already has the analysis {}",
             analysis.command()
         );
-        let file = format!("analysis{}.txt", self.analyses.len() + 1);
+        let file = format!("analysis{}.txt", self.analyses.0.len() + 1);
         self.control.push(analysis.command());
         let wrdata = wrdata_command(analysis, &file);
         let file = wrdata.map(|wrdata| {
             self.control.push(wrdata);
             file
         });
-        self.analyses.push((analysis.id(), file));
+        self.analyses.push(analysis, file);
         self
     }
 
-    /// The file `wrdata` writes the probes of `analysis` into: `None` if the deck does not have the
-    /// analysis, `Some(None)` if it has no probes.
-    pub(crate) fn analysis_file(&self, analysis: &dyn AnalysisCommand) -> Option<Option<&str>> {
-        self.analyses
-            .iter()
-            .find(|(id, _)| *id == analysis.id())
-            .map(|(_, file)| file.as_deref())
-    }
-
-    /// The typed analyses with their output files, as [`Self::analysis_file`].
-    pub(crate) fn analyses(&self) -> &[(u64, Option<String>)] {
+    /// The typed analyses with their output files.
+    pub(crate) fn analyses(&self) -> &AnalysisFiles {
         &self.analyses
     }
 

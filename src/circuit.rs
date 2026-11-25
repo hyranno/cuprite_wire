@@ -19,8 +19,8 @@ use crate::{
     erc::{ErcMark, ErcRule, NodeMark},
     error::{CircuitError, CircuitErrorKind},
     naming::{
-        AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_base_name, check_explicit_name,
-        check_label_name, check_ref_prefix,
+        AUTO_NAME_SEPARATOR, HierPath, NetLabel, NodeLabel, check_instance_name, check_label_name,
+        check_ref_prefix,
     },
     parts::{Part, PartInstance, PinType},
     subcircuit::{BoundGenerator, Interface, IntoSubcircuit, SubcircuitInstance, interface_nodes},
@@ -90,6 +90,27 @@ pub(crate) struct NameRegistry {
     explicit_names: HashMap<String, Trace>,
 }
 
+/// Reports `name` as a [`CircuitErrorKind::InvalidName`] if `check` rejects it, and returns
+/// whether it is accepted.
+fn check_name(
+    name: &str,
+    check: fn(&str) -> Result<(), &'static str>,
+    trace: &Trace,
+    errors: &mut Vec<CircuitError>,
+) -> bool {
+    let result = check(name);
+    if let Err(reason) = result {
+        errors.push(CircuitError::new(
+            CircuitErrorKind::InvalidName {
+                name: name.to_string(),
+                reason,
+            },
+            trace.clone(),
+        ));
+    }
+    result.is_ok()
+}
+
 impl NameRegistry {
     fn assign(
         &mut self,
@@ -103,15 +124,10 @@ impl NameRegistry {
             *counter += 1;
             return format!("{base_name}{AUTO_NAME_SEPARATOR}{counter}");
         };
-        if let Err(reason) = check_explicit_name(name) {
-            errors.push(CircuitError::new(
-                CircuitErrorKind::InvalidName {
-                    name: name.to_string(),
-                    reason,
-                },
-                trace.clone(),
-            ));
-        } else if let Some(previous) = self.explicit_names.get(name) {
+        if !check_name(name, check_instance_name, trace, errors) {
+            return name.to_string();
+        }
+        if let Some(previous) = self.explicit_names.get(name) {
             errors.push(
                 CircuitError::new(
                     CircuitErrorKind::DuplicateInstanceName {
@@ -266,24 +282,6 @@ impl<B> CircuitBuilder<B> {
         }
     }
 
-    /// Reports `name` as a [`CircuitErrorKind::InvalidName`] if `check` rejects it.
-    fn check_name(
-        &mut self,
-        name: &str,
-        check: fn(&str) -> Result<(), &'static str>,
-        trace: Trace,
-    ) {
-        if let Err(reason) = check(name) {
-            self.errors.push(CircuitError::new(
-                CircuitErrorKind::InvalidName {
-                    name: name.to_string(),
-                    reason,
-                },
-                trace,
-            ));
-        }
-    }
-
     /// Gives a name to the net containing `node`.
     ///
     /// Nodes with the same global label, or with the same local label in the same
@@ -296,7 +294,7 @@ impl<B> CircuitBuilder<B> {
     pub fn label(&mut self, node: Node, label: NetLabel) {
         let location = Location::caller();
         let trace = Trace::new(location);
-        self.check_name(label.name(), check_label_name, trace.clone());
+        check_name(label.name(), check_label_name, &trace, &mut self.errors);
         let Some(node) = self.index_of(node, location) else {
             return;
         };
@@ -369,7 +367,12 @@ impl<B> CircuitBuilder<B> {
         let location = Location::caller();
         let (name, bound) = subcircuit.into_named_subcircuit();
         if name.is_none() {
-            self.check_name(&bound.base_name, check_base_name, Trace::new(location));
+            check_name(
+                &bound.base_name,
+                check_instance_name,
+                &Trace::new(location),
+                &mut self.errors,
+            );
         }
         let name = self.subcircuit_names.assign(
             name.as_deref(),
@@ -399,7 +402,7 @@ impl<B> CircuitBuilder<B> {
         let (name, part) = part.into_named_part();
         let trace = Trace::new(Location::caller());
         let prefix = part.ref_prefix();
-        self.check_name(&prefix, check_ref_prefix, trace.clone());
+        check_name(&prefix, check_ref_prefix, &trace, &mut self.errors);
         let name = self
             .part_names
             .assign(name.as_deref(), &prefix, &trace, &mut self.errors);
@@ -419,7 +422,7 @@ impl<B> CircuitBuilder<B> {
         }
         // Unknown pin IDs are skipped here too.
         for (pin, name) in part.global_labels() {
-            self.check_name(&name, check_label_name, trace.clone());
+            check_name(&name, check_label_name, &trace, &mut self.errors);
             if let Some(&node) = pin_mapping.get(&pin) {
                 self.nets[node].labels.push(NodeLabel {
                     label: NetLabel::Global(name),

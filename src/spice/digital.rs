@@ -116,7 +116,7 @@ impl Part for DigitalDriver {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let (name, text) = self.subcircuit();
-        Some(subcircuit_part([Self::OUT, Self::GND], name, text))
+        Some(subcircuit_part([Self::OUT, Self::GND], name, text, []))
     }
 }
 
