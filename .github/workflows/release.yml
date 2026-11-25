@@ -2,27 +2,42 @@ name: Release
 
 # Pushing a tag `vX.Y.Z` publishes the crates of the workspace to crates.io and then creates the
 # GitHub release, so a release exists only for versions that were published.
+#
+# Crates whose version is already on crates.io are skipped: a crate published for the first time
+# by hand (trusted publishing cannot do the first publish), or the crates published before a
+# failure. To retry a failed release, run this workflow by hand with the tag
+# (`gh workflow run release.yml -f tag=vX.Y.Z`); it publishes the crates of the tag that are not
+# on crates.io yet, with this version of the workflow.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to release (vX.Y.Z), already pushed"
+        required: true
 
 permissions:
   contents: read
 
-concurrency:
-  group: publish-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   CARGO_TERM_COLOR: always
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+concurrency:
+  group: publish-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   ci:
+    # A retry skips the checks, which the tag passed in the run that failed.
+    if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
 
   publish:
     name: publish to crates.io
     needs: ci
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: ubuntu-latest
     container: rust:trixie
     environment: crates-io
@@ -33,29 +48,51 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: refs/tags/${{ env.TAG }}
           persist-credentials: false
       - name: Check that the tag matches the version
         run: |
           pkgid="$(cargo pkgid -p cuprite_wire)"
           version="${pkgid##*[#@]}"
-          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} does not match the version ${version} in Cargo.toml"
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "::error::tag ${TAG} does not match the version ${version} in Cargo.toml"
             exit 1
           fi
       - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: auth
-      # Publishes the crates in dependency order.
-      - run: cargo publish --workspace
+      # Publishes the crates in dependency order, skipping the versions already on crates.io
+      # (looked up in the sparse index; `cargo publish` fails on them).
+      - name: Publish the crates not on crates.io yet
+        run: |
+          excludes=""
+          for member in $(cargo tree --workspace --depth 0 --prefix none -e normal | awk 'NF { print $1 "@" substr($2, 2) }'); do
+            name="${member%@*}"
+            version="${member#*@}"
+            lower="$(printf %s "${name}" | tr '[:upper:]' '[:lower:]')"
+            case ${#lower} in
+              1) path="1/${lower}" ;;
+              2) path="2/${lower}" ;;
+              3) path="3/$(printf %s "${lower}" | cut -c1)/${lower}" ;;
+              *) path="$(printf %s "${lower}" | cut -c1-2)/$(printf %s "${lower}" | cut -c3-4)/${lower}" ;;
+            esac
+            if curl -sSf "https://index.crates.io/${path}" 2>/dev/null | grep -q "\"vers\":\"${version}\""; then
+              echo "${name} ${version} is already on crates.io"
+              excludes="${excludes} --exclude ${name}"
+            fi
+          done
+          cargo publish --workspace ${excludes}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   github-release:
     name: GitHub release
     needs: publish
+    # `needs.publish` alone: a skipped `ci` (a retry) would skip this job too.
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - run: gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
+      - run: gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
