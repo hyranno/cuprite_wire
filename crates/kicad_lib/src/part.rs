@@ -422,12 +422,6 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
 /// it as KiCad writes it.
 fn ibis_fields(def: &IbisDef) -> Vec<(String, String)> {
     let source = &def.source;
-    let pins: Vec<String> = def
-        .nodes
-        .iter()
-        .zip(source.kicad_pins())
-        .map(|(pin, port)| format!("{pin}={port}"))
-        .collect();
     let mut fields = vec![
         ("Sim.Device", "IBIS".to_string()),
         (
@@ -444,7 +438,10 @@ fn ibis_fields(def: &IbisDef) -> Vec<(String, String)> {
     if source.diff {
         fields.push(("Sim.Ibis.Diff", "1".to_string()));
     }
-    fields.push(("Sim.Pins", pins.join(" ")));
+    fields.push((
+        "Sim.Pins",
+        sim::assignments(def.nodes.iter().zip(source.kicad_pins())),
+    ));
     fields
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

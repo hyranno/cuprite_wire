@@ -99,14 +99,11 @@ impl Resolver {
 
     pub fn symbol_lib(&mut self, library: &str) -> Result<Arc<SymbolLib>, Error> {
         let path = self.symbol_dir().join(format!("{library}.kicad_sym"));
-        if !path.is_file() {
-            self.track(&path);
-            return Err(Error::new(format!(
-                "symbol library {library:?} not found ({})",
-                path.display()
-            )));
-        }
-        self.load(&path, utf8, SymbolLib::parse)
+        self.load(
+            &path,
+            || format!("symbol library {library:?}"),
+            |bytes| SymbolLib::parse(&utf8(bytes)?),
+        )
     }
 
     pub fn footprint(&mut self, library: &str, name: &str) -> Result<Arc<Footprint>, Error> {
@@ -114,18 +111,19 @@ impl Resolver {
             .footprint_dir()
             .join(format!("{library}.pretty"))
             .join(format!("{name}.kicad_mod"));
-        if !path.is_file() {
-            self.track(&path);
-            return Err(Error::new(format!(
-                "footprint {library}:{name} not found ({})",
-                path.display()
-            )));
-        }
-        self.load(&path, utf8, Footprint::parse)
+        self.load(
+            &path,
+            || format!("footprint {library}:{name}"),
+            |bytes| Footprint::parse(&utf8(bytes)?),
+        )
     }
 
     pub fn spice_lib(&mut self, path: &Path) -> Result<Arc<SpiceLib>, Error> {
-        self.load(path, |bytes| Ok(spice_lib::decode(bytes)), SpiceLib::parse)
+        self.load(
+            path,
+            || "SPICE library".to_string(),
+            |bytes| SpiceLib::parse(&spice_lib::decode(bytes)),
+        )
     }
 
     /// Reads an IBIS file. Bytes that are not UTF-8 (in the comments of some vendor files) are
@@ -133,8 +131,8 @@ impl Resolver {
     pub fn ibis_file(&mut self, path: &Path) -> Result<Arc<IbisFile>, Error> {
         self.load(
             path,
-            |bytes| Ok(String::from_utf8_lossy(&bytes).into_owned()),
-            |text| cuprite_wire_ibis::parse(text).map_err(|e| Error::new(e.to_string())),
+            || "IBIS file".to_string(),
+            |bytes| cuprite_wire_ibis::parse_bytes(&bytes).map_err(|e| Error::new(e.to_string())),
         )
     }
 
@@ -167,14 +165,22 @@ impl Resolver {
         })
     }
 
+    /// Reads and parses the file (`what`, for the error if it does not exist), and tracks it.
     fn load<T: Send + Sync + 'static>(
         &mut self,
         path: &Path,
-        decode: fn(Vec<u8>) -> Result<String, Error>,
-        parse: impl FnOnce(&str) -> Result<T, Error>,
+        what: impl FnOnce() -> String,
+        parse: impl FnOnce(Vec<u8>) -> Result<T, Error>,
     ) -> Result<Arc<T>, Error> {
         let path = self.track(path);
-        cached(&path, decode, parse).map_err(|e| e.context(path.display()))
+        if !path.is_file() {
+            return Err(Error::new(format!(
+                "{} not found ({})",
+                what(),
+                path.display()
+            )));
+        }
+        cached(&path, parse).map_err(|e| e.context(path.display()))
     }
 
     pub(crate) fn track(&mut self, path: &Path) -> PathBuf {
@@ -213,8 +219,7 @@ type Entry = (SystemTime, u64, Arc<dyn std::any::Any + Send + Sync>);
 /// the process may outlive edits to the file (e.g. in rust-analyzer).
 fn cached<T: Send + Sync + 'static>(
     path: &Path,
-    decode: fn(Vec<u8>) -> Result<String, Error>,
-    parse: impl FnOnce(&str) -> Result<T, Error>,
+    parse: impl FnOnce(Vec<u8>) -> Result<T, Error>,
 ) -> Result<Arc<T>, Error> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, Entry>>> = OnceLock::new();
     let cache = CACHE.get_or_init(Default::default);
@@ -230,7 +235,7 @@ fn cached<T: Send + Sync + 'static>(
         return Ok(value);
     }
     let bytes = std::fs::read(path).map_err(|e| Error::new(e.to_string()))?;
-    let value = Arc::new(parse(&decode(bytes)?)?);
+    let value = Arc::new(parse(bytes)?);
     cache
         .lock()
         .unwrap()

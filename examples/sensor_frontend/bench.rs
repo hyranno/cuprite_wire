@@ -2,18 +2,14 @@
 
 use cuprite_wire::{
     circuit::{CircuitBuilder, Named, Node},
+    erc::{ErcSettings, check_subcircuit},
     naming::NetLabel,
+    parts::PinType,
     spice::{IndependentSource, Simulation, SpiceDeck},
+    subcircuit::{IntoSubcircuit, SubcircuitGenerator},
 };
 
-/// The nodes of a signal stage (the preamp, the filter) for [`Bench::stage`].
-pub struct StageNodes {
-    pub input: Node,
-    pub vref: Node,
-    pub vcc: Node,
-    pub gnd: Node,
-    pub output: Node,
-}
+use crate::stage::StagePorts;
 
 pub struct Bench {
     pub circuit: CircuitBuilder,
@@ -45,20 +41,20 @@ impl Bench {
     }
 
     /// A signal stage on a 5 V supply with an ideal 2.5 V reference, driven by `input`, with its
-    /// output probed as `OUT`. `instantiate` adds the stage and returns its nodes.
-    pub fn stage(
+    /// output probed as `OUT`.
+    pub fn stage<S: IntoSubcircuit<(), Interface = StagePorts>>(
+        stage: S,
         input: IndependentSource,
-        instantiate: impl FnOnce(&mut CircuitBuilder) -> StageNodes,
     ) -> Self {
         let mut bench = Self::new(IndependentSource::voltage(5.0));
-        let nodes = instantiate(&mut bench.circuit);
-        bench.circuit.connect(nodes.vcc, bench.vcc);
-        bench.circuit.connect(nodes.gnd, bench.gnd);
+        let ports = bench.circuit.instantiate_subcircuit(stage);
+        bench.circuit.connect(ports.vcc, bench.vcc);
+        bench.circuit.connect(ports.gnd, bench.gnd);
         let vref = bench.source("vref", IndependentSource::voltage(2.5));
-        bench.circuit.connect(nodes.vref, vref);
+        bench.circuit.connect(ports.vref, vref);
         let input = bench.source("input", input);
-        bench.circuit.connect(nodes.input, input);
-        bench.probe(nodes.output, "OUT");
+        bench.circuit.connect(ports.input, input);
+        bench.probe(ports.output, "OUT");
         bench
     }
 
@@ -77,6 +73,21 @@ impl Bench {
     pub fn simulate<S: Into<String>>(&self, commands: impl IntoIterator<Item = S>) -> Simulation {
         run(&self.deck().control(commands))
     }
+}
+
+/// Checks a signal stage with ERC, its input and reference driven and its output read.
+#[track_caller]
+pub fn check_stage<G: SubcircuitGenerator<Options = (), Interface = StagePorts>>(stage: &G) {
+    let ports = StagePorts {
+        input: Some(PinType::Output),
+        vref: Some(PinType::Output),
+        vcc: Some(PinType::PowerOut),
+        gnd: Some(PinType::PowerOut),
+        output: Some(PinType::Input),
+    };
+    check_subcircuit(stage, &(), &ports, &ErcSettings::default())
+        .unwrap()
+        .assert_clean();
 }
 
 /// Runs `deck`; panics with the log on failure.

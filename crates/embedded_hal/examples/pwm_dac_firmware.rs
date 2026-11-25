@@ -11,7 +11,6 @@
 #[path = "../../../examples/common/pwm_dac.rs"]
 mod pwm_dac;
 
-use cuprite_wire::spice::cosim::DeviceModels;
 use cuprite_wire_embedded_hal::{AdcChannel, AdcPin, Board, Firmware, PwmChannel};
 use pwm_dac::bench;
 
@@ -74,13 +73,7 @@ fn run(stop: f64) -> Result<(Regulated, f64), Box<dyn std::error::Error>> {
     let board = Board::new();
     let regulator = Regulator::new(board.pwm("pwm", 10e-6, 1000), board.adc("adc", 12, 3.3));
     let mut mcu = Firmware::new(&board, 20e-6, regulator, Regulator::step);
-    let bench = bench(stop)?;
-    let sim = bench
-        .deck
-        .run_with(DeviceModels::new().with("mcu", &mut mcu))?;
-    let tran = sim.result(&bench.tran)?;
-    let end = *tran.scale().last().ok_or("no time points")?;
-    let out = tran.interpolate(&bench.out, end)?.ok_or("no OUT")?;
+    let (_, out) = bench(stop)?.run(&mut mcu)?;
     Ok((mcu.into_task(), out))
 }
 

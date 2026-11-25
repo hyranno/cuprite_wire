@@ -32,6 +32,16 @@ pub fn parse(text: &str) -> Result<IbisFile, Error> {
     parser.finish(comment_char)
 }
 
+/// Reads the bytes of an IBIS file, as [`parse`]. Bytes that are not UTF-8 (in the comments of
+/// some vendor files) are replaced.
+///
+/// # Errors
+///
+/// As [`parse`].
+pub fn parse_bytes(bytes: &[u8]) -> Result<IbisFile, Error> {
+    parse(&String::from_utf8_lossy(bytes))
+}
+
 /// Where the keywords belong.
 #[derive(Clone, Copy)]
 enum Context {
@@ -222,17 +232,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn skip(&mut self, b: &Block) {
+    fn skip(&mut self, at: &impl Located) {
         self.skipped.push(Skipped {
-            name: b.keyword.clone(),
-            line: b.line,
-        });
-    }
-
-    fn skip_subparam(&mut self, s: &Subparam) {
-        self.skipped.push(Skipped {
-            name: s.name.clone(),
-            line: s.line,
+            name: at.written().to_string(),
+            line: at.line(),
         });
     }
 
@@ -250,12 +253,12 @@ impl<'a> Parser<'a> {
                         "l_pkg" => &mut package.l_pkg,
                         "c_pkg" => &mut package.c_pkg,
                         _ => {
-                            self.skip_subparam(&s);
+                            self.skip(&s);
                             continue;
                         }
                     };
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_optional)?;
-                    set_subparam(field, &s, value)?;
+                    set_once(field, &s, value)?;
                 }
                 self.components[c].package = package;
                 Ok(())
@@ -467,7 +470,7 @@ impl<'a> Parser<'a> {
                     let t = ModelType::from_name(value).ok_or_else(|| {
                         Error::new(s.line, format!("unknown Model_type `{value}`"))
                     })?;
-                    set_subparam(&mut model_type, &s, t)?;
+                    set_once(&mut model_type, &s, t)?;
                 }
                 "polarity" => {
                     let p = match s.single()?.to_ascii_lowercase().as_str() {
@@ -477,7 +480,7 @@ impl<'a> Parser<'a> {
                             return Err(Error::new(s.line, format!("unknown Polarity `{other}`")));
                         }
                     };
-                    set_subparam(&mut model.polarity, &s, p)?;
+                    set_once(&mut model.polarity, &s, p)?;
                 }
                 "enable" => {
                     let e = match s.single()?.to_ascii_lowercase().as_str() {
@@ -487,7 +490,7 @@ impl<'a> Parser<'a> {
                             return Err(Error::new(s.line, format!("unknown Enable `{other}`")));
                         }
                     };
-                    set_subparam(&mut model.enable, &s, e)?;
+                    set_once(&mut model.enable, &s, e)?;
                 }
                 "vinl" | "vinh" | "vmeas" | "vref" | "cref" | "rref" => {
                     let field = match lower.as_str() {
@@ -500,16 +503,16 @@ impl<'a> Parser<'a> {
                     };
                     let value = s.single()?;
                     let v = parse_number(value).ok_or_else(|| s.invalid(value))?;
-                    set_subparam(field, &s, v)?;
+                    set_once(field, &s, v)?;
                 }
                 "c_comp" => {
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_optional)?;
-                    set_subparam(&mut model.c_comp, &s, value)?;
+                    set_once(&mut model.c_comp, &s, value)?;
                 }
                 "c_comp_pullup" | "c_comp_pulldown" | "c_comp_power_clamp" | "c_comp_gnd_clamp" => {
                     c_comp_parts.push(typ_min_max(&s.values, s.line, &s.name, parse_optional)?);
                 }
-                _ => self.skip_subparam(&s),
+                _ => self.skip(&s),
             }
         }
         if model.c_comp.is_none() && !c_comp_parts.is_empty() {
@@ -560,12 +563,12 @@ impl<'a> Parser<'a> {
                         "vinl" => &mut spec.vinl,
                         "vinh" => &mut spec.vinh,
                         _ => {
-                            self.skip_subparam(&s);
+                            self.skip(&s);
                             continue;
                         }
                     };
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_optional)?;
-                    set_subparam(field, &s, value)?;
+                    set_once(field, &s, value)?;
                 }
                 if self.models[m].model_spec != ModelSpec::default() {
                     return Err(Error::new(b.line, format!("duplicate {}", b.keyword)));
@@ -584,11 +587,7 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 // The ranges, references and terminations: three columns after the keyword.
-                let values: Vec<_> = b
-                    .args
-                    .split_whitespace()
-                    .chain(b.body.iter().flat_map(Line::tokens))
-                    .collect();
+                let values = values(b);
                 let value = typ_min_max(&values, b.line, &b.keyword, parse_optional)?;
                 let model = &mut self.models[m];
                 let field = match name {
@@ -631,11 +630,7 @@ impl<'a> Parser<'a> {
                 return Ok(());
             }
         };
-        let values: Vec<_> = b
-            .args
-            .split_whitespace()
-            .chain(b.body.iter().flat_map(Line::tokens))
-            .collect();
+        let values = values(b);
         let value = typ_min_max(&values, b.line, &b.keyword, parse_optional)?;
         set_once(field, b, value)
     }
@@ -646,18 +641,18 @@ impl<'a> Parser<'a> {
             match s.name.to_ascii_lowercase().as_str() {
                 "dv/dt_r" => {
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_slope)?;
-                    set_subparam(&mut rise, &s, value)?;
+                    set_once(&mut rise, &s, value)?;
                 }
                 "dv/dt_f" => {
                     let value = typ_min_max(&s.values, s.line, &s.name, parse_slope)?;
-                    set_subparam(&mut fall, &s, value)?;
+                    set_once(&mut fall, &s, value)?;
                 }
                 "r_load" => {
                     let value = s.single()?;
                     let r = parse_number(value).ok_or_else(|| s.invalid(value))?;
-                    set_subparam(&mut r_load, &s, r)?;
+                    set_once(&mut r_load, &s, r)?;
                 }
-                _ => self.skip_subparam(&s),
+                _ => self.skip(&s),
             }
         }
         match (rise, fall) {
@@ -695,13 +690,13 @@ impl Parser<'_> {
                 "l_dut" => &mut optional[3],
                 "c_dut" => &mut optional[4],
                 _ => {
-                    self.skip_subparam(&s);
+                    self.skip(&s);
                     continue;
                 }
             };
             let value = s.single()?;
             let v = parse_number(value).ok_or_else(|| s.invalid(value))?;
-            set_subparam(field, &s, v)?;
+            set_once(field, &s, v)?;
         }
         let missing = |what: &str| Error::new(b.line, format!("{} needs {what}", b.keyword));
         let r_fixture = r_fixture.ok_or_else(|| missing("R_fixture"))?;
@@ -914,20 +909,45 @@ fn append(field: &mut Option<String>, text: String) {
     }
 }
 
-fn set_once<T>(field: &mut Option<T>, b: &Block, value: T) -> Result<(), Error> {
+/// A keyword or a subparameter, as errors and [`Skipped`] name it.
+trait Located {
+    fn line(&self) -> usize;
+    /// The keyword or the name, as written.
+    fn written(&self) -> &str;
+}
+
+impl Located for Block {
+    fn line(&self) -> usize {
+        self.line
+    }
+    fn written(&self) -> &str {
+        &self.keyword
+    }
+}
+
+impl Located for Subparam {
+    fn line(&self) -> usize {
+        self.line
+    }
+    fn written(&self) -> &str {
+        &self.name
+    }
+}
+
+fn set_once<T>(field: &mut Option<T>, at: &impl Located, value: T) -> Result<(), Error> {
     if field.is_some() {
-        return Err(Error::new(b.line, format!("duplicate {}", b.keyword)));
+        return Err(Error::new(at.line(), format!("duplicate {}", at.written())));
     }
     *field = Some(value);
     Ok(())
 }
 
-fn set_subparam<T>(field: &mut Option<T>, s: &Subparam, value: T) -> Result<(), Error> {
-    if field.is_some() {
-        return Err(Error::new(s.line, format!("duplicate {}", s.name)));
-    }
-    *field = Some(value);
-    Ok(())
+/// The values after the keyword and on the following lines.
+fn values(b: &Block) -> Vec<&str> {
+    b.args
+        .split_whitespace()
+        .chain(b.body.iter().flat_map(Line::tokens))
+        .collect()
 }
 
 /// The typical value, optionally followed by the minimum and the maximum (which may be `NA`).

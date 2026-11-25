@@ -129,7 +129,7 @@ pub fn read_file(path: impl AsRef<Path>) -> Result<IbisFile, IbisBufferError> {
         message,
     };
     let bytes = std::fs::read(path).map_err(|e| error(e.to_string()))?;
-    cuprite_wire_ibis::parse(&String::from_utf8_lossy(&bytes)).map_err(|e| error(e.to_string()))
+    cuprite_wire_ibis::parse_bytes(&bytes).map_err(|e| error(e.to_string()))
 }
 
 /// An IBIS `[Model]` with the package parasitics of a pin, at a corner, ready to simulate.
