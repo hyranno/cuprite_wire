@@ -18,9 +18,9 @@ the PR; the user merges it and pushes the tag.
    previous release and check that every removed or changed item is under a Breaking/Changed
    entry (see "Public API diff" and "Semver checks" below). Pick the version: before 1.0, a
    breaking change bumps the minor version.
-2. **Bump the version** in the root `Cargo.toml`: `workspace.package.version` and the three
-   `workspace.dependencies` entries (`cuprite_wire`, `cuprite_wire_kicad_lib`,
-   `cuprite_wire_macros`). Then `cargo update --workspace` to update `Cargo.lock`.
+2. **Bump the version** in the root `Cargo.toml`: `workspace.package.version` and the four
+   `workspace.dependencies` entries (`cuprite_wire`, `cuprite_wire_ibis`,
+   `cuprite_wire_kicad_lib`, `cuprite_wire_macros`). Then `cargo update --workspace` to update `Cargo.lock`.
 3. **Regenerate the goldens**, which contain `(tool "cuprite_wire X.Y.Z")`:
    ```bash
    UPDATE_GOLDEN=1 cargo test --workspace
@@ -31,7 +31,7 @@ the PR; the user merges it and pushes the tag.
    `[Unreleased]` above it, and update the comparison links at the bottom
    (`[Unreleased]: .../compare/vX.Y.Z...HEAD`, `[X.Y.Z]: .../compare/vPREV...vX.Y.Z`).
 5. **Check the packages** (see "`cargo package`" below) and the docs.rs rendering:
-   `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p cuprite_wire --features shared-ngspice --no-deps`
+   `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc -p cuprite_wire --features ibis,shared-ngspice --no-deps`
    (the settings of `[package.metadata.docs.rs]`; nightly is in the devcontainer).
 6. **Run the usual checks**: `cargo xtask all` (the checks of CI; the pre-push hook runs it
    too), and the tests with the vendor models, which CI does not run:

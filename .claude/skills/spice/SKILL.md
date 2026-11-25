@@ -5,7 +5,8 @@ description: Run and inspect SPICE simulations with ngspice in batch mode, and u
 
 # SPICE (ngspice) investigation
 
-ngspice 44.2 is the simulator KiCad uses (apt packages `ngspice` and `libngspice0`).
+ngspice 44.2 from Debian's apt packages (`ngspice` and `libngspice0`, installed in the
+devcontainer) is the simulator used here.
 
 ## Running
 
