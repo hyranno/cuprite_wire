@@ -58,7 +58,7 @@ error: `ibis` gives a model, so the part cannot be `spice: none` or `spice: excl
    |                ^^^^
 
 error: pin ID "library" would make the constant LIBRARY, which the part already has
-  --> tests/ui/ibis_sim.rs:87:15
+  --> tests/ui/ibis_sim.rs:87:17
    |
 87 |         pins: { "2" => "library" },
-   |               ^^^^^^^^^^^^^^^^^^^^
+   |                 ^^^^^^^^^^^^^^^^

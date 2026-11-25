@@ -76,6 +76,8 @@ pub struct BindingError {
     /// The index of the binding.
     pub element: usize,
     pub field: BindingField,
+    /// The index of the entry of the option (of `pins`, `unused` or `params`) the error is about.
+    pub entry: Option<usize>,
     pub error: Error,
 }
 
@@ -133,15 +135,13 @@ pub fn bind(
     let mut elements = Vec::new();
     let mut unused: Vec<String> = Vec::new();
     for (index, binding) in bindings.iter().enumerate() {
-        let at = |field| {
-            move |error| BindingError {
-                element: index,
-                field,
-                error,
-            }
-        };
         let (element, unmapped) =
-            bind_one(binding, options, resolver).map_err(|(field, e)| at(field)(e))?;
+            bind_one(binding, options, resolver).map_err(|e| BindingError {
+                element: index,
+                field: e.field,
+                entry: e.entry,
+                error: e.error,
+            })?;
         for pin in binding.unused.iter().chain(&unmapped) {
             if !unused.contains(pin) {
                 unused.push(pin.clone());
@@ -151,10 +151,13 @@ pub fn bind(
     }
     let mapped: BTreeSet<&String> = elements.iter().flat_map(|e| &e.nodes).collect();
     for (index, binding) in bindings.iter().enumerate() {
-        if let Some(pin) = binding.unused.iter().find(|pin| mapped.contains(pin)) {
+        if let Some((entry, pin)) =
+            (binding.unused.iter().enumerate()).find(|(_, pin)| mapped.contains(pin))
+        {
             return Err(BindingError {
                 element: index,
                 field: BindingField::Unused,
+                entry: Some(entry),
                 error: Error::new(format!(
                     "pin {pin:?} is mapped to a port, so it cannot be unused"
                 )),
@@ -167,6 +170,7 @@ pub fn bind(
         let error = |message: String| BindingError {
             element: index,
             field: BindingField::Suffix,
+            entry: None,
             error: Error::new(message),
         };
         crate::naming::check_element_suffix(suffix).map_err(error)?;
@@ -204,6 +208,7 @@ pub fn bind(
             return Err(BindingError {
                 element: 0,
                 field: BindingField::Pins,
+                entry: None,
                 error: Error::new(message),
             });
         }
@@ -214,10 +219,35 @@ pub fn bind(
     })
 }
 
-type FieldError = (BindingField, Error);
+/// An error about an option of a binding, and the entry of the option it is about, if one.
+#[derive(Debug)]
+pub(crate) struct FieldError {
+    pub(crate) field: BindingField,
+    pub(crate) entry: Option<usize>,
+    pub(crate) error: Error,
+}
+
+impl From<(BindingField, Error)> for FieldError {
+    fn from((field, error): (BindingField, Error)) -> Self {
+        FieldError {
+            field,
+            entry: None,
+            error,
+        }
+    }
+}
 
 fn fail(field: BindingField, message: String) -> FieldError {
-    (field, Error::new(message))
+    (field, Error::new(message)).into()
+}
+
+/// An error about the `entry`-th entry of the option `field`.
+fn fail_at(field: BindingField, entry: usize, message: String) -> FieldError {
+    FieldError {
+        field,
+        entry: Some(entry),
+        error: Error::new(message),
+    }
 }
 
 fn bind_one(
@@ -322,7 +352,7 @@ fn find_definition(
             lib.find_in(name, section.as_deref())
                 .map(|d| (d.clone(), file.clone()))
         })
-        .ok_or_else(|| (BindingField::Name, not_found(name, path, libs)))
+        .ok_or_else(|| (BindingField::Name, not_found(name, path, libs)).into())
 }
 
 /// A file named by a code model, resolved.
@@ -551,12 +581,12 @@ pub(crate) fn map_ports(
         }
     }
     let mut seen_pins = BTreeSet::new();
-    for (pin, port) in mapping {
+    for (entry, (pin, port)) in mapping.iter().enumerate() {
         if !part_pin(pin) {
-            return Err(fail(Pins, format!("the part has no pin {pin:?}")));
+            return Err(fail_at(Pins, entry, format!("the part has no pin {pin:?}")));
         }
         if !seen_pins.insert(pin) {
-            return Err(fail(Pins, format!("pin {pin:?} is mapped twice")));
+            return Err(fail_at(Pins, entry, format!("pin {pin:?} is mapped twice")));
         }
         // A port by name, or by its number (from 1) as KiCad also reads `Sim.Pins`.
         let index = ports
@@ -569,8 +599,9 @@ pub(crate) fn map_ports(
                     .map(|n| n - 1)
             })
             .ok_or_else(|| {
-                fail(
+                fail_at(
                     Pins,
+                    entry,
                     format!(
                         "{what} has no port {port:?}; its ports are {}",
                         ports.join(" ")
@@ -578,8 +609,9 @@ pub(crate) fn map_ports(
                 )
             })?;
         if let Some(other) = nodes[index].replace(pin.clone()) {
-            return Err(fail(
+            return Err(fail_at(
                 Pins,
+                entry,
                 format!(
                     "port {} is mapped twice (pins {other:?} and {pin:?})",
                     ports[index]
@@ -587,8 +619,12 @@ pub(crate) fn map_ports(
             ));
         }
     }
-    if let Some(pin) = unused.iter().find(|pin| !part_pin(pin)) {
-        return Err(fail(Unused, format!("the part has no pin {pin:?}")));
+    if let Some((entry, pin)) = unused.iter().enumerate().find(|(_, pin)| !part_pin(pin)) {
+        return Err(fail_at(
+            Unused,
+            entry,
+            format!("the part has no pin {pin:?}"),
+        ));
     }
     let unmapped_ports: Vec<&str> = ports
         .iter()
@@ -644,7 +680,8 @@ fn instance_args(
     }
     let mut args = name.to_string();
     let mut seen = BTreeSet::new();
-    for (name, value) in params {
+    for (entry, (name, value)) in params.iter().enumerate() {
+        let fail = |message| fail_at(BindingField::Params, entry, message);
         let defaults = &model.defaults;
         if !defaults.iter().any(|(p, _)| p.eq_ignore_ascii_case(name)) {
             let known: Vec<String> = defaults.iter().map(|(p, v)| format!("{p}={v}")).collect();
@@ -660,7 +697,11 @@ fn instance_args(
         if !seen.insert(name.to_ascii_lowercase()) {
             return Err(fail(format!("parameter {name:?} is given twice")));
         }
-        check_param_value(name, value).map_err(|e| (BindingField::Params, e))?;
+        check_param_value(name, value).map_err(|e| FieldError {
+            field: BindingField::Params,
+            entry: Some(entry),
+            error: e,
+        })?;
         args.push_str(&format!(" {name}={value}"));
     }
     Ok(args)

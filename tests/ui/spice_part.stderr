@@ -5,16 +5,16 @@ error: no .subckt or .model named "VSUP1" in $DIR/crates/kicad_lib/tests/fixture
   |               ^^^^^^^
 
 error: the model VSUP01 has no port "RESET"; its ports are CTR CTS GND RESET_B SENSE VDD
-  --> tests/ui/spice_part.rs:16:15
+  --> tests/ui/spice_part.rs:16:17
    |
 16 |         pins: { "RESET" => "reset_n" },
-   |               ^^^^^^^^^^^^^^^^^^^^^^^^
+   |                 ^^^^^^^^^^^^^^^^^^^^
 
 error: subcircuit VSUP01 has no parameter "TD"; its parameters are VTH=0.5 VDDMIN=0.8
-  --> tests/ui/spice_part.rs:25:17
+  --> tests/ui/spice_part.rs:25:35
    |
 25 |         params: { "VTH" => "0.6", "TD" => "1m" },
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                                   ^^^^^^^^^^^^
 
 error: the library includes "vsup01_aux.lib" with `.LIB`, which ngspice reads only in its PSpice mode; use `dialect: pspice` or `sim_model: inline`
   --> tests/ui/spice_part.rs:34:18

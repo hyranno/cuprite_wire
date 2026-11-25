@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{OptionKey, PartError, PinDef, err};
+use super::{OptionKey, PartError, PinDef, err, err_at};
 use crate::{
     sim::{self, Elements, SpiceDef},
     symbol::{ElectricalType, Symbol},
@@ -101,16 +101,24 @@ pub(super) fn rename_pins(
     };
     let default_ids: Vec<String> = pins.iter().map(|pin| pin.id.clone()).collect();
     let mut renamed = BTreeSet::new();
-    for (key, id) in renames {
+    for (entry, (key, id)) in renames.iter().enumerate() {
         let normalized = match keys {
             PinKeys::PadNumbers => key.clone(),
             PinKeys::PortNames { .. } => key.to_ascii_lowercase(),
         };
         if !renamed.insert(normalized) {
-            return err(OptionKey::Pins, format!("{what} {key:?} is renamed twice"));
+            return err_at(
+                OptionKey::Pins,
+                entry,
+                format!("{what} {key:?} is renamed twice"),
+            );
         }
         if id.is_empty() {
-            return err(OptionKey::Pins, format!("empty pin ID for {what} {key:?}"));
+            return err_at(
+                OptionKey::Pins,
+                entry,
+                format!("empty pin ID for {what} {key:?}"),
+            );
         }
         // A pad number stands for its first pin; the other duplicate pins are given by their
         // default IDs (`6#2`).
@@ -128,8 +136,9 @@ pub(super) fn rename_pins(
             Some(pin) => pin.id = id.clone(),
             None => {
                 let known: Vec<&str> = pins.iter().map(|pin| pin.pad.as_str()).collect();
-                return err(
+                return err_at(
                     OptionKey::Pins,
+                    entry,
                     match keys {
                         PinKeys::PadNumbers => format!("the part has no pin {key:?}"),
                         PinKeys::PortNames { model } => format!(
@@ -144,10 +153,12 @@ pub(super) fn rename_pins(
     let mut ids = BTreeSet::new();
     for pin in pins.iter() {
         if !ids.insert(pin.id.as_str()) {
-            return err(
-                OptionKey::Pins,
-                format!("pin ID {:?} is used twice", pin.id),
-            );
+            let message = format!("pin ID {:?} is used twice", pin.id);
+            // The last entry giving the ID, if one does.
+            return match renames.iter().rposition(|(_, id)| *id == pin.id) {
+                Some(entry) => err_at(OptionKey::Pins, entry, message),
+                None => err(OptionKey::Pins, message),
+            };
         }
     }
     Ok(())
@@ -171,20 +182,22 @@ pub(super) fn pin_constants(
     let reserved = reserved_constants(spice);
     let mut constants: BTreeMap<String, &str> = BTreeMap::new();
     let mut result = Vec::new();
-    for (_, id) in renames {
+    for (entry, (_, id)) in renames.iter().enumerate() {
         if !is_identifier(id) {
             continue;
         }
         let name = id.to_ascii_uppercase();
         if reserved.contains(&name.as_str()) {
-            return err(
+            return err_at(
                 OptionKey::Pins,
+                entry,
                 format!("pin ID {id:?} would make the constant {name}, which the part already has"),
             );
         }
         if let Some(other) = constants.insert(name.clone(), id) {
-            return err(
+            return err_at(
                 OptionKey::Pins,
+                entry,
                 format!("pin IDs {other:?} and {id:?} differ only in case"),
             );
         }
@@ -221,10 +234,11 @@ pub(super) fn check_internal_connections(
     groups: &[Vec<String>],
     pins: &[PinDef],
 ) -> Result<Vec<Vec<String>>, PartError> {
-    for group in groups {
+    for (entry, group) in groups.iter().enumerate() {
         if group.len() < 2 {
-            return err(
+            return err_at(
                 OptionKey::InternalConnections,
+                entry,
                 "a group needs at least two pins",
             );
         }
@@ -232,8 +246,9 @@ pub(super) fn check_internal_connections(
             .iter()
             .find(|id| !pins.iter().any(|pin| &pin.id == *id))
         {
-            return err(
+            return err_at(
                 OptionKey::InternalConnections,
+                entry,
                 format!("the part has no pin ID {unknown:?}"),
             );
         }

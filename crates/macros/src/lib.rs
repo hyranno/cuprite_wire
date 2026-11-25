@@ -187,9 +187,11 @@ fn expand(
     resolver: &Resolver,
 ) -> TokenStream {
     output(
+        header,
         result.map(|part| generate(header, &part)).map_err(|error| {
-            let span = spans.of(error.key, fallback, header.name.span());
-            syn::Error::new(span, error.error.message)
+            spans
+                .of(error.key, error.entry, fallback, header.name.span())
+                .error(error.error.message)
         }),
         resolver,
     )
@@ -199,8 +201,23 @@ fn expand(
 /// that fixing a library file triggers a rebuild. A file that does not exist cannot be tracked
 /// (`include_bytes!` fails, and stable Rust has no other way), so creating it does not: the
 /// source has to be touched.
-fn output(result: syn::Result<TokenStream>, resolver: &Resolver) -> TokenStream {
-    let code = result.unwrap_or_else(syn::Error::into_compile_error);
+///
+/// With the error comes an empty struct of the name, so that the code using the type does not
+/// add "cannot find type" errors to it.
+fn output(
+    header: &input::Header,
+    result: syn::Result<TokenStream>,
+    resolver: &Resolver,
+) -> TokenStream {
+    let code = result.unwrap_or_else(|error| {
+        let error = error.into_compile_error();
+        let input::Header { attrs, vis, name } = header;
+        quote! {
+            #error
+            #(#attrs)*
+            #vis struct #name;
+        }
+    });
     let tracking = tracking(resolver);
     quote! { #code #tracking }
 }

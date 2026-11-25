@@ -603,7 +603,7 @@ fn map_pins(symbol: &Symbol, terminals: &[&str]) -> Result<(Vec<String>, Vec<Str
         false,
         "the model",
     )
-    .map_err(|(_, e)| e)
+    .map_err(|e| e.error)
 }
 
 /// Parses `Sim.Params` (`name=value` separated by spaces; values may be double-quoted).

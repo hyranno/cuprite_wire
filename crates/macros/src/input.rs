@@ -9,7 +9,7 @@ use cuprite_wire_kicad_lib::{
     },
     spice_lib::Dialect,
 };
-use proc_macro2::Span;
+use proc_macro2::{Ident as Ident2, Span, TokenStream, TokenTree};
 use syn::{
     Attribute, Ident, LitStr, Token, Visibility, braced, bracketed,
     parse::{Parse, ParseStream},
@@ -33,36 +33,82 @@ impl Parse for Header {
     }
 }
 
+/// Where something is written, from its first token to its last. A [`Span`] covering several
+/// tokens cannot be made on stable Rust (`Span::join` is nightly), so an error over them is
+/// given the first and the last.
+#[derive(Clone, Copy)]
+pub struct Place {
+    start: Span,
+    end: Span,
+}
+
+impl Place {
+    fn new(start: Span, end: Span) -> Self {
+        Place { start, end }
+    }
+
+    /// An error over the place.
+    pub fn error(self, message: impl std::fmt::Display) -> syn::Error {
+        // `new_spanned` spans the first token to the last.
+        let tokens: TokenStream = [self.start, self.end]
+            .into_iter()
+            .map(|span| TokenTree::from(Ident2::new("x", span)))
+            .collect();
+        syn::Error::new_spanned(tokens, message)
+    }
+}
+
+impl From<Span> for Place {
+    fn from(span: Span) -> Self {
+        Place::new(span, span)
+    }
+}
+
+/// An option as written: the whole value, and its entries if it is a map or a list.
+struct Written {
+    key: OptionKey,
+    value: Span,
+    entries: Vec<Place>,
+}
+
 /// Where each option is written, to point errors at it.
 #[derive(Default)]
 pub struct Spans {
-    options: Vec<(OptionKey, Span)>,
+    options: Vec<Written>,
     /// The blocks of the `sim` models.
     models: Vec<Span>,
 }
 
 impl Spans {
-    /// The span of the option `key`; for an option of a model that is not written, the model's
-    /// block; else the span of `fallback`, else `default`.
-    pub fn of(&self, key: OptionKey, fallback: OptionKey, default: Span) -> Span {
-        let find = |key| {
-            self.options
-                .iter()
-                .find(|(k, _)| *k == key)
-                .map(|(_, span)| *span)
-        };
+    /// The place of the `entry`-th entry of the option `key`, else of the whole option; for an
+    /// option of a model that is not written, the model's block; else the place of `fallback`,
+    /// else `default`.
+    pub fn of(
+        &self,
+        key: OptionKey,
+        entry: Option<usize>,
+        fallback: OptionKey,
+        default: Span,
+    ) -> Place {
+        let find = |key| self.options.iter().find(|written| written.key == key);
         let model = match key {
             OptionKey::Model { element, .. } => self.models.get(element).copied(),
             // An option of the `ibis` block that is not written: the block.
-            OptionKey::Ibis(_) => find(OptionKey::IbisBlock),
+            OptionKey::Ibis(_) => find(OptionKey::IbisBlock).map(|w| w.value),
             _ => None,
         };
-        find(key)
-            .or(model)
-            .or_else(|| find(fallback))
-            .unwrap_or(default)
+        let written = find(key);
+        let entry = written.and_then(|w| w.entries.get(entry?).copied());
+        entry
+            .or(written.map(|w| w.value.into()))
+            .or(model.map(Place::from))
+            .or_else(|| find(fallback).map(|w| w.value.into()))
+            .unwrap_or(default.into())
     }
 }
+
+/// What a key sets, if errors should point at it: the option, and the places of its entries.
+pub(crate) type Recorded = Option<(OptionKey, Vec<Place>)>;
 
 /// `#[attrs] vis struct Name { key: value, ... }` of `kicad_part!`.
 pub struct PartInput {
@@ -193,7 +239,7 @@ impl Parse for PartInput {
                     KicadPartKey::Common(key) => common_key(key, content, &mut options.common)?,
                     KicadPartKey::Kicad(KicadKey::Symbol) => {
                         options.symbol = content.parse::<LitStr>()?.value();
-                        Some(OptionKey::Symbol)
+                        Some((OptionKey::Symbol, Vec::new()))
                     }
                     KicadPartKey::Kicad(KicadKey::Footprint) => {
                         options.footprint = if content.peek(LitStr) {
@@ -202,15 +248,15 @@ impl Parse for PartInput {
                             keyword(content, &["none"])?;
                             FootprintOption::None
                         };
-                        Some(OptionKey::Footprint)
+                        Some((OptionKey::Footprint, Vec::new()))
                     }
                     KicadPartKey::Kicad(KicadKey::Fields) => {
                         options.fields = fields(content)?;
                         None
                     }
                     KicadPartKey::Kicad(KicadKey::ExtraPads) => {
-                        options.extra_pads = string_list(content)?;
-                        Some(OptionKey::ExtraPads)
+                        options.extra_pads = string_list(content)?.0;
+                        Some((OptionKey::ExtraPads, Vec::new()))
                     }
                     KicadPartKey::Kicad(KicadKey::Spice) => {
                         options.spice =
@@ -219,7 +265,7 @@ impl Parse for PartInput {
                                 "none" => SpiceOption::None,
                                 _ => SpiceOption::Excluded,
                             };
-                        Some(OptionKey::Spice)
+                        Some((OptionKey::Spice, Vec::new()))
                     }
                     KicadPartKey::Kicad(KicadKey::Sim) => {
                         options.sim = sim_block(content, &mut sim_spans)?;
@@ -227,7 +273,7 @@ impl Parse for PartInput {
                     }
                     KicadPartKey::Kicad(KicadKey::Ibis) => {
                         options.ibis = Some(ibis_block(content, span, &mut sim_spans)?);
-                        Some(OptionKey::IbisBlock)
+                        Some((OptionKey::IbisBlock, Vec::new()))
                     }
                     KicadPartKey::Kicad(KicadKey::SymbolDir) => {
                         symbol_dir = Some(content.parse()?);
@@ -242,7 +288,7 @@ impl Parse for PartInput {
                         None
                     }
                 };
-                Ok(recorded.map(|k| (k, span)))
+                Ok(recorded)
             },
             &mut spans,
         )?;
@@ -281,15 +327,15 @@ impl Parse for SpicePartInput {
                 ("name", "`name: \"NAME\"` is required"),
             ],
             header.name.span(),
-            |key, content, span| {
+            |key, content, _| {
                 let recorded = match key {
                     SpicePartKey::Common(key) => common_key(key, content, &mut options.common)?,
                     SpicePartKey::Model(field) => {
-                        model_key(field, content, &mut options.model)?;
-                        Some(OptionKey::Model { element: 0, field })
+                        let entries = model_key(field, content, &mut options.model)?;
+                        Some((OptionKey::Model { element: 0, field }, entries))
                     }
                 };
-                Ok(recorded.map(|k| (k, span)))
+                Ok(recorded)
             },
             &mut spans,
         )?;
@@ -308,10 +354,7 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
     let mut one = |input: ParseStream| -> syn::Result<()> {
         let element = bindings.len();
         let mut binding = ModelBinding::default();
-        let block = input
-            .cursor()
-            .token_tree()
-            .map_or_else(|| input.span(), |(tree, _)| tree.span());
+        let block = next_span(input);
         let content;
         braced!(content in input);
         parse_keys(
@@ -322,9 +365,9 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
                 ("name", "`name` is required in `sim`"),
             ],
             block,
-            |field, content, span| {
-                model_key(field, content, &mut binding)?;
-                Ok(Some((OptionKey::Model { element, field }, span)))
+            |field, content, _| {
+                let entries = model_key(field, content, &mut binding)?;
+                Ok(Some((OptionKey::Model { element, field }, entries)))
             },
             spans,
         )?;
@@ -355,7 +398,7 @@ fn ibis_block(input: ParseStream, block: Span, spans: &mut Spans) -> syn::Result
             ("pin", "`pin` is required in `ibis`"),
         ],
         block,
-        |field, content, span| {
+        |field, content, _| {
             match field {
                 IbisField::Library => source.library = content.parse::<LitStr>()?.value(),
                 IbisField::Component => source.component = Some(content.parse::<LitStr>()?.value()),
@@ -365,7 +408,7 @@ fn ibis_block(input: ParseStream, block: Span, spans: &mut Spans) -> syn::Result
                 IbisField::Driver => source.driver = content.parse::<syn::LitBool>()?.value,
                 IbisField::Symbol => unreachable!("not a key"),
             }
-            Ok(Some((OptionKey::Ibis(field), span)))
+            Ok(Some((OptionKey::Ibis(field), Vec::new())))
         },
         spans,
     )?;
@@ -381,15 +424,16 @@ const IBIS_KEYS: &[(&str, IbisField)] = &[
     ("driver", IbisField::Driver),
 ];
 
-/// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` parses the
-/// value and returns the option it sets, if errors should point at it, with its span. A key of
-/// `required` that is not given is an error at `missing`, with the message given with the key.
+/// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` is given the
+/// span of the value; it parses the value and returns the option it sets (see [`Recorded`]). A
+/// key of `required` that is not given is an error at `missing`, with the message given with the
+/// key.
 pub(crate) fn parse_keys<K: Copy>(
     content: ParseStream,
     keys: &[(&str, K)],
     required: &[(&str, &str)],
     missing: Span,
-    mut handle: impl FnMut(K, ParseStream, Span) -> syn::Result<Option<(OptionKey, Span)>>,
+    mut handle: impl FnMut(K, ParseStream, Span) -> syn::Result<Recorded>,
     spans: &mut Spans,
 ) -> syn::Result<()> {
     let mut seen: Vec<String> = Vec::new();
@@ -411,12 +455,14 @@ pub(crate) fn parse_keys<K: Copy>(
         }
         seen.push(key_name);
         content.parse::<Token![:]>()?;
-        // The whole value (a group's span covers its brackets and contents).
-        let span = content
-            .cursor()
-            .token_tree()
-            .map_or_else(|| content.span(), |(tree, _)| tree.span());
-        spans.options.extend(handle(handled, content, span)?);
+        let value = next_span(content);
+        if let Some((key, entries)) = handle(handled, content, value)? {
+            spans.options.push(Written {
+                key,
+                value,
+                entries,
+            });
+        }
         Ok(())
     })?;
     match required
@@ -426,6 +472,14 @@ pub(crate) fn parse_keys<K: Copy>(
         Some((_, message)) => Err(syn::Error::new(missing, *message)),
         None => Ok(()),
     }
+}
+
+/// The span of the next token tree: a group's covers its brackets and contents.
+fn next_span(input: ParseStream) -> Span {
+    input
+        .cursor()
+        .token_tree()
+        .map_or_else(|| input.span(), |(tree, _)| tree.span())
 }
 
 /// Calls `item` for each item of the comma-separated list filling `input`; a trailing comma is
@@ -444,12 +498,12 @@ pub(crate) fn comma_separated(
     Ok(())
 }
 
-/// Parses an option shared by both macros; returns the key errors point at, if any.
+/// Parses an option shared by both macros.
 fn common_key(
     key: CommonKey,
     content: ParseStream,
     options: &mut CommonOptions,
-) -> syn::Result<Option<OptionKey>> {
+) -> syn::Result<Recorded> {
     Ok(match key {
         CommonKey::Value => {
             options.value = Some(if content.peek(LitStr) {
@@ -458,24 +512,28 @@ fn common_key(
                 keyword(content, &["param"])?;
                 Value::Param
             });
-            Some(OptionKey::Value)
+            Some((OptionKey::Value, Vec::new()))
         }
         CommonKey::RefPrefix => {
             options.ref_prefix = Some(content.parse::<LitStr>()?.value());
-            Some(OptionKey::RefPrefix)
+            Some((OptionKey::RefPrefix, Vec::new()))
         }
         CommonKey::Pins => {
-            options.pins = string_map(content)?;
-            Some(OptionKey::Pins)
+            let entries;
+            (options.pins, entries) = string_map(content)?;
+            Some((OptionKey::Pins, entries))
         }
         CommonKey::InternalConnections => {
             let groups;
             bracketed!(groups in content);
-            options.internal_connections =
-                Punctuated::<_, Token![,]>::parse_terminated_with(&groups, string_list)?
-                    .into_iter()
-                    .collect();
-            Some(OptionKey::InternalConnections)
+            let mut places = Vec::new();
+            options.internal_connections.clear();
+            comma_separated(&groups, |group| {
+                places.push(next_span(group).into());
+                options.internal_connections.push(string_list(group)?.0);
+                Ok(())
+            })?;
+            Some((OptionKey::InternalConnections, places))
         }
         CommonKey::SimModel => {
             options.sim_model = match keyword(content, &["include", "inline"])?.as_str() {
@@ -487,18 +545,20 @@ fn common_key(
     })
 }
 
-/// Parses an option of a model (`spice_part!` and the `sim` block).
+/// Parses an option of a model (`spice_part!` and the `sim` block); returns the places of its
+/// entries.
 fn model_key(
     field: BindingField,
     content: ParseStream,
     binding: &mut ModelBinding,
-) -> syn::Result<()> {
+) -> syn::Result<Vec<Place>> {
+    let mut entries = Vec::new();
     match field {
         BindingField::Library => binding.library = content.parse::<LitStr>()?.value(),
         BindingField::Name => binding.name = content.parse::<LitStr>()?.value(),
-        BindingField::Pins => binding.pins = string_map(content)?,
-        BindingField::Unused => binding.unused = string_list(content)?,
-        BindingField::Params => binding.params = string_map(content)?,
+        BindingField::Pins => (binding.pins, entries) = string_map(content)?,
+        BindingField::Unused => (binding.unused, entries) = string_list(content)?,
+        BindingField::Params => (binding.params, entries) = string_map(content)?,
         BindingField::Dialect => {
             binding.dialect =
                 match keyword(content, &["auto", "ngspice", "pspice", "ltspice"])?.as_str() {
@@ -510,7 +570,7 @@ fn model_key(
         }
         BindingField::Suffix => binding.suffix = content.parse::<LitStr>()?.value(),
     }
-    Ok(())
+    Ok(entries)
 }
 
 pub(crate) fn end(input: ParseStream) -> syn::Result<()> {
@@ -536,20 +596,31 @@ fn keyword(input: ParseStream, allowed: &[&str]) -> syn::Result<String> {
     }
 }
 
-/// `["a", "b"]`
-fn string_list(input: ParseStream) -> syn::Result<Vec<String>> {
+/// `["a", "b"]`, with the places of the items.
+fn string_list(input: ParseStream) -> syn::Result<(Vec<String>, Vec<Place>)> {
     let content;
     bracketed!(content in input);
     let items = Punctuated::<LitStr, Token![,]>::parse_terminated(&content)?;
-    Ok(items.iter().map(LitStr::value).collect())
+    Ok((
+        items.iter().map(LitStr::value).collect(),
+        items.iter().map(|item| item.span().into()).collect(),
+    ))
 }
 
-/// `{ "a" => "b", ... }` with distinct keys.
-fn string_map(input: ParseStream) -> syn::Result<Vec<(String, String)>> {
-    Ok(pairs(entries(input)?))
+/// The pairs of a map.
+type Pairs = Vec<(String, String)>;
+
+/// `{ "a" => "b", ... }` with distinct keys, with the places of the entries.
+fn string_map(input: ParseStream) -> syn::Result<(Pairs, Vec<Place>)> {
+    let entries = entries(input)?;
+    let places = entries
+        .iter()
+        .map(|e| Place::new(e.key.span(), e.value.span()))
+        .collect();
+    Ok((pairs(entries), places))
 }
 
-fn pairs(entries: Vec<Entry>) -> Vec<(String, String)> {
+fn pairs(entries: Vec<Entry>) -> Pairs {
     entries
         .into_iter()
         .map(|e| (e.key.value(), e.value.value()))
@@ -577,7 +648,7 @@ fn entries(input: ParseStream) -> syn::Result<Vec<Entry>> {
 
 /// `fields`: the `Sim.*` fields are written from the `sim` block (or are the symbol's), so the
 /// user cannot give them.
-fn fields(input: ParseStream) -> syn::Result<Vec<(String, String)>> {
+fn fields(input: ParseStream) -> syn::Result<Pairs> {
     let entries = entries(input)?;
     if let Some(entry) = entries
         .iter()

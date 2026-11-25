@@ -14,16 +14,16 @@ error: no pin is mapped to the ports RESET_B of subcircuit VSUP01
    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: subcircuit VSUP01 has no port "RESET_N"; its ports are CTR CTS GND RESET_B SENSE VDD
-  --> tests/ui/sim.rs:24:19
+  --> tests/ui/sim.rs:24:93
    |
 24 |             pins: { "1" => "CTR", "2" => "CTS", "3" => "GND", "4" => "VDD", "5" => "SENSE", "6" => "RESET_N" },
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                                                                                             ^^^^^^^^^^^^^^^^
 
 error: port CTR is mapped twice (pins "1" and "2")
-  --> tests/ui/sim.rs:36:19
+  --> tests/ui/sim.rs:36:35
    |
 36 |             pins: { "1" => "CTR", "2" => "CTR", "3" => "GND", "4" => "VDD", "5" => "SENSE", "6" => "RESET_B" },
-   |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                                   ^^^^^^^^^^^^
 
 error: pins not mapped to the model: 3 (GND), 4 (VDD); map them in `pins`, or declare them with `unused: ["3", "4"]`
        pins and ports:
@@ -39,10 +39,10 @@ error: pins not mapped to the model: 3 (GND), 4 (VDD); map them in `pins`, or de
    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: subcircuit VSUP01 has no parameter "TD"; its parameters are VTH=0.5 VDDMIN=0.8
-  --> tests/ui/sim.rs:63:21
+  --> tests/ui/sim.rs:63:23
    |
 63 |             params: { "TD" => "1m" },
-   |                     ^^^^^^^^^^^^^^^^
+   |                       ^^^^^^^^^^^^
 
 error: subcircuit VSUP_LOCKED is encrypted, which ngspice cannot read; ask the vendor for an unencrypted model
   --> tests/ui/sim.rs:74:19

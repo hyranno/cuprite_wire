@@ -23,16 +23,16 @@ error: expected `auto` or `none` or `excluded`
    |                ^^^^^
 
 error: the part has no pin "3"
-  --> tests/ui/options.rs:33:15
+  --> tests/ui/options.rs:33:29
    |
 33 |         pins: { "1" => "a", "3" => "b" },
-   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                             ^^^^^^^^^^
 
 error: the part has no pin ID "x"
-  --> tests/ui/options.rs:42:31
+  --> tests/ui/options.rs:42:32
    |
 42 |         internal_connections: [["1", "x"]],
-   |                               ^^^^^^^^^^^^
+   |                                ^^^^^^^^^^
 
 error: "MPN" is given twice
   --> tests/ui/options.rs:51:33
@@ -47,13 +47,13 @@ error: `Sim.*` fields cannot be given in `fields`; give the model with `sim`
    |                                 ^^^^^^^^^^^^
 
 error: pin IDs "out" and "OUT" differ only in case
-  --> tests/ui/options.rs:69:15
+  --> tests/ui/options.rs:69:31
    |
 69 |         pins: { "1" => "out", "2" => "OUT" },
-   |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                               ^^^^^^^^^^^^
 
 error: pin ID "pins" would make the constant PINS, which the part already has
-  --> tests/ui/options.rs:79:15
+  --> tests/ui/options.rs:79:17
    |
 79 |         pins: { "1" => "pins" },
-   |               ^^^^^^^^^^^^^^^^^
+   |                 ^^^^^^^^^^^^^
