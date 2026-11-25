@@ -107,6 +107,10 @@ break the API).
   them as absolute paths; with `sim_model: include`, a relative path is a compile error, since
   ngspice would look for it in the directory it runs in.
 
+- `cuprite_wire_ibis::parse_bytes` reads the bytes of a file, replacing those that are not
+  UTF-8, as cuprite_wire and the macros read IBIS files. The READMEs of `cuprite_wire_ibis` and
+  `cuprite_wire_embedded_hal` are their crate documentation, and their examples are tested.
+
 ### Changed
 
 - **Breaking:** `CircuitErrors` has the fields `errors` and `warnings` (it was a tuple struct;
@@ -146,6 +150,11 @@ break the API).
   written to the KiCad netlist (value, field, datasheet, description, unit or pin name, pad) is an
   error (`CircuitErrorKind::KicadNulCharacter`), since KiCad ends the text there;
   `KicadNetlist::with_source` panics on one.
+- **Breaking** (`cuprite_wire_kicad_lib`, used by the macros): `ibis_part::IbisKey` is renamed
+  `IbisPartKey`; `sim::ibis::SINGLE_PINS` and `DIFF_PINS` are replaced by `IbisSource::inner`
+  (`IbisInner`: KiCad's model pins with the pins of the `cuprite_wire::spice::ibis` part that
+  simulates them); `IbisField` has `Diff`. Added `ElementDef::port_of` and `sim::assignments`.
+  A missing SPICE library is reported as `SPICE library not found (path)`, as the other files.
 
 ### Fixed
 
