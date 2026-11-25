@@ -20,16 +20,22 @@ impl<I: InputPin, O: OutputPin> Mirror<I, O> {
     }
 }
 
-// The test: pins of the `CosimDevice` named "mcu" in `deck`, the `SpiceDeck` of the test bench.
-let board = Board::new();
-let mirror = Mirror { button: board.input_pin("button"), led: board.output_pin("led") };
-let mut firmware = Firmware::new(&board, 10e-6, mirror, Mirror::step);
-deck.run_with(DeviceModels::new().with("mcu", &mut firmware)).unwrap();
+// The test: pins of the `CosimDevice` named "mcu" in the deck of the test bench.
+fn test(deck: &cuprite_wire::spice::SpiceDeck) {
+    let board = Board::new();
+    let mirror = Mirror { button: board.input_pin("button"), led: board.output_pin("led") };
+    let mut firmware = Firmware::new(&board, 10e-6, mirror, Mirror::step);
+    deck.run_with(DeviceModels::new().with("mcu", &mut firmware)).unwrap();
+}
 ```
 
-The firmware runs as a periodic task: `Firmware` calls its step function every period, and the
-pins read the circuit at that time and drive it from then on. Digital input, output and
-open-drain pins, PWM and a minimal ADC channel trait are provided.
+The firmware runs as a periodic task: `Firmware` calls its step function every period (as a
+timer interrupt or the body of a super loop would), and the pins handed to it read the circuit at
+that time and drive it from then on. Digital input, output and open-drain pins, PWM and a minimal
+ADC channel trait are provided.
+
+Blocking waits (`DelayNs`) cannot advance the simulated time from inside a step, so they are not
+provided: write the waits as states of the periodic task.
 
 ## Requirements
 
