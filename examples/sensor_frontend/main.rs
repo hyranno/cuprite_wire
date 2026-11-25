@@ -16,6 +16,7 @@ mod bias;
 mod filter;
 mod parts;
 mod preamp;
+mod stage;
 
 #[cfg(test)]
 mod bench;

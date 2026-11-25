@@ -13,7 +13,7 @@
 mod pwm_dac;
 
 use cuprite_wire::spice::cosim::{
-    DeviceIo, DeviceModel, DeviceModels,
+    DeviceIo, DeviceModel,
     peripherals::{Adc, Periodic, Pwm},
 };
 use pwm_dac::bench;
@@ -57,16 +57,11 @@ impl DeviceModel for Controller {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bench = bench(3e-3)?;
     let mut controller = Controller::new();
-    let sim = bench
-        .deck
-        .run_with(DeviceModels::new().with("mcu", &mut controller))?;
+    let (_, out) = bench.run(&mut controller)?;
     for &(time, volts) in controller.measured.iter().step_by(10) {
         println!("{:7.0} us  {volts:.3} V", time * 1e6);
     }
     println!("duty: {:.3}", controller.pwm.duty());
-    let tran = sim.result(&bench.tran)?;
-    let end = *tran.scale().last().ok_or("no time points")?;
-    let out = tran.interpolate(&bench.out, end)?.ok_or("no OUT")?;
     println!("OUT at the end: {out:.3} V");
     Ok(())
 }
@@ -80,10 +75,7 @@ mod tests {
     fn test_regulates_to_target() {
         let bench = bench(3e-3).unwrap();
         let mut controller = Controller::new();
-        let sim = bench
-            .deck
-            .run_with(DeviceModels::new().with("mcu", &mut controller))
-            .unwrap();
+        let (sim, _) = bench.run(&mut controller).unwrap();
         let &(_, last) = controller.measured.last().unwrap();
         assert!((last - TARGET).abs() < 0.05, "{last}");
         let duty = controller.pwm.duty();

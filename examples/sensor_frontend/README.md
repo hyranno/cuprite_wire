@@ -67,7 +67,8 @@ The other parts (resistors, capacitors) are the ready-made ones of `cuprite_wire
 
 ## Subcircuits and their interfaces
 
-Each subcircuit has an interface struct deriving `Interface` (`PreampPorts`, ...). Instantiating
+Each subcircuit has an interface struct deriving `Interface` (`MidSupplyPorts`, and `StagePorts`
+shared by the preamp and the filter). Instantiating
 the subcircuit returns its nodes in the board by name, and the ERC test gives the same fields their
 pin types:
 

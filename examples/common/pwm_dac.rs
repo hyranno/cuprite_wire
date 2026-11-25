@@ -14,9 +14,9 @@ use cuprite_wire::{
     circuit::{CircuitBuilder, Named},
     naming::NetLabel,
     spice::{
-        SpiceDeck,
+        Simulation, SpiceDeck,
         analysis::{Probe, Tran},
-        cosim::CosimDevice,
+        cosim::{CosimDevice, DeviceModel, DeviceModels},
         digital::{InputCharacteristics, OutputCharacteristics},
     },
 };
@@ -28,6 +28,21 @@ pub struct Bench {
     pub tran: Tran,
     /// The voltage of `OUT`.
     pub out: Probe,
+}
+
+impl Bench {
+    /// Runs the bench with `mcu` simulating the microcontroller; returns the simulation and the
+    /// voltage of `OUT` at the end.
+    pub fn run(
+        &self,
+        mcu: &mut dyn DeviceModel,
+    ) -> Result<(Simulation, f64), Box<dyn std::error::Error>> {
+        let sim = self.deck.run_with(DeviceModels::new().with("mcu", mcu))?;
+        let tran = sim.result(&self.tran)?;
+        let end = *tran.scale().last().ok_or("no time points")?;
+        let out = tran.interpolate(&self.out, end)?.ok_or("no OUT")?;
+        Ok((sim, out))
+    }
 }
 
 /// The microcontroller (`mcu`, a 3.3 V CMOS device with the pins `pwm` and `adc`), the RC filter,

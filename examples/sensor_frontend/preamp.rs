@@ -2,11 +2,11 @@
 
 use cuprite_wire::{
     basic::{Capacitor0603, Resistor0603},
-    circuit::{CircuitBuilder, Named, Node},
-    subcircuit::{Interface, SubcircuitGenerator},
+    circuit::{CircuitBuilder, Named},
+    subcircuit::SubcircuitGenerator,
 };
 
-use crate::parts::RrioOpAmp;
+use crate::{parts::RrioOpAmp, stage::StagePorts};
 
 /// Gain `1 + feedback / ground` above the input high-pass corner (1.6 Hz with 1u and 100k).
 /// The output sits at `vref` without a signal.
@@ -28,19 +28,9 @@ impl Default for Preamp {
     }
 }
 
-/// The interface of [`Preamp`].
-#[derive(Interface)]
-pub struct PreampPorts<T = Node> {
-    pub input: T,
-    pub vref: T,
-    pub vcc: T,
-    pub gnd: T,
-    pub output: T,
-}
-
 impl SubcircuitGenerator for Preamp {
     type Options = ();
-    type Interface = PreampPorts;
+    type Interface = StagePorts;
 
     fn construct_subcircuit(
         &self,
@@ -48,7 +38,7 @@ impl SubcircuitGenerator for Preamp {
         c: &mut CircuitBuilder,
         interface: Self::Interface,
     ) {
-        let PreampPorts {
+        let StagePorts {
             input,
             vref,
             vcc,
@@ -82,47 +72,19 @@ impl SubcircuitGenerator for Preamp {
 
 #[cfg(test)]
 mod tests {
-    use cuprite_wire::{
-        erc::{ErcSettings, check_subcircuit},
-        parts::PinType,
-        spice::{IndependentSource, Waveform, analysis::Tran},
-    };
+    use cuprite_wire::spice::{IndependentSource, Waveform, analysis::Tran};
 
     use super::*;
-    use crate::bench::{Bench, StageNodes, assert_near, run};
+    use crate::bench::{Bench, assert_near, check_stage, run};
 
     #[test]
     fn erc() {
-        let ports = PreampPorts {
-            input: Some(PinType::Output),
-            vref: Some(PinType::Output),
-            vcc: Some(PinType::PowerOut),
-            gnd: Some(PinType::PowerOut),
-            output: Some(PinType::Input),
-        };
-        check_subcircuit(&Preamp::default(), &(), &ports, &ErcSettings::default())
-            .unwrap()
-            .assert_clean();
+        check_stage(&Preamp::default());
     }
 
     /// The preamp on a 5 V supply with an ideal 2.5 V reference, driven by `input`.
     fn bench(input: IndependentSource) -> Bench {
-        Bench::stage(input, |circuit| {
-            let PreampPorts {
-                input,
-                vref,
-                vcc,
-                gnd,
-                output,
-            } = circuit.instantiate_subcircuit(Named("preamp", Preamp::default()));
-            StageNodes {
-                input,
-                vref,
-                vcc,
-                gnd,
-                output,
-            }
-        })
+        Bench::stage(Named("preamp", Preamp::default()), input)
     }
 
     #[test]
