@@ -1,5 +1,5 @@
 (export (version "E")
-  (design (tool "cuprite_wire 0.3.0"))
+  (design (tool "cuprite_wire 0.4.0"))
   (components
     (comp (ref "C1")
       (value "100n")

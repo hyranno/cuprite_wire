@@ -10,6 +10,8 @@ break the API).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
 ### Added
 
 - `spice::analysis`: typed `Op`, `Tran`, `Dc` and `Ac` analyses with probes made by the deck
@@ -18,7 +20,8 @@ break the API).
   `Simulation::result` without file or column names (AC values as `Complex`). `Tran` takes the
   start of the recording (`with_start`), the maximum time step (`with_max_step`) and `uic`
   (`with_uic`). `Complex::phase_degrees`, and `AcResult::continuous_phase` and `group_delay`
-  (as `cph()` and `group_delay()` of ngspice). `doc/spice_netlist_usage.md` section 3 describes
+  (as `cph()` and `group_delay()` of ngspice). The analyses check their values when made and
+  panic with a message on what ngspice would reject or run without points. `doc/spice_netlist_usage.md` section 3 describes
   them; the examples (`spice_rc_filter`, `sensor_frontend`, `pwm_dac_feedback`,
   `ibis_signal_integrity`, and `pwm_dac_firmware` of `cuprite_wire_embedded_hal`) use them.
 
@@ -35,13 +38,6 @@ break the API).
 - `KicadPartInfo::datasheet` and `description`, which `kicad_part!` takes from the symbol's
   `Datasheet` and `Description` fields. The KiCad netlist writes them as the `datasheet` and
   `description` of a component when set (a `~` datasheet is left out, as Eeschema does).
-- BOM: `BomField::Datasheet` and `BomField::Description` columns;
-  `BomGrouping::Fields`, kicad-cli's `--group-by` (grouping by fields that need not be written,
-  a cell listing the differing values of a row); and the delimiters of kicad-cli
-  (`field_delimiter`, `string_delimiter`, `ref_delimiter`, `ref_range_delimiter`) in
-  `BomOptions`, whose `group` is now a `BomGrouping` and whose `ref_ranges` is replaced by an
-  empty `ref_range_delimiter`.
-
 - The KiCad netlist writes the pin type of the only pin of a net marked with
   `CircuitBuilder::no_connect` with the suffix `+no_connect` (e.g. `input+no_connect`), as
   Eeschema writes a pin with a no-connect flag.
@@ -56,8 +52,12 @@ break the API).
 - `KicadNetlist::bom` makes a bill of materials (`cuprite_wire::kicad::KicadBom`) and writes it
   as CSV in the format of `kicad-cli sch export bom`: components excluded from the BOM are left
   out, equal components are grouped into one row with reference ranges (`R1-R5`), and DNP
-  components get a row of their own. `BomOptions` chooses the columns (including part fields such
-  as `MPN`), grouping and whether DNP components are listed.
+  components get a row of their own. `BomOptions` chooses the columns (`BomField`, including the
+  datasheet, the description and part fields such as `MPN`), the grouping (`BomGrouping`;
+  `BomGrouping::Fields` is kicad-cli's `--group-by`, grouping by fields that need not be written,
+  a cell listing the differing values of a row), whether DNP components are listed, and the
+  delimiters of kicad-cli (`field_delimiter`, `string_delimiter`, `ref_delimiter`,
+  `ref_range_delimiter`; an empty one writes no reference ranges).
 - `cuprite_wire_ibis`: a new crate reading IBIS model files (`.ibs`): the header, components with
   their package and pins, and models with their I-V tables, ramp rates, voltage ranges and input
   thresholds. Other keywords are skipped and listed. It does not depend on `cuprite_wire`, which
@@ -137,24 +137,15 @@ break the API).
   variant). The error of a co-simulation is reported even if ngspice also failed (it was hidden
   behind `SimulationError::Ngspice`), and the run directory is kept and named in the error
   (it was removed when ngspice succeeded).
-- The analyses check their values when made, and panic with a message, instead of panicking
-  when the deck is written (`NaN`, infinities) or making a deck ngspice rejects or runs without
-  points: `Tran` (positive step and stop, a start from 0 to before the stop, a positive maximum
-  step), `Dc` (a non-zero step toward the stop) and `Ac` (at least one point, a start above 0
-  for `decade` / `octave`, from 0 for `linear`, and a finite stop not below it).
-  `IbisDiffBuffer::new` checks that `vdiff` and `tdelay` are finite, `Pwm::set_duty` rejects NaN
-  (which drove the pin high), and `InputCharacteristics::decode` checks that the times do not
-  decrease.
+- `Pwm::set_duty` rejects NaN (which drove the pin high), and `InputCharacteristics::decode`
+  panics with a message when the times decrease.
 - Instance names, subcircuit base names, net labels and reference prefixes with control
   characters are rejected (`CircuitErrorKind::InvalidName`). A NUL character in a text of a part
   written to the KiCad netlist (value, field, datasheet, description, unit or pin name, pad) is an
   error (`CircuitErrorKind::KicadNulCharacter`), since KiCad ends the text there;
   `KicadNetlist::with_source` panics on one.
-- **Breaking** (`cuprite_wire_kicad_lib`, used by the macros): `ibis_part::IbisKey` is renamed
-  `IbisPartKey`; `sim::ibis::SINGLE_PINS` and `DIFF_PINS` are replaced by `IbisSource::inner`
-  (`IbisInner`: KiCad's model pins with the pins of the `cuprite_wire::spice::ibis` part that
-  simulates them); `IbisField` has `Diff`. Added `ElementDef::port_of` and `sim::assignments`.
-  A missing SPICE library is reported as `SPICE library not found (path)`, as the other files.
+- `cuprite_wire_kicad_lib` (used by the macros): added `ElementDef::port_of` and
+  `sim::assignments`. A missing SPICE library is reported as `SPICE library not found (path)`, as the other files.
 - The errors of `kicad_part!` and `spice_part!` about an entry of a map or a list (`pins`,
   `params`, `unused`, `internal_connections`) point at that entry instead of the whole value.
   When the part cannot be made, the macros (and `ibis_part!`) still define an empty struct of
@@ -165,32 +156,19 @@ break the API).
 - **Breaking:** `Part` has `Any` as a supertrait, so a part type is `'static`. `PartExt` on a
   `Box<dyn Part>` holding an `Overridden` adds to its overrides, as on an `Overridden`, instead
   of wrapping it in another one.
-- The analyses (`Op`, `Tran`, `Dc`, `Ac`) no longer implement `PartialEq`, which compared their
-  hidden identity (two analyses made alike were unequal, a clone was equal), and the hidden
-  `Analysis::read` cannot be called outside the crate.
 
 ### Fixed
 
 - A clone of a `CircuitBuilder` shared the identity of the original, so a node made by one after
   cloning was taken by the other as its own: connected to a wrong pin, or a panic. Such a node is
   now a `ForeignNode` error; the nodes made before cloning still belong to both.
-- `Simulation::result` of an analysis whose output has no rows is a `SimulationError::Table`
-  error instead of a panic (`Op`).
-- `cuprite_wire_ibis` rejects numbers out of the range of `f64` (`1e999`) instead of reading them
-  as infinities.
 - `kicad_part!` and `spice_part!`: a pin renamed to an ID whose constant is another constant of the
-  type (`pins`, or `library`, `component` and `ibis_pin` for an IBIS part) is a compile error
+  type (`pins`) is a compile error
   pointing at `pins` instead of a duplicate definition in the generated code.
-- On Windows, `sim_model: inline` wrote the absolute paths of the files of code models with `\`,
-  which ngspice reads as an escape; they are written with `/` like the other paths.
 - The built-in models of `kicad_part!` (`Sim.Device D` etc. with `Sim.Params`) were named after the
   type only (`__Diode`), so two types of the same name in different modules with different
   parameters made ngspice fail with conflicting models. The name has the hash of the model
   appended (`__Diode_af63f94c86021dd3`).
-- `cuprite_wire_ibis`: a `[Ramp]` slope with a time that is not positive (`1/0`) is a parse error;
-  making the edges from it panicked (at compile time in `ibis_part!` and `kicad_part!`).
-- `cuprite_wire_ibis`: a file starting with a UTF-8 byte order mark failed to parse ("text before
-  the first keyword"); the mark is skipped.
 - `cuprite_wire_embedded_hal`: the first `toggle` of an output pin not yet set left it low (the
   default `toggle` of embedded-hal sets a pin that is not set low to low); it drives it high.
 - `kicad_part!`: a relative directory in `KICAD10_SYMBOL_DIR` etc. was read relative to the
@@ -203,8 +181,6 @@ break the API).
 - `kicad_part!` limits what a broken library can make it do: a stacked pin number of more than
   10000 pads (`[1-99999999]`) and lists nested more than 512 deep are errors instead of running
   out of memory or stack.
-- `cuprite_wire_ibis`: where the equations of the weights of two waveforms were dependent up to
-  rounding, a weight could jump between 0 and 1; it keeps its previous value.
 
 ## [0.3.0] - 2026-11-22
 
@@ -438,7 +414,8 @@ Initial release: describing circuits in Rust, ERC, export to KiCad 9 (pcbnew) an
 simulation with ngspice, and parts generated from KiCad libraries and SPICE models
 (`kicad_part!`, `spice_part!`).
 
-[Unreleased]: https://github.com/hyranno/cuprite_wire/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/hyranno/cuprite_wire/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/hyranno/cuprite_wire/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/hyranno/cuprite_wire/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hyranno/cuprite_wire/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/hyranno/cuprite_wire/releases/tag/v0.1.0
