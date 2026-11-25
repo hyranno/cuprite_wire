@@ -28,9 +28,14 @@ pub(crate) fn unescape_name(name: &str) -> String {
 
 /// Path of subcircuit instance names from the root, e.g. `["amp_left", "stage#1"]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct HierPath(pub Vec<String>);
+pub struct HierPath(Vec<String>);
 
 impl HierPath {
+    /// The subcircuit instance names on the path, from the root.
+    pub fn names(&self) -> &[String] {
+        &self.0
+    }
+
     /// The path inside the subcircuit instance `name`.
     pub(crate) fn prepended(&self, name: &str) -> Self {
         let mut names = Vec::with_capacity(self.0.len() + 1);
@@ -61,7 +66,7 @@ impl HierPath {
     }
 
     /// The UUID of a part with the instance name `name` in the subcircuit instance at this path.
-    pub fn part_uuid(&self, name: &str) -> Uuid {
+    pub(crate) fn part_uuid(&self, name: &str) -> Uuid {
         Uuid::new_v5(
             &UUID_NAMESPACE,
             format!("part:{self}{}", escape_name(name)).as_bytes(),

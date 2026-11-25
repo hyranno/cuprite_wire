@@ -160,6 +160,14 @@ break the API).
   When the part cannot be made, the macros (and `ibis_part!`) still define an empty struct of
   the name, so that the code using the type gets no "cannot find type" errors besides the error.
   **Breaking** (`cuprite_wire_kicad_lib`): `PartError` and `BindingError` have the field `entry`.
+- **Breaking:** the names of a `HierPath` are private (read with `HierPath::names`), and
+  `HierPath::part_uuid` is internal: the UUID of a component is `Component::uuid`.
+- **Breaking:** `Part` has `Any` as a supertrait, so a part type is `'static`. `PartExt` on a
+  `Box<dyn Part>` holding an `Overridden` adds to its overrides, as on an `Overridden`, instead
+  of wrapping it in another one.
+- The analyses (`Op`, `Tran`, `Dc`, `Ac`) no longer implement `PartialEq`, which compared their
+  hidden identity (two analyses made alike were unequal, a clone was equal), and the hidden
+  `Analysis::read` cannot be called outside the crate.
 
 ### Fixed
 

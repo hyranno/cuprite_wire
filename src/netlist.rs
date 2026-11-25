@@ -384,7 +384,7 @@ fn choose_label<'a>(labels: &[&'a NodeLabel]) -> Option<&'a NodeLabel> {
     labels.iter().copied().min_by(|a, b| {
         rank(a)
             .cmp(&rank(b))
-            .then_with(|| a.scope.0.len().cmp(&b.scope.0.len()))
+            .then_with(|| a.scope.names().len().cmp(&b.scope.names().len()))
             .then_with(|| a.net_name().cmp(&b.net_name()))
     })
 }
