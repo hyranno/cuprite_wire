@@ -262,32 +262,7 @@ fn source(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
         .iter()
         .find(|(name, _, _)| *name == sim_type)
         .ok_or_else(|| fields.unsupported_type())?;
-    let names: Vec<&str> = wave.iter().copied().chain(["ac", "ph"]).collect();
-    let mut values: Vec<Option<String>> = vec![None; names.len()];
-    for (name, value) in &fields.params {
-        let index = names
-            .iter()
-            .position(|known| known.eq_ignore_ascii_case(name))
-            .ok_or_else(|| {
-                Error::new(format!(
-                    "Sim.Params {name} of Sim.Type {sim_type} is not supported (its parameters are {})",
-                    names.join(" ")
-                ))
-            })?;
-        if values[index].is_some() {
-            return Err(Error::new(format!("Sim.Params {name} is given twice")));
-        }
-        values[index] = Some(if names[index] == "pwl" {
-            pwl_points(value, letter)?
-        } else {
-            let unit = if SOURCE_LEVELS.contains(&names[index]) {
-                letter
-            } else {
-                ' '
-            };
-            param_value(name, value, unit)?
-        });
-    }
+    let mut values = source_values(fields, sim_type, wave, letter)?;
     if sim_type == "PULSE" && values[6].is_none() && values[7].is_none() {
         // A single pulse, as KiCad: ngspice 46 repeats a pulse without `per`.
         values[6] = Some("0".into());
@@ -331,6 +306,43 @@ fn source(input: &SimInput, fields: &SimFields) -> Result<Elements, Error> {
     };
     let (nodes, unused) = map_pins(input.symbol, &["+", "-"])?;
     Ok(element(letter, nodes, args, Vec::new(), unused))
+}
+
+/// The `Sim.Params` of a source of `sim_type` in SPICE's notation, in the order of the parameters
+/// of its waveform `wave`, then `ac` and `ph`.
+fn source_values(
+    fields: &SimFields,
+    sim_type: &str,
+    wave: &[&str],
+    letter: char,
+) -> Result<Vec<Option<String>>, Error> {
+    let names: Vec<&str> = wave.iter().copied().chain(["ac", "ph"]).collect();
+    let mut values: Vec<Option<String>> = vec![None; names.len()];
+    for (name, value) in &fields.params {
+        let index = names
+            .iter()
+            .position(|known| known.eq_ignore_ascii_case(name))
+            .ok_or_else(|| {
+                Error::new(format!(
+                    "Sim.Params {name} of Sim.Type {sim_type} is not supported (its parameters are {})",
+                    names.join(" ")
+                ))
+            })?;
+        if values[index].is_some() {
+            return Err(Error::new(format!("Sim.Params {name} is given twice")));
+        }
+        values[index] = Some(if names[index] == "pwl" {
+            pwl_points(value, letter)?
+        } else {
+            let unit = if SOURCE_LEVELS.contains(&names[index]) {
+                letter
+            } else {
+                ' '
+            };
+            param_value(name, value, unit)?
+        });
+    }
+    Ok(values)
 }
 
 /// A number of `Sim.Params` in KiCad's notation, converted to SPICE's (with the unit of `device`).

@@ -12,12 +12,12 @@ mod kicad_ibis;
 use std::path::PathBuf;
 
 use cuprite_wire_kicad_lib::{
-    part::{OptionKey, PartDef, PartError, load_part, load_spice_part},
+    part::{KicadDef, OptionKey, PartDef, PartError, load_part, load_spice_part},
     resolve::Resolver,
-    sim::{Args, ElementDef, Elements, ModelDef, SpiceDef, Value},
+    sim::{Args, ElementDef, Elements, ModelDef, SpiceDef, Value, ibis::IbisDef},
     spice_lib::Dialect,
 };
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::{format_ident, quote};
 
 /// Generates a part type (a struct implementing `Part`) from a KiCad symbol and footprint.
@@ -236,66 +236,11 @@ fn generate(header: &input::Header, part: &PartDef) -> TokenStream {
         quote! { #[doc = #doc] pub const #ident: &'static str = #id; }
     });
 
-    let (mut fields, mut constructor, value_fn) = match &part.value {
-        Value::Param => {
-            // The devices that write the value, which must be a number they read.
-            let mut devices: Vec<char> = match &part.spice {
-                SpiceDef::Elements(Elements { elements, .. }) => elements
-                    .iter()
-                    .filter(|element| matches!(element.args, Args::Value { .. }))
-                    .map(|element| element.device)
-                    .collect(),
-                _ => Vec::new(),
-            };
-            devices.sort_unstable();
-            devices.dedup();
-            let (check, panics) = if devices.is_empty() {
-                (None, None)
-            } else {
-                (
-                    Some(quote! {
-                        #(
-                            if let ::core::result::Result::Err(error) =
-                                #krate::spice::spice_value(#devices, &value)
-                            {
-                                ::core::panic!("{}", error);
-                            }
-                        )*
-                    }),
-                    Some(quote! {
-                        ///
-                        /// # Panics
-                        ///
-                        /// If the value is not a number in KiCad's notation (e.g. `"4k7"`, `"1M"`
-                        /// for mega), which the simulation needs.
-                        #[track_caller]
-                    }),
-                )
-            };
-            (
-                quote!({ value: ::std::string::String }),
-                quote! {
-                    /// Creates the part with the given value (e.g. `"10k"`).
-                    #panics
-                    pub fn new(value: impl ::core::convert::Into<::std::string::String>) -> Self {
-                        let value = value.into();
-                        #check
-                        #name { value }
-                    }
-                },
-                quote!(self.value.clone()),
-            )
-        }
-        Value::Fixed(value) => (
-            quote!(;),
-            quote! {
-                pub const fn new() -> Self {
-                    #name
-                }
-            },
-            quote!(::std::string::String::from(#value)),
-        ),
-    };
+    let ValueItems {
+        mut fields,
+        mut constructor,
+        value_fn,
+    } = value_items(part, name, &krate);
     let mut default_impl = matches!(part.value, Value::Fixed(_)).then(|| {
         quote! {
             impl ::core::default::Default for #name {
@@ -370,6 +315,83 @@ fn generate(header: &input::Header, part: &PartDef) -> TokenStream {
             #spice_fn
         }
     }
+}
+
+/// The items of a part that depend on its value.
+struct ValueItems {
+    /// The fields of the struct.
+    fields: TokenStream,
+    /// `new`.
+    constructor: TokenStream,
+    /// The body of `Part::value`.
+    value_fn: TokenStream,
+}
+
+fn value_items(part: &PartDef, name: &Ident, krate: &TokenStream) -> ValueItems {
+    match &part.value {
+        Value::Param => {
+            let (check, panics) = value_check(part, krate).unzip();
+            ValueItems {
+                fields: quote!({ value: ::std::string::String }),
+                constructor: quote! {
+                    /// Creates the part with the given value (e.g. `"10k"`).
+                    #panics
+                    pub fn new(value: impl ::core::convert::Into<::std::string::String>) -> Self {
+                        let value = value.into();
+                        #check
+                        #name { value }
+                    }
+                },
+                value_fn: quote!(self.value.clone()),
+            }
+        }
+        Value::Fixed(value) => ValueItems {
+            fields: quote!(;),
+            constructor: quote! {
+                pub const fn new() -> Self {
+                    #name
+                }
+            },
+            value_fn: quote!(::std::string::String::from(#value)),
+        },
+    }
+}
+
+/// The check of a given value in `new`, with its `# Panics` section: the devices that write the
+/// value must read it as a number. `None` if no device writes it.
+fn value_check(part: &PartDef, krate: &TokenStream) -> Option<(TokenStream, TokenStream)> {
+    let mut devices: Vec<char> = match &part.spice {
+        SpiceDef::Elements(Elements { elements, .. }) => elements
+            .iter()
+            .filter(|element| matches!(element.args, Args::Value { .. }))
+            .map(|element| element.device)
+            .collect(),
+        _ => Vec::new(),
+    };
+    devices.sort_unstable();
+    devices.dedup();
+    if devices.is_empty() {
+        return None;
+    }
+    Some((
+        quote! {
+            #(
+                if let ::core::result::Result::Err(error) =
+                    #krate::spice::spice_value(#devices, &value)
+                {
+                    ::core::panic!("{}", error);
+                }
+            )*
+        },
+        quote! {
+            ///
+            /// # Panics
+            ///
+            /// If the value is not a number in KiCad's notation (e.g. `"4k7"`, `"1M"`
+            /// for mega), which the simulation needs.
+            #[track_caller]
+        },
+    ))
 }
 
 fn kicad_fn(part: &PartDef, krate: &TokenStream) -> Option<TokenStream> {
@@ -493,19 +515,69 @@ fn element_tokens(element: &ElementDef, krate: &TokenStream) -> TokenStream {
 
 /// Documentation appended to the user's: where the part comes from, its pins and its model.
 fn doc_lines(part: &PartDef) -> Vec<String> {
-    let mut lines = vec![String::new()];
     let elements: &[ElementDef] = match &part.spice {
         SpiceDef::Elements(Elements { elements, .. }) => elements,
         _ => &[],
     };
-    let models: Vec<&ElementDef> = elements.iter().filter(|e| e.info.is_some()).collect();
-    let ibis = match &part.spice {
-        SpiceDef::Ibis(def) => Some(def.as_ref()),
-        _ => None,
+    let doc = PartDoc {
+        part,
+        models: elements.iter().filter(|e| e.info.is_some()).collect(),
+        ibis: match &part.spice {
+            SpiceDef::Ibis(def) => Some(def.as_ref()),
+            _ => None,
+        },
+        lines: vec![String::new()],
     };
-    // The port of each pin in each model.
-    let ports_of = |id: &str| -> String {
-        if let Some(def) = ibis {
+    doc.write()
+}
+
+/// The documentation of a part, as [`doc_lines`] writes it.
+struct PartDoc<'a> {
+    part: &'a PartDef,
+    /// The elements with a model from a library.
+    models: Vec<&'a ElementDef>,
+    ibis: Option<&'a IbisDef>,
+    lines: Vec<String>,
+}
+
+impl PartDoc<'_> {
+    fn write(mut self) -> Vec<String> {
+        match &self.part.kicad {
+            Some(kicad) => self.kicad(kicad),
+            None => self.spice_model(),
+        }
+        if let Some(def) = self.ibis {
+            let source = &def.source;
+            let inner = source.inner();
+            self.paragraph(format!(
+                "IBIS model: {} of the pin `{}` of the component `{}` in `{}` (IBIS {}), \
+                 simulated by `{}`. The file is read again by `new`.",
+                inner.description,
+                source.pin,
+                def.part.component,
+                def.part.path.display(),
+                def.part.ibis_ver,
+                inner.name,
+            ));
+        }
+        for element in self.models.clone() {
+            self.model(element);
+        }
+        self.lines
+            .into_iter()
+            .map(|line| format!(" {line}"))
+            .collect()
+    }
+
+    /// Adds a line after an empty one.
+    fn paragraph(&mut self, line: String) {
+        self.lines.push(String::new());
+        self.lines.push(line);
+    }
+
+    /// The ports of the pin in the models.
+    fn ports_of(&self, id: &str) -> String {
+        if let Some(def) = self.ibis {
             let ports = def.source.kicad_pins();
             return def
                 .nodes
@@ -514,109 +586,94 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 .map(|i| format!("`{}`", ports[i]))
                 .unwrap_or_default();
         }
-        let ports: Vec<String> = models
+        let ports: Vec<String> = self
+            .models
             .iter()
             .filter_map(|element| element.port_of(id, |port| format!("`{}`", escape(port))))
             .collect();
         ports.join(", ")
-    };
-    match &part.kicad {
-        Some(kicad) => {
-            let footprint = kicad
-                .footprint
-                .as_ref()
-                .map_or("no footprint".to_string(), |id| format!("footprint `{id}`"));
-            lines.push(format!(
-                "Generated from the KiCad symbol `{}` with {footprint}.",
-                kicad.symbol
-            ));
-            if let Some(description) = &kicad.description {
-                lines.push(String::new());
-                lines.push(format!(
-                    "Symbol description: {}",
-                    description.replace('\n', " ")
-                ));
-            }
-            if let Some(datasheet) = &kicad.datasheet {
-                lines.push(String::new());
-                lines.push(format!("Datasheet: <{datasheet}>"));
-            }
-            lines.push(String::new());
-            let port_column = !models.is_empty() || ibis.is_some();
-            lines.push(format!(
-                "| Pin ID | Pad | Name | Type | Unit |{}",
-                if port_column { " SPICE port |" } else { "" }
-            ));
-            lines.push(format!(
-                "|---|---|---|---|---|{}",
-                if port_column { "---|" } else { "" }
-            ));
-            for pin in &part.pins {
-                let unit = if pin.unit == 0 {
-                    "-".to_string()
-                } else {
-                    pin.unit.to_string()
-                };
-                let port = if port_column {
-                    format!(" {} |", ports_of(&pin.id))
-                } else {
-                    String::new()
-                };
-                lines.push(format!(
-                    "| `{}` | {} | {} | {} | {} |{port}",
-                    escape(&pin.id),
-                    escape(&pin.pad),
-                    pin.name
-                        .as_deref()
-                        .map_or("".into(), |n| format!("`{}`", escape(n))),
-                    pin.electrical_type.as_str(),
-                    unit
-                ));
-            }
-            if !part.global_labels.is_empty() {
-                let labels: Vec<String> = part
-                    .global_labels
-                    .iter()
-                    .map(|(id, net)| format!("`{}` to `{}`", escape(id), escape(net)))
-                    .collect();
-                lines.push(String::new());
-                lines.push(format!(
-                    "Hidden power input pins, connected to global nets as in KiCad: {}.",
-                    labels.join(", ")
-                ));
-            }
-        }
-        None => {
-            lines.push(
-                "Generated from a SPICE model, for simulation only (`kicad()` returns `None`)."
-                    .into(),
-            );
-            lines.push(String::new());
-            lines.push("| Pin ID | Port |".into());
-            lines.push("|---|---|".into());
-            for pin in &part.pins {
-                lines.push(format!("| `{}` | {} |", escape(&pin.id), ports_of(&pin.id)));
-            }
-        }
     }
-    if let Some(def) = ibis {
-        let source = &def.source;
-        let inner = source.inner();
-        lines.push(String::new());
-        lines.push(format!(
-            "IBIS model: {} of the pin `{}` of the component `{}` in `{}` (IBIS {}), \
-             simulated by `{}`. The file is read again by `new`.",
-            inner.description,
-            source.pin,
-            def.part.component,
-            def.part.path.display(),
-            def.part.ibis_ver,
-            inner.name,
+
+    /// A part made from a KiCad symbol: the symbol and its pins.
+    fn kicad(&mut self, kicad: &KicadDef) {
+        let part = self.part;
+        let footprint = kicad
+            .footprint
+            .as_ref()
+            .map_or("no footprint".to_string(), |id| format!("footprint `{id}`"));
+        self.lines.push(format!(
+            "Generated from the KiCad symbol `{}` with {footprint}.",
+            kicad.symbol
         ));
+        if let Some(description) = &kicad.description {
+            self.paragraph(format!(
+                "Symbol description: {}",
+                description.replace('\n', " ")
+            ));
+        }
+        if let Some(datasheet) = &kicad.datasheet {
+            self.paragraph(format!("Datasheet: <{datasheet}>"));
+        }
+        let port_column = !self.models.is_empty() || self.ibis.is_some();
+        self.paragraph(format!(
+            "| Pin ID | Pad | Name | Type | Unit |{}",
+            if port_column { " SPICE port |" } else { "" }
+        ));
+        self.lines.push(format!(
+            "|---|---|---|---|---|{}",
+            if port_column { "---|" } else { "" }
+        ));
+        for pin in &part.pins {
+            let unit = if pin.unit == 0 {
+                "-".to_string()
+            } else {
+                pin.unit.to_string()
+            };
+            let port = if port_column {
+                format!(" {} |", self.ports_of(&pin.id))
+            } else {
+                String::new()
+            };
+            self.lines.push(format!(
+                "| `{}` | {} | {} | {} | {} |{port}",
+                escape(&pin.id),
+                escape(&pin.pad),
+                pin.name
+                    .as_deref()
+                    .map_or("".into(), |n| format!("`{}`", escape(n))),
+                pin.electrical_type.as_str(),
+                unit
+            ));
+        }
+        if !part.global_labels.is_empty() {
+            let labels: Vec<String> = part
+                .global_labels
+                .iter()
+                .map(|(id, net)| format!("`{}` to `{}`", escape(id), escape(net)))
+                .collect();
+            self.paragraph(format!(
+                "Hidden power input pins, connected to global nets as in KiCad: {}.",
+                labels.join(", ")
+            ));
+        }
     }
-    for element in &models {
+
+    /// A part made from a SPICE model: its pins.
+    fn spice_model(&mut self) {
+        self.lines.push(
+            "Generated from a SPICE model, for simulation only (`kicad()` returns `None`).".into(),
+        );
+        self.paragraph("| Pin ID | Port |".into());
+        self.lines.push("|---|---|".into());
+        for pin in &self.part.pins {
+            let line = format!("| `{}` | {} |", escape(&pin.id), self.ports_of(&pin.id));
+            self.lines.push(line);
+        }
+    }
+
+    /// A model from a library.
+    fn model(&mut self, element: &ElementDef) {
         let info = element.info.as_ref().unwrap();
-        lines.push(String::new());
         let kind = match &info.model_type {
             Some(model_type) => format!("`.model` of type `{model_type}`"),
             None => "`.subckt`".to_string(),
@@ -626,13 +683,12 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
         } else {
             format!(" (element {})", element.suffix)
         };
-        lines.push(format!(
+        self.paragraph(format!(
             "SPICE model{suffix}: {kind} `{}` in `{}`.",
             info.name,
             info.path.display()
         ));
-        lines.push(String::new());
-        lines.push(format!(
+        self.paragraph(format!(
             "Dialect: {} ({}).",
             info.dialect.as_str(),
             info.dialect_reason
@@ -643,11 +699,9 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
                 .iter()
                 .map(|(k, v)| format!("`{k}={v}`"))
                 .collect();
-            lines.push(String::new());
-            lines.push(format!("Parameters and defaults: {}.", params.join(", ")));
+            self.paragraph(format!("Parameters and defaults: {}.", params.join(", ")));
         }
     }
-    lines.into_iter().map(|line| format!(" {line}")).collect()
 }
 
 /// Escapes `|` in a table cell.

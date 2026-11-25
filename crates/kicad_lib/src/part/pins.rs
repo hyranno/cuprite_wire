@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::{OptionKey, PartError, PinDef, err};
 use crate::{
     sim::{self, Elements, SpiceDef},
-    symbol::Symbol,
+    symbol::{ElectricalType, Symbol},
 };
 
 /// Pin IDs by pad number (of the first pin of duplicate pins), and pads by symbol pin number.
@@ -239,4 +239,83 @@ pub(super) fn check_internal_connections(
         }
     }
     Ok(groups.to_vec())
+}
+
+/// The pins of a part made from a symbol: a pin per pad of the symbol pins, then the extra pads;
+/// IDs default to the pad numbers (see [`default_pin_ids`] for duplicate pins), renamed by
+/// `renames`.
+pub(super) fn symbol_part_pins(
+    symbol: &Symbol,
+    extra_pads: &[String],
+    renames: &[(String, String)],
+) -> Result<Vec<PinDef>, PartError> {
+    let mut pins: Vec<PinDef> = symbol
+        .pins
+        .iter()
+        .flat_map(|pin| {
+            pin.pads.iter().map(|pad| PinDef {
+                id: pad.clone(),
+                pad: pad.clone(),
+                name: pin.name.clone(),
+                electrical_type: pin.electrical_type,
+                unit: pin.unit,
+            })
+        })
+        .collect();
+    pins.extend(extra_pads.iter().map(|pad| PinDef {
+        id: pad.clone(),
+        pad: pad.clone(),
+        name: None,
+        electrical_type: ElectricalType::Passive,
+        unit: 0,
+    }));
+    let default_ids = default_pin_ids(&pins);
+    for (pin, id) in pins.iter_mut().zip(&default_ids) {
+        pin.id.clone_from(id);
+    }
+    rename_pins(&mut pins, renames, PinKeys::PadNumbers)?;
+    Ok(pins)
+}
+
+/// The pins of [`symbol_part_pins`] connected to global nets, as `(pin ID, net name)`: those of
+/// hidden `power_in` symbol pins.
+pub(super) fn global_labels(symbol: &Symbol, pins: &[PinDef]) -> Vec<(String, String)> {
+    // The global net of each pin of the symbol pins, in the same order.
+    let global_nets = symbol.pins.iter().flat_map(|pin| {
+        let net = (pin.hidden && pin.electrical_type == ElectricalType::PowerIn)
+            .then(|| pin.name.clone())
+            .flatten();
+        pin.pads.iter().map(move |_| net.clone())
+    });
+    pins.iter()
+        .zip(global_nets)
+        .filter_map(|(pin, net)| Some((pin.id.clone(), net?)))
+        .collect()
+}
+
+/// The internal connections of a part made from a symbol: the pads of a stacked pin notation,
+/// pins at the same position, the duplicate pins of each pad, then the `given` ones.
+pub(super) fn symbol_internal_connections(
+    symbol: &Symbol,
+    pins: &[PinDef],
+    ids: &PinIds,
+    given: &[Vec<String>],
+) -> Result<Vec<Vec<String>>, PartError> {
+    let mut connections: Vec<Vec<String>> = symbol
+        .pins
+        .iter()
+        .filter(|pin| pin.pads.len() > 1)
+        .map(|pin| ids.of(&pin.pads))
+        .collect();
+    connections.extend(symbol.stacked_pins().iter().map(|group| ids.of_pins(group)));
+    let mut pins_of_pad: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for pin in pins {
+        pins_of_pad
+            .entry(pin.pad.as_str())
+            .or_default()
+            .push(pin.id.clone());
+    }
+    connections.extend(pins_of_pad.into_values().filter(|ids| ids.len() > 1));
+    connections.extend(check_internal_connections(given, pins)?);
+    Ok(connections)
 }

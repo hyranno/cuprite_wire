@@ -249,43 +249,101 @@ pub fn subcircuit(
         model: model.name.clone(),
         message,
     };
-    let kind = Kind::of(model.model_type).ok_or_else(|| {
-        error(format!(
-            "the model type `{}` is not supported",
-            model.model_type
-        ))
-    })?;
-    if kind.needs_pullup && model.pullup.is_none() {
-        return Err(error(format!(
-            "a `{}` model needs [Pullup]",
-            model.model_type
-        )));
-    }
-    if kind.needs_pulldown && model.pulldown.is_none() {
-        return Err(error(format!(
-            "a `{}` model needs [Pulldown]",
-            model.model_type
-        )));
-    }
+    let kind = Kind::checked(model).map_err(error)?;
     let mut ports = vec![PIN, REF];
     if kind.driver {
         ports.extend([KU, KD]);
     }
-
-    let supply = model.voltage_range.map(|v| v.get(corner));
-    let reference = |value: Option<TypMinMax<f64>>, default: Option<f64>| {
-        value.map(|v| v.get(corner)).or(default)
+    let levels = Levels::of(model, corner);
+    let elements = Elements {
+        c_comp: model.c_comp.map(|c| c.get(corner)),
+        curves: iv_curves(model, &kind, &levels).map_err(error)?,
+        terminations: Terminations::of(model, &levels).map_err(error)?,
     };
+    let mut notes = Vec::new();
+    let edges = if kind.driver {
+        Some(driver_edges(model, &elements, corner, &mut notes).map_err(error)?)
+    } else {
+        None
+    };
+    let text = write_subcircuit(name, &ports, model, corner, &notes, parasitics, &elements);
+    Ok(Subcircuit {
+        name: name.to_string(),
+        ports,
+        edges,
+        notes,
+        text,
+    })
+}
+
+impl Kind {
+    /// The kind of the model, if its type is supported and it has the I-V tables the type needs.
+    fn checked(model: &Model) -> Result<Kind, String> {
+        let kind = Kind::of(model.model_type)
+            .ok_or_else(|| format!("the model type `{}` is not supported", model.model_type))?;
+        for (needed, table, keyword) in [
+            (kind.needs_pullup, &model.pullup, "[Pullup]"),
+            (kind.needs_pulldown, &model.pulldown, "[Pulldown]"),
+        ] {
+            if needed && table.is_none() {
+                return Err(format!("a `{}` model needs {keyword}", model.model_type));
+            }
+        }
+        Ok(kind)
+    }
+}
+
+/// The reference voltages of a model at a corner.
+struct Levels {
+    corner: Corner,
+    /// `[Voltage Range]`.
+    supply: Option<f64>,
+    /// `[GND Clamp Reference]`, or else 0.
+    gnd_clamp: Option<f64>,
+    /// `[POWER Clamp Reference]`, or else `[Voltage Range]`.
+    power_clamp: Option<f64>,
+}
+
+impl Levels {
+    fn of(model: &Model, corner: Corner) -> Levels {
+        let supply = model.voltage_range.map(|v| v.get(corner));
+        let mut levels = Levels {
+            corner,
+            supply,
+            gnd_clamp: None,
+            power_clamp: None,
+        };
+        levels.gnd_clamp = levels.reference(model.gnd_clamp_reference, Some(0.0));
+        levels.power_clamp = levels.reference(model.power_clamp_reference, supply);
+        levels
+    }
+
+    /// The `value` at the corner, or else the `default`.
+    fn reference(&self, value: Option<TypMinMax<f64>>, default: Option<f64>) -> Option<f64> {
+        value.map(|v| v.get(self.corner)).or(default)
+    }
+}
+
+/// The elements of a model between the die and the reference.
+struct Elements {
+    c_comp: Option<f64>,
+    curves: Vec<IvCurve>,
+    terminations: Terminations,
+}
+
+/// The I-V tables of the model that the `kind` uses, with their references.
+fn iv_curves(model: &Model, kind: &Kind, levels: &Levels) -> Result<Vec<IvCurve>, String> {
     let ecl = matches!(
         model.model_type,
         ModelType::OutputEcl | ModelType::IoEcl | ModelType::ThreeStateEcl
     );
+    let pulldown_default = if ecl { levels.supply } else { Some(0.0) };
     let tables = [
         (
             "GC",
             "[GND Clamp]",
             &model.gnd_clamp,
-            reference(model.gnd_clamp_reference, Some(0.0)),
+            levels.gnd_clamp,
             false,
             None,
         ),
@@ -293,7 +351,7 @@ pub fn subcircuit(
             "PC",
             "[POWER Clamp]",
             &model.power_clamp,
-            reference(model.power_clamp_reference, supply),
+            levels.power_clamp,
             true,
             None,
         ),
@@ -301,10 +359,7 @@ pub fn subcircuit(
             "PD",
             "[Pulldown]",
             &model.pulldown,
-            reference(
-                model.pulldown_reference,
-                if ecl { supply } else { Some(0.0) },
-            ),
+            levels.reference(model.pulldown_reference, pulldown_default),
             ecl,
             Some(KD),
         ),
@@ -312,7 +367,7 @@ pub fn subcircuit(
             "PU",
             "[Pullup]",
             &model.pullup,
-            reference(model.pullup_reference, supply),
+            levels.reference(model.pullup_reference, levels.supply),
             true,
             Some(KU),
         ),
@@ -324,12 +379,9 @@ pub fn subcircuit(
         if weight.is_some() && !kind.driver {
             continue;
         }
-        let reference = reference.ok_or_else(|| {
-            error(format!(
-                "{keyword} needs its reference voltage or [Voltage Range]"
-            ))
-        })?;
-        let (xs, ys) = table_points(table, corner).map_err(|m| error(format!("{keyword} {m}")))?;
+        let reference = reference
+            .ok_or_else(|| format!("{keyword} needs its reference voltage or [Voltage Range]"))?;
+        let (xs, ys) = table_points(table, levels.corner).map_err(|m| format!("{keyword} {m}"))?;
         curves.push(IvCurve {
             id,
             xs,
@@ -339,141 +391,154 @@ pub fn subcircuit(
             weight,
         });
     }
-    let c_comp = model.c_comp.map(|c| c.get(corner));
-    // The specification allows the terminations only in terminators.
-    let terminator = model.model_type == ModelType::Terminator;
-    let value = |v: Option<TypMinMax<f64>>| v.filter(|_| terminator).map(|v| v.get(corner));
-    let terminations = [
-        (
-            "RGND",
-            "[Rgnd]",
-            value(model.rgnd),
-            "[GND Clamp Reference]",
-            reference(model.gnd_clamp_reference, Some(0.0)),
-        ),
-        (
-            "RPOWER",
-            "[Rpower]",
-            value(model.rpower),
-            "[POWER Clamp Reference]",
-            reference(model.power_clamp_reference, supply),
-        ),
-    ];
-    let ac = match (value(model.rac), value(model.cac)) {
-        (Some(r), Some(c)) => Some((r, c)),
-        (None, None) => None,
-        _ => return Err(error("[Rac] and [Cac] go together".into())),
-    };
-    for (_, keyword, r, reference_keyword, reference) in &terminations {
-        if r.is_some() && reference.is_none() {
-            return Err(error(format!(
-                "{keyword} needs {reference_keyword} or [Voltage Range]"
-            )));
+    Ok(curves)
+}
+
+/// The terminations of a terminator.
+struct Terminations {
+    /// `[Rgnd]` and `[Rpower]`: the names of their elements, the resistances and the voltages of
+    /// their references.
+    resistors: Vec<(&'static str, f64, f64)>,
+    /// `[Rac]` and `[Cac]`, in series to `[GND Clamp Reference]`.
+    ac: Option<(f64, f64)>,
+    /// The voltage of `[GND Clamp Reference]`, or else 0.
+    ac_reference: f64,
+}
+
+impl Terminations {
+    fn of(model: &Model, levels: &Levels) -> Result<Terminations, String> {
+        // The specification allows the terminations only in terminators.
+        let terminator = model.model_type == ModelType::Terminator;
+        let value =
+            |v: Option<TypMinMax<f64>>| v.filter(|_| terminator).map(|v| v.get(levels.corner));
+        let ac = match (value(model.rac), value(model.cac)) {
+            (Some(r), Some(c)) => Some((r, c)),
+            (None, None) => None,
+            _ => return Err("[Rac] and [Cac] go together".into()),
+        };
+        let mut resistors = Vec::new();
+        for (id, keyword, r, reference_keyword, reference) in [
+            (
+                "RGND",
+                "[Rgnd]",
+                value(model.rgnd),
+                "[GND Clamp Reference]",
+                levels.gnd_clamp,
+            ),
+            (
+                "RPOWER",
+                "[Rpower]",
+                value(model.rpower),
+                "[POWER Clamp Reference]",
+                levels.power_clamp,
+            ),
+        ] {
+            let Some(r) = r else { continue };
+            let reference = reference
+                .ok_or_else(|| format!("{keyword} needs {reference_keyword} or [Voltage Range]"))?;
+            resistors.push((id, r, reference));
         }
-    }
-
-    let mut notes = Vec::new();
-    let edges = if kind.driver {
-        let weighted = |weight| curves.iter().find(|c| c.weight == Some(weight));
-        let buffer = edges::Buffer {
-            pullup: weighted(KU),
-            pulldown: weighted(KD),
-            clamps: curves.iter().filter(|c| c.weight.is_none()).collect(),
-            c_comp: c_comp.unwrap_or(0.0),
-        };
-        let mut edge = |waveforms, rising| {
-            edges::from_waveforms(&buffer, waveforms, rising, corner, &mut notes)
-        };
-        let rising = edge(&model.rising_waveforms, true);
-        let falling = edge(&model.falling_waveforms, false);
-        let ramp = |keyword: &str| {
-            let ramp = model.ramp.as_ref().ok_or_else(|| {
-                error(format!(
-                    "a `{}` model needs [{keyword} Waveform] or [Ramp]",
-                    model.model_type
-                ))
-            })?;
-            Ok(Edges::from_ramp(ramp, corner))
-        };
-        Some(Edges {
-            rising: match rising {
-                Some(edge) => edge,
-                None => ramp("Rising")?.rising,
-            },
-            falling: match falling {
-                Some(edge) => edge,
-                None => ramp("Falling")?.falling,
-            },
+        Ok(Terminations {
+            resistors,
+            ac,
+            ac_reference: levels.gnd_clamp.unwrap_or(0.0),
         })
-    } else {
-        None
+    }
+}
+
+/// The edges of a driver: from its waveforms, or else from `[Ramp]`.
+fn driver_edges(
+    model: &Model,
+    elements: &Elements,
+    corner: Corner,
+    notes: &mut Vec<String>,
+) -> Result<Edges, String> {
+    let curves = &elements.curves;
+    let weighted = |weight| curves.iter().find(|c| c.weight == Some(weight));
+    let buffer = edges::Buffer {
+        pullup: weighted(KU),
+        pulldown: weighted(KD),
+        clamps: curves.iter().filter(|c| c.weight.is_none()).collect(),
+        c_comp: elements.c_comp.unwrap_or(0.0),
     };
-
-    let mut text = String::new();
-    let line = |text: &mut String, args: fmt::Arguments| {
-        text.push_str(&args.to_string());
-        text.push('\n');
+    let rising = edges::from_waveforms(&buffer, &model.rising_waveforms, true, corner, notes);
+    let falling = edges::from_waveforms(&buffer, &model.falling_waveforms, false, corner, notes);
+    let ramp = |keyword: &str| {
+        let ramp = model.ramp.as_ref().ok_or_else(|| {
+            format!(
+                "a `{}` model needs [{keyword} Waveform] or [Ramp]",
+                model.model_type
+            )
+        })?;
+        Ok::<_, String>(Edges::from_ramp(ramp, corner))
     };
-    line(
-        &mut text,
-        format_args!(
-            "* IBIS model {} ({}), corner {:?}",
-            model.name, model.model_type, corner
-        ),
-    );
-    for note in &notes {
-        line(&mut text, format_args!("* {note}"));
-    }
-    line(
-        &mut text,
-        format_args!(".subckt {name} {}", ports.join(" ")),
-    );
+    Ok(Edges {
+        rising: match rising {
+            Some(edge) => edge,
+            None => ramp("Rising")?.rising,
+        },
+        falling: match falling {
+            Some(edge) => edge,
+            None => ramp("Falling")?.falling,
+        },
+    })
+}
 
-    // The package, from the pin to the die.
-    let mut node = PIN;
-    if let Some(r) = parasitics.r {
-        line(&mut text, format_args!("RPKG {node} pkg {}", num(r)));
-        node = "pkg";
-    }
-    if let Some(l) = parasitics.l {
-        line(&mut text, format_args!("LPKG {node} die {}", num(l)));
-        node = "die";
-    }
-    let die = node;
-    if let Some(c) = parasitics.c {
-        line(&mut text, format_args!("CPKG {PIN} {REF} {}", num(c)));
-    }
-    if let Some(c) = c_comp {
-        line(&mut text, format_args!("CCOMP {die} {REF} {}", num(c)));
+/// The text of a subcircuit, from its header comments to `.ends`.
+struct SubcircuitText {
+    text: String,
+}
+
+impl SubcircuitText {
+    fn line(&mut self, args: fmt::Arguments) {
+        self.text.push_str(&args.to_string());
+        self.text.push('\n');
     }
 
-    // A node at the voltage of a reference: `ref` itself, or a source named after the element.
-    let gnd_reference = terminations[0].4.unwrap_or(0.0);
-    let reference_node = |text: &mut String, id: &str, voltage: f64| {
+    /// A node at the `voltage` relative to `ref`: `ref` itself, or a source named after the
+    /// element `id`.
+    fn reference_node(&mut self, id: &str, voltage: f64) -> String {
         if voltage == 0.0 {
             REF.to_string()
         } else {
             let node = format!("{}_ref", id.to_ascii_lowercase());
-            line(text, format_args!("V{id} {node} {REF} {}", num(voltage)));
+            self.line(format_args!("V{id} {node} {REF} {}", num(voltage)));
             node
         }
-    };
-    // The terminations of a terminator.
-    for (id, _, r, _, reference) in terminations {
-        if let (Some(r), Some(reference)) = (r, reference) {
-            let node = reference_node(&mut text, id, reference);
-            line(&mut text, format_args!("{id} {die} {node} {}", num(r)));
-        }
-    }
-    if let Some((r, c)) = ac {
-        let node = reference_node(&mut text, "AC", gnd_reference);
-        line(&mut text, format_args!("RAC {die} ac {}", num(r)));
-        line(&mut text, format_args!("CAC ac {node} {}", num(c)));
     }
 
-    for curve in &curves {
+    /// The package, from the pin to the die. Returns the node of the die.
+    fn package(&mut self, parasitics: &Parasitics) -> &'static str {
+        let mut node = PIN;
+        if let Some(r) = parasitics.r {
+            self.line(format_args!("RPKG {node} pkg {}", num(r)));
+            node = "pkg";
+        }
+        if let Some(l) = parasitics.l {
+            self.line(format_args!("LPKG {node} die {}", num(l)));
+            node = "die";
+        }
+        if let Some(c) = parasitics.c {
+            self.line(format_args!("CPKG {PIN} {REF} {}", num(c)));
+        }
+        node
+    }
+
+    fn terminations(&mut self, die: &str, terminations: &Terminations) {
+        for &(id, r, reference) in &terminations.resistors {
+            let node = self.reference_node(id, reference);
+            self.line(format_args!("{id} {die} {node} {}", num(r)));
+        }
+        if let Some((r, c)) = terminations.ac {
+            let node = self.reference_node("AC", terminations.ac_reference);
+            self.line(format_args!("RAC {die} ac {}", num(r)));
+            self.line(format_args!("CAC ac {node} {}", num(c)));
+        }
+    }
+
+    fn curve(&mut self, die: &str, curve: &IvCurve) {
         let id = curve.id;
-        let ref_node = reference_node(&mut text, id, curve.reference);
+        let ref_node = self.reference_node(id, curve.reference);
         // The current into the pin flows from the die to the reference.
         let input = if curve.from_reference {
             format!("%vd({ref_node} {die})")
@@ -481,41 +546,54 @@ pub fn subcircuit(
             format!("%vd({die} {ref_node})")
         };
         match curve.weight {
-            None => line(
-                &mut text,
-                format_args!("A{id} {input} %id({die} {ref_node}) {id}"),
-            ),
+            None => self.line(format_args!("A{id} {input} %id({die} {ref_node}) {id}")),
             Some(weight) => {
                 // The table current as a voltage, multiplied by the weight.
                 let current = format!("i_{}", id.to_ascii_lowercase());
-                line(
-                    &mut text,
-                    format_args!("A{id} {input} %vd({current} {REF}) {id}"),
-                );
-                line(
-                    &mut text,
-                    format_args!("B{id} {die} {ref_node} I=v({current},{REF})*v({weight},{REF})"),
-                );
+                self.line(format_args!("A{id} {input} %vd({current} {REF}) {id}"));
+                self.line(format_args!(
+                    "B{id} {die} {ref_node} I=v({current},{REF})*v({weight},{REF})"
+                ));
             }
         }
-        line(
-            &mut text,
-            format_args!(
-                ".model {id} pwl(x_array=[{}] y_array=[{}] input_domain={PWL_DOMAIN} fraction=TRUE)",
-                join(&curve.xs),
-                join(&curve.ys)
-            ),
-        );
+        self.line(format_args!(
+            ".model {id} pwl(x_array=[{}] y_array=[{}] input_domain={PWL_DOMAIN} fraction=TRUE)",
+            join(&curve.xs),
+            join(&curve.ys)
+        ));
     }
-    line(&mut text, format_args!(".ends {name}"));
+}
 
-    Ok(Subcircuit {
-        name: name.to_string(),
-        ports,
-        edges,
-        notes,
-        text,
-    })
+fn write_subcircuit(
+    name: &str,
+    ports: &[&str],
+    model: &Model,
+    corner: Corner,
+    notes: &[String],
+    parasitics: &Parasitics,
+    elements: &Elements,
+) -> String {
+    let mut text = SubcircuitText {
+        text: String::new(),
+    };
+    text.line(format_args!(
+        "* IBIS model {} ({}), corner {:?}",
+        model.name, model.model_type, corner
+    ));
+    for note in notes {
+        text.line(format_args!("* {note}"));
+    }
+    text.line(format_args!(".subckt {name} {}", ports.join(" ")));
+    let die = text.package(parasitics);
+    if let Some(c) = elements.c_comp {
+        text.line(format_args!("CCOMP {die} {REF} {}", num(c)));
+    }
+    text.terminations(die, &elements.terminations);
+    for curve in &elements.curves {
+        text.curve(die, curve);
+    }
+    text.line(format_args!(".ends {name}"));
+    text.text
 }
 
 /// The first port of a series subcircuit ([`series_subcircuit`]).
