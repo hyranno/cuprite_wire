@@ -1184,7 +1184,8 @@ suggested from the names (not applied; check them against the datasheet):
                     other => panic!("{other:?}"),
                 })
                 .collect();
-            let expected = format!("state_file = \"{}\")", path.display());
+            // With `/` on Windows too, since ngspice reads `\` as an escape.
+            let expected = format!("state_file = \"{}\")", spice_path(path));
             assert_eq!(
                 texts.iter().filter(|t| t.contains(&expected)).count(),
                 1,
