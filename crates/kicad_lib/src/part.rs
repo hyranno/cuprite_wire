@@ -112,18 +112,30 @@ pub enum OptionKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartError {
     pub key: OptionKey,
+    /// The index of the entry of the option (of a map or a list) the error is about.
+    pub entry: Option<usize>,
     pub error: Error,
 }
 
 fn err<T>(key: OptionKey, message: impl Into<String>) -> Result<T, PartError> {
+    Err(at(key)(Error::new(message)))
+}
+
+/// An error about the `entry`-th entry of the option `key`.
+fn err_at<T>(key: OptionKey, entry: usize, message: impl Into<String>) -> Result<T, PartError> {
     Err(PartError {
         key,
+        entry: Some(entry),
         error: Error::new(message),
     })
 }
 
 fn at(key: OptionKey) -> impl Fn(Error) -> PartError {
-    move |error| PartError { key, error }
+    move |error| PartError {
+        key,
+        entry: None,
+        error,
+    }
 }
 
 fn model_error(error: binding::BindingError) -> PartError {
@@ -132,6 +144,7 @@ fn model_error(error: binding::BindingError) -> PartError {
             element: error.element,
             field: error.field,
         },
+        entry: error.entry,
         error: error.error,
     }
 }
@@ -327,13 +340,10 @@ impl SymbolPart<'_> {
             );
         }
         let def = ibis_def(self.symbol, source.clone(), resolver).map_err(|(field, error)| {
-            PartError {
-                key: match field {
-                    IbisField::Symbol => OptionKey::Symbol,
-                    field => OptionKey::Ibis(field),
-                },
-                error,
-            }
+            at(match field {
+                IbisField::Symbol => OptionKey::Symbol,
+                field => OptionKey::Ibis(field),
+            })(error)
         })?;
         fields.extend(ibis_fields(&def));
         Ok(self.ibis_part(def))
@@ -354,12 +364,11 @@ impl SymbolPart<'_> {
             builtin_model_name: &format!("__{}", common.type_name),
             model_mode: common.sim_model,
         };
-        let def = sim::spice_def(&input, resolver).map_err(|e| PartError {
-            key: OptionKey::Spice,
-            error: e.context(format!(
+        let def = sim::spice_def(&input, resolver).map_err(|e| {
+            at(OptionKey::Spice)(e.context(format!(
                 "cannot simulate {} (use `spice: none` or `spice: excluded` to skip)",
                 self.symbol_id
-            )),
+            )))
         })?;
         let ids = self.ids;
         Ok(match def {

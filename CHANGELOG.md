@@ -155,6 +155,11 @@ break the API).
   (`IbisInner`: KiCad's model pins with the pins of the `cuprite_wire::spice::ibis` part that
   simulates them); `IbisField` has `Diff`. Added `ElementDef::port_of` and `sim::assignments`.
   A missing SPICE library is reported as `SPICE library not found (path)`, as the other files.
+- The errors of `kicad_part!` and `spice_part!` about an entry of a map or a list (`pins`,
+  `params`, `unused`, `internal_connections`) point at that entry instead of the whole value.
+  When the part cannot be made, the macros (and `ibis_part!`) still define an empty struct of
+  the name, so that the code using the type gets no "cannot find type" errors besides the error.
+  **Breaking** (`cuprite_wire_kicad_lib`): `PartError` and `BindingError` have the field `entry`.
 
 ### Fixed
 

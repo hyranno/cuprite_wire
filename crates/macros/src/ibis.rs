@@ -213,7 +213,7 @@ pub fn expand(input: &IbisPartInput, resolver: &mut Resolver) -> TokenStream {
             let span = input.spans.of(error.key, input.header.name.span());
             syn::Error::new(span, error.error.message)
         });
-    crate::output(result, resolver)
+    crate::output(&input.header, result, resolver)
 }
 
 fn generate(header: &Header, names: &[Ident], part: &IbisPartDef) -> TokenStream {

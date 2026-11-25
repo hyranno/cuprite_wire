@@ -19,4 +19,7 @@ cuprite_wire::kicad_part! {
     }
 }
 
+// A part that failed is still a type, so that its uses add no "cannot find type" errors.
+fn uses(_: Missing, _: NoLibrary, _: Ground) {}
+
 fn main() {}
