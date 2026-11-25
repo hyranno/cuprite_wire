@@ -765,7 +765,7 @@ pub struct VtPoint {
 pub struct Slope {
     /// In volts.
     pub dv: f64,
-    /// In seconds.
+    /// In seconds; positive in a parsed file.
     pub dt: f64,
 }
 

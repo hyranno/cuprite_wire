@@ -138,7 +138,7 @@ impl Board {
 
     /// A digital output (`OutputPin`, `StatefulOutputPin`) on a pin with output characteristics.
     /// Until it is set, the pin stays as the device starts it (`Low` for an output, `HiZ` for a
-    /// bidirectional pin), and neither `is_set_high` nor `is_set_low` is true.
+    /// bidirectional pin), and neither `is_set_high` nor `is_set_low` is true; `toggle` sets it high.
     pub fn output_pin(&self, pin: &str) -> OutputPinHandle {
         let mut state = self.state.borrow_mut();
         state.outputs.push(Output {
@@ -387,6 +387,19 @@ impl digital::StatefulOutputPin for OutputPinHandle {
 
     fn is_set_low(&mut self) -> Result<bool, Infallible> {
         Ok(self.0.output_level() == Some(Level::Low))
+    }
+
+    /// Sets the output low if it is set high, and high otherwise: an output not yet set starts
+    /// `Low` (or `HiZ`), so its first toggle drives it high. (The default of embedded-hal would
+    /// set it low, since it is not set low either.)
+    fn toggle(&mut self) -> Result<(), Infallible> {
+        let level = if self.0.output_level() == Some(Level::High) {
+            Level::Low
+        } else {
+            Level::High
+        };
+        self.0.set_output(level);
+        Ok(())
     }
 }
 

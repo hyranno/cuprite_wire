@@ -165,6 +165,12 @@ break the API).
   type only (`__Diode`), so two types of the same name in different modules with different
   parameters made ngspice fail with conflicting models. The name has the hash of the model
   appended (`__Diode_af63f94c86021dd3`).
+- `cuprite_wire_ibis`: a `[Ramp]` slope with a time that is not positive (`1/0`) is a parse error;
+  making the edges from it panicked (at compile time in `ibis_part!` and `kicad_part!`).
+- `cuprite_wire_ibis`: a file starting with a UTF-8 byte order mark failed to parse ("text before
+  the first keyword"); the mark is skipped.
+- `cuprite_wire_embedded_hal`: the first `toggle` of an output pin not yet set left it low (the
+  default `toggle` of embedded-hal sets a pin that is not set low to low); it drives it high.
 
 ## [0.3.0] - 2026-11-22
 

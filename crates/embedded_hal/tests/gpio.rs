@@ -249,3 +249,23 @@ fn test_pins_outside_a_run() {
     assert!(line.is_set_low().unwrap());
     assert!(!line.is_set_high().unwrap());
 }
+
+/// The first `toggle` of an output drives it high: it starts `Low` (or `HiZ`), neither set high
+/// nor low, and the default `toggle` of embedded-hal would set it low.
+#[test]
+fn test_toggle() {
+    let board = Board::new();
+    let mut output = board.output_pin("out");
+    output.toggle().unwrap();
+    assert!(output.is_set_high().unwrap());
+    output.toggle().unwrap();
+    assert!(output.is_set_low().unwrap());
+    output.toggle().unwrap();
+    assert!(output.is_set_high().unwrap());
+    // An open-drain pin starts released, so it is pulled low first.
+    let mut line = board.open_drain_pin("sda");
+    line.toggle().unwrap();
+    assert!(line.is_set_low().unwrap());
+    line.toggle().unwrap();
+    assert!(line.is_set_high().unwrap());
+}
