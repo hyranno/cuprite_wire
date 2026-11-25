@@ -207,6 +207,11 @@ mod sealed {
         fn complex(&self) -> bool {
             false
         }
+        /// The result from the columns written by `wrdata`: the scale and one column per probe
+        /// (two for complex vectors).
+        fn read(&self, columns: Vec<Vec<f64>>) -> <Self as super::Analysis>::Output
+        where
+            Self: super::Analysis + Sized;
     }
 }
 
@@ -215,14 +220,10 @@ mod sealed {
 pub trait Analysis: sealed::Sealed {
     /// The result of the analysis.
     type Output;
-    #[doc(hidden)]
-    /// The result from the columns written by `wrdata`: the scale and one column per probe
-    /// (two for complex vectors).
-    fn read(&self, columns: Vec<Vec<f64>>) -> Self::Output;
 }
 
 /// Probes shared by the analyses, with a new identity for each change.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 struct Probes {
     id: u64,
     probes: Vec<Probe>,
@@ -266,7 +267,7 @@ macro_rules! analysis_probes {
 }
 
 /// The operating point, `op`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Op {
     probes: Probes,
 }
@@ -298,10 +299,6 @@ impl sealed::Sealed for Op {
     fn probes(&self) -> &[Probe] {
         &self.probes.probes
     }
-}
-
-impl Analysis for Op {
-    type Output = OpResult;
     fn read(&self, columns: Vec<Vec<f64>>) -> OpResult {
         // `wrdata` writes the first vector of the plot as the scale of `op`.
         OpResult {
@@ -311,13 +308,17 @@ impl Analysis for Op {
     }
 }
 
+impl Analysis for Op {
+    type Output = OpResult;
+}
+
 /// Whether `value` is finite and above 0.
 fn is_positive(value: f64) -> bool {
     value.is_finite() && value > 0.0
 }
 
 /// A transient analysis, `tran <step> <stop> [<start> [<max step>]] [uic]`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Tran {
     step: f64,
     stop: f64,
@@ -420,17 +421,17 @@ impl sealed::Sealed for Tran {
     fn probes(&self) -> &[Probe] {
         &self.probes.probes
     }
-}
-
-impl Analysis for Tran {
-    type Output = SweepResult;
     fn read(&self, columns: Vec<Vec<f64>>) -> SweepResult {
         SweepResult::new(self.probes.probes.clone(), columns)
     }
 }
 
+impl Analysis for Tran {
+    type Output = SweepResult;
+}
+
 /// A DC sweep of the value of an independent source, `dc <source> <start> <stop> <step>`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Dc {
     source: String,
     start: f64,
@@ -481,17 +482,17 @@ impl sealed::Sealed for Dc {
     fn probes(&self) -> &[Probe] {
         &self.probes.probes
     }
-}
-
-impl Analysis for Dc {
-    type Output = SweepResult;
     fn read(&self, columns: Vec<Vec<f64>>) -> SweepResult {
         SweepResult::new(self.probes.probes.clone(), columns)
     }
 }
 
+impl Analysis for Dc {
+    type Output = SweepResult;
+}
+
 /// A small-signal AC analysis, `ac <dec|oct|lin> <points> <start> <stop>`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Ac {
     variation: &'static str,
     points: u32,
@@ -574,10 +575,6 @@ impl sealed::Sealed for Ac {
     fn complex(&self) -> bool {
         true
     }
-}
-
-impl Analysis for Ac {
-    type Output = AcResult;
     fn read(&self, columns: Vec<Vec<f64>>) -> AcResult {
         let mut columns = columns.into_iter();
         let frequency = columns.next().unwrap_or_default();
@@ -596,6 +593,10 @@ impl Analysis for Ac {
             values,
         }
     }
+}
+
+impl Analysis for Ac {
+    type Output = AcResult;
 }
 
 /// The `wrdata` command recording the probes of `analysis` into `file`, if it has probes.

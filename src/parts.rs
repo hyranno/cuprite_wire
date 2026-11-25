@@ -3,6 +3,7 @@
 //! See the guide [Describing circuits](https://github.com/hyranno/cuprite_wire/blob/main/doc/circuits.md#2-parts).
 
 use std::{
+    any::Any,
     collections::{BTreeMap, HashMap},
     fmt::{self, Debug},
 };
@@ -22,7 +23,9 @@ pub use overrides::{Overridden, PartExt, PartOverrides};
 /// [`Part::kicad`] and [`Part::spice`]; `None` means the part cannot be exported to that format.
 /// Parts supporting different formats may be mixed in one circuit; exporting a circuit
 /// that contains an unsupported part to that format is an error.
-pub trait Part: Debug + DynClone {
+///
+/// `Any` lets [`PartExt`] add to the overrides of a boxed [`Overridden`] instead of nesting it.
+pub trait Part: Any + Debug + DynClone {
     /// Reference designator prefix (e.g. `"R"`), followed by a number in the reference.
     ///
     /// It must not be empty, end with a digit (`U1` + `1` would be `U11`), or contain whitespace,

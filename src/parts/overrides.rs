@@ -191,23 +191,22 @@ pub trait PartExt: Sized {
     }
 }
 
-impl<P: Part + 'static> PartExt for P {
+impl<P: Part> PartExt for P {
     fn into_overridden(self) -> Overridden {
-        match (Box::new(self) as Box<dyn Any>).downcast::<Overridden>() {
-            Ok(part) => *part,
-            Err(part) => Overridden {
-                part: part.downcast::<P>().expect("the part is a `P`"),
-                overrides: PartOverrides::default(),
-            },
-        }
+        (Box::new(self) as Box<dyn Part>).into_overridden()
     }
 }
 
 impl PartExt for Box<dyn Part> {
     fn into_overridden(self) -> Overridden {
-        Overridden {
-            part: self,
-            overrides: PartOverrides::default(),
+        if (&*self as &dyn Any).is::<Overridden>() {
+            let part: Box<dyn Any> = self;
+            *part.downcast().expect("the part is an `Overridden`")
+        } else {
+            Overridden {
+                part: self,
+                overrides: PartOverrides::default(),
+            }
         }
     }
 }
@@ -294,6 +293,13 @@ mod tests {
         assert_eq!(part.value(), "1k");
         let flags = part.kicad().unwrap().flags;
         assert!(!flags.dnp && flags.exclude_from_bom && flags.exclude_from_board);
+
+        // A boxed `Overridden` gets the new overrides instead of being wrapped in another one.
+        let boxed: Box<dyn Part> = Box::new(part);
+        let part = boxed.dnp();
+        assert!((&*part.part as &dyn Any).is::<Resistor>(), "{part:?}");
+        let flags = part.kicad().unwrap().flags;
+        assert!(flags.dnp && flags.exclude_from_bom && flags.exclude_from_board);
     }
 
     #[test]
