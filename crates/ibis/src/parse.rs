@@ -989,15 +989,16 @@ fn check_typ(rows: impl IntoIterator<Item = CornerValues>, b: &Block) -> Result<
     Ok(())
 }
 
-/// A `dV/dt` value (`3.0/30n`) or `NA`.
+/// A `dV/dt` value (`3.0/30n`) or `NA`. The time must be positive: the edges are made from it.
 fn parse_slope(s: &str) -> Option<Option<Slope>> {
     if s.eq_ignore_ascii_case("NA") {
         return Some(None);
     }
     let (dv, dt) = s.split_once('/')?;
+    let dt = parse_number(dt).filter(|&dt| dt > 0.0)?;
     Some(Some(Slope {
         dv: parse_number(dv)?,
-        dt: parse_number(dt)?,
+        dt,
     }))
 }
 

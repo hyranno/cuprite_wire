@@ -139,6 +139,7 @@ pub fn parse(text: &str) -> Result<Sexpr, ParseError> {
     let mut parser = Parser {
         chars: text.chars().peekable(),
         pos: Pos { line: 1, column: 1 },
+        depth: 0,
     };
     parser.skip_whitespace();
     let expr = parser.expr()?;
@@ -149,9 +150,15 @@ pub fn parse(text: &str) -> Result<Sexpr, ParseError> {
     Ok(expr)
 }
 
+/// The deepest nesting of lists read. KiCad's files nest about ten levels; the limit keeps a
+/// broken or hostile file from overflowing the stack of the compiler running the macro.
+const MAX_DEPTH: usize = 512;
+
 struct Parser<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     pos: Pos,
+    /// The lists open.
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -245,7 +252,11 @@ impl Parser<'_> {
         match self.chars.peek() {
             None => Err(self.error("unexpected end of file")),
             Some('(') => {
+                if self.depth == MAX_DEPTH {
+                    return Err(self.error(format!("lists nested more than {MAX_DEPTH} deep")));
+                }
                 self.bump();
+                self.depth += 1;
                 let mut items = Vec::new();
                 loop {
                     self.skip_whitespace();
@@ -258,6 +269,7 @@ impl Parser<'_> {
                         }
                         Some(')') => {
                             self.bump();
+                            self.depth -= 1;
                             return Ok(Sexpr::List(items, start));
                         }
                         Some(_) => items.push(self.expr()?),
@@ -363,6 +375,16 @@ mod tests {
             "1:4: unexpected text after the top-level expression"
         );
         assert_eq!(error(")"), "1:1: unexpected ')'");
+        let nested = |depth| format!("{}{}", "(".repeat(depth), ")".repeat(depth));
+        assert!(parse(&nested(MAX_DEPTH)).is_ok());
+        let too_deep = nested(MAX_DEPTH + 1);
+        assert_eq!(
+            error(&too_deep),
+            format!(
+                "1:{}: lists nested more than {MAX_DEPTH} deep",
+                MAX_DEPTH + 1
+            )
+        );
         assert_eq!(error("  "), "1:3: unexpected end of file");
         // KiCad reads such a string as empty (not UTF-8) or cut at the NUL.
         assert_eq!(

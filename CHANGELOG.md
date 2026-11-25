@@ -156,6 +156,33 @@ break the API).
   error instead of a panic (`Op`).
 - `cuprite_wire_ibis` rejects numbers out of the range of `f64` (`1e999`) instead of reading them
   as infinities.
+- `kicad_part!` and `spice_part!`: a pin renamed to an ID whose constant is another constant of the
+  type (`pins`, or `library`, `component` and `ibis_pin` for an IBIS part) is a compile error
+  pointing at `pins` instead of a duplicate definition in the generated code.
+- On Windows, `sim_model: inline` wrote the absolute paths of the files of code models with `\`,
+  which ngspice reads as an escape; they are written with `/` like the other paths.
+- The built-in models of `kicad_part!` (`Sim.Device D` etc. with `Sim.Params`) were named after the
+  type only (`__Diode`), so two types of the same name in different modules with different
+  parameters made ngspice fail with conflicting models. The name has the hash of the model
+  appended (`__Diode_af63f94c86021dd3`).
+- `cuprite_wire_ibis`: a `[Ramp]` slope with a time that is not positive (`1/0`) is a parse error;
+  making the edges from it panicked (at compile time in `ibis_part!` and `kicad_part!`).
+- `cuprite_wire_ibis`: a file starting with a UTF-8 byte order mark failed to parse ("text before
+  the first keyword"); the mark is skipped.
+- `cuprite_wire_embedded_hal`: the first `toggle` of an output pin not yet set left it low (the
+  default `toggle` of embedded-hal sets a pin that is not set low to low); it drives it high.
+- `kicad_part!`: a relative directory in `KICAD10_SYMBOL_DIR` etc. was read relative to the
+  directory rustc runs in, while the rebuild tracking took it relative to the source file; it is
+  relative to the crate, like the other paths.
+- `dialect: auto` of `spice_part!` and the `sim` block chose the dialect from the constructs of the
+  whole library, so an unrelated subcircuit with `IF(` put a model in PSpice mode (or made it an
+  error next to one with `uplim(`). Only the model, the definitions it uses and the lines outside
+  any definition count.
+- `kicad_part!` limits what a broken library can make it do: a stacked pin number of more than
+  10000 pads (`[1-99999999]`) and lists nested more than 512 deep are errors instead of running
+  out of memory or stack.
+- `cuprite_wire_ibis`: where the equations of the weights of two waveforms were dependent up to
+  rounding, a weight could jump between 0 and 1; it keeps its previous value.
 
 ## [0.3.0] - 2026-11-22
 

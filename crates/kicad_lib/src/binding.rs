@@ -26,7 +26,10 @@ use crate::{
     Error,
     resolve::Resolver,
     sim::{Args, ElementDef, Elements, ModelDef, ModelMode},
-    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, FileRef, file_refs},
+    spice_lib::{
+        Definition, DefinitionKind, Dialect, DialectHint, FileRef, file_refs, same_section,
+        spice_path,
+    },
 };
 
 /// The dialect of a model: detected from the library, or given.
@@ -269,7 +272,7 @@ fn bind_one(
         &model.what,
     )?;
     let args = instance_args(&found.name, &model, &binding.params)?;
-    let (dialect, dialect_reason) = choose_dialect(binding.dialect, &libs)?;
+    let (dialect, dialect_reason) = choose_dialect(binding.dialect, &libs, &dependencies)?;
     let models = match options.mode {
         ModelMode::Include => {
             check_includes(&libs, dialect)?;
@@ -424,7 +427,7 @@ fn check_relative_files(found: &Definition, files: &[Vec<ModelFile>]) -> Result<
 fn with_absolute_files(text: &str, files: &[ModelFile]) -> String {
     let mut text = text.to_string();
     for file in files.iter().rev() {
-        let path = file.path.to_string_lossy();
+        let path = spice_path(&file.path);
         text.replace_range(file.reference.range.clone(), &format!("\"{path}\""));
     }
     text
@@ -687,14 +690,29 @@ pub(crate) fn check_param_value(name: &str, value: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// The dialect of the model, and why it was chosen.
+/// The dialect of the model, and why it was chosen: from the hints in the sections read and in the
+/// definitions `used` (the model and its dependencies), or outside any definition. ngspice
+/// translates a definition only when it is used, so the others do not matter.
 fn choose_dialect(
     option: DialectOption,
     libs: &[LibFile],
+    used: &[(Definition, PathBuf)],
 ) -> Result<(Dialect, String), FieldError> {
+    let applies = |hint: &DialectHint, section: Option<&str>, file: &Path| {
+        same_section(hint.section.as_deref(), section)
+            && hint.definition.as_ref().is_none_or(|name| {
+                used.iter()
+                    .any(|(d, path)| path == file && d.name.eq_ignore_ascii_case(name))
+            })
+    };
     let hints: Vec<(&Path, &DialectHint)> = libs
         .iter()
-        .flat_map(|(lib, _, file)| lib.hints.iter().map(move |hint| (file.as_path(), hint)))
+        .flat_map(|(lib, section, file)| {
+            lib.hints
+                .iter()
+                .filter(move |hint| applies(hint, section.as_deref(), file))
+                .map(move |hint| (file.as_path(), hint))
+        })
         .collect();
     let describe = |hints: &[&(&Path, &DialectHint)]| -> String {
         let list: Vec<String> = hints
@@ -1095,6 +1113,16 @@ suggested from the names (not applied; check them against the datasheet):
                     .into()
             )
         );
+        // The constructs of the other subcircuits do not decide the dialect of one without any.
+        let plain = run(&[binding("vsup_plain")], pins, ModelMode::Include).unwrap();
+        let info = plain.elements[0].info.as_ref().unwrap();
+        assert_eq!(
+            (plain.elements[0].dialect, info.dialect_reason.as_str()),
+            (
+                crate::spice_lib::Dialect::Ngspice,
+                "no PSpice or LTspice constructs found"
+            )
+        );
         let mut given = binding("vsup_mixed");
         given.dialect = DialectOption::Given(crate::spice_lib::Dialect::Ltspice);
         assert_eq!(
@@ -1156,7 +1184,8 @@ suggested from the names (not applied; check them against the datasheet):
                     other => panic!("{other:?}"),
                 })
                 .collect();
-            let expected = format!("state_file = \"{}\")", path.display());
+            // With `/` on Windows too, since ngspice reads `\` as an escape.
+            let expected = format!("state_file = \"{}\")", spice_path(path));
             assert_eq!(
                 texts.iter().filter(|t| t.contains(&expected)).count(),
                 1,

@@ -363,16 +363,26 @@ fn parse_pin(pin: &Sexpr, unit: u32) -> Result<Pin, Error> {
     })
 }
 
+/// The most pads a stacked pin number may stand for, so that a typo (`[1-100000000]`) does not
+/// make the macro allocate without bound. Packages have a few thousand pads at most.
+pub const MAX_STACKED_PADS: usize = 10_000;
+
 /// The pad numbers of a pin number: the number itself, or the pads of KiCad 10's stacked pin
 /// notation, `[` and `]` around comma-separated pad numbers or ranges (`[1,3]`, `[1-4]`,
 /// `[A1-A4,B2]`; the ends of a range share the prefix before their trailing digits). Expanded as
 /// KiCad's `ExpandStackedPinNotation` does; KiCad keeps an invalid notation as a single pad number
-/// (with an ERC warning), while this is an error.
+/// (with an ERC warning), while this is an error. So is a notation of more than
+/// [`MAX_STACKED_PADS`] pads, for which KiCad has no limit.
 pub fn expand_stacked_pin_number(number: &str) -> Result<Vec<String>, Error> {
     if !number.contains(['[', ']']) {
         return Ok(vec![number.to_string()]);
     }
     let invalid = || Error::new(format!("invalid stacked pin number {number:?}"));
+    let too_many = || {
+        Error::new(format!(
+            "stacked pin number {number:?} has more than {MAX_STACKED_PADS} pads"
+        ))
+    };
     let inner = number
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
@@ -384,6 +394,9 @@ pub fn expand_stacked_pin_number(number: &str) -> Result<Vec<String>, Error> {
         .filter(|part| !part.is_empty())
     {
         let Some((start, end)) = part.split_once('-') else {
+            if pads.len() == MAX_STACKED_PADS {
+                return Err(too_many());
+            }
             pads.push(part.to_string());
             continue;
         };
@@ -391,6 +404,9 @@ pub fn expand_stacked_pin_number(number: &str) -> Result<Vec<String>, Error> {
         let (end_prefix, end) = split_trailing_number(end.trim()).ok_or_else(invalid)?;
         if prefix != end_prefix || start > end {
             return Err(invalid());
+        }
+        if end - start >= (MAX_STACKED_PADS - pads.len()) as u64 {
+            return Err(too_many());
         }
         pads.extend((start..=end).map(|n| format!("{prefix}{n}")));
     }
@@ -483,6 +499,16 @@ mod tests {
         );
         assert_eq!(expand("[AA9-AA10]"), Ok(strings(&["AA9", "AA10"])));
         assert_eq!(expand("[7]"), Ok(strings(&["7"])));
+        assert_eq!(expand("[1-10000]").map(|pads| pads.len()), Ok(10_000));
+        assert_eq!(expand("[1-9999,A]").map(|pads| pads.len()), Ok(10_000));
+        for too_many in ["[0-10000]", "[1-99999999]", "[1-10000,A]", "[A,1-10000]"] {
+            assert_eq!(
+                expand(too_many),
+                Err(format!(
+                    "stacked pin number {too_many:?} has more than 10000 pads"
+                ))
+            );
+        }
         for invalid in [
             "[1,2", "1]", "x[1]", "[]", "[ , ]", "[A1-B2]", "[4-1]", "[A-C]",
         ] {

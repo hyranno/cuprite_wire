@@ -45,8 +45,9 @@ pub(crate) fn normalize(keyword: &str) -> String {
 }
 
 /// Splits the text into keywords, up to `[END]` (excluded). Returns the blocks and the comment
-/// character in effect at the end.
+/// character in effect at the end. A UTF-8 byte order mark at the start is skipped.
 pub(crate) fn lex(text: &str) -> Result<(Vec<Block>, char), Error> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut comment = '|';
     let mut blocks: Vec<Block> = Vec::new();
     for (index, raw) in text.lines().enumerate() {

@@ -1,12 +1,12 @@
 .title kicad_libraries
 .include "/usr/share/kicad/symbols/Simulation_SPICE.sp"
-.model __Diode D
-.model __Nmos VDMOS NCHAN
-.model __Npn NPN
+.model __Diode_af63f94c86021dd3 D
+.model __Nmos_d1c0588218d928f2 VDMOS NCHAN
+.model __Npn_36951e19c2985367 NPN
 C1 Net-_Q2-G_ 0 100n
-D1 /OUT +5V __Diode
-Q1 /OUT Net-_Q1-B_ 0 __Npn
-MQ2 /OUT Net-_Q2-G_ 0 __Nmos
+D1 /OUT +5V __Diode_af63f94c86021dd3
+Q1 /OUT Net-_Q1-B_ 0 __Npn_36951e19c2985367
+MQ2 /OUT Net-_Q2-G_ 0 __Nmos_d1c0588218d928f2
 R1 /AMP Net-_U1--_ 10k
 R2 Net-_U1--_ 0 1k
 R3 /AMP Net-_Q1-B_ 4.7k

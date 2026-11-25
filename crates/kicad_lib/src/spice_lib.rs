@@ -118,6 +118,11 @@ pub struct DialectHint {
     /// What was found, e.g. `IF(`.
     pub what: &'static str,
     pub line: usize,
+    /// The `.lib` section the construct is in.
+    pub section: Option<String>,
+    /// The top-level `.subckt`, `.model` or `.func` the construct is in; `None` outside them, where
+    /// it applies to whatever is used from the file.
+    pub definition: Option<String>,
 }
 
 impl std::fmt::Display for DialectHint {
@@ -133,7 +138,7 @@ pub struct SpiceLib {
     pub includes: Vec<Include>,
     /// Names of the `.lib` sections.
     pub sections: Vec<String>,
-    /// The first occurrence of each construct hinting at a dialect.
+    /// The first occurrence of each construct hinting at a dialect, in each definition.
     pub hints: Vec<DialectHint>,
     /// Encrypted blocks outside any definition (they may hide whole definitions).
     pub encrypted_blocks: usize,
@@ -160,6 +165,13 @@ impl Statement<'_> {
             .map_or(1, |i| i + 1);
         &self.lines[..end]
     }
+}
+
+/// Where a statement is, for its dialect hints.
+struct HintScope {
+    line: usize,
+    section: Option<String>,
+    definition: Option<String>,
 }
 
 struct OpenSubckt<'a> {
@@ -193,12 +205,25 @@ impl SpiceLib {
                 }
                 continue;
             }
-            lib.collect_hints(statement);
             let tokens = tokenize(&statement.text);
             let keyword = tokens
                 .first()
                 .map(|t| t.to_ascii_lowercase())
                 .unwrap_or_default();
+            let scope = HintScope {
+                line: statement.line,
+                section: section.clone(),
+                definition: match (open.first(), keyword.as_str()) {
+                    (Some(subckt), _) => Some(subckt.name.clone()),
+                    (None, ".subckt" | ".model") => tokens.get(1).cloned(),
+                    (None, ".func") => tokens
+                        .get(1)
+                        .and_then(|t| t.split('(').next())
+                        .map(str::to_string),
+                    _ => None,
+                },
+            };
+            lib.collect_hints(&statement.text, &scope);
             if let Some(OpenSubckt {
                 top: Some((_, lines, _)),
                 ..
@@ -305,7 +330,7 @@ impl SpiceLib {
                             within: section.clone(),
                             pspice: true,
                         });
-                        lib.hint(Dialect::Pspice, ".LIB file", statement.line);
+                        lib.hint(Dialect::Pspice, ".LIB file", &scope);
                     }
                     [path, name] => lib.includes.push(Include {
                         path: unquote(path).to_string(),
@@ -348,34 +373,40 @@ impl SpiceLib {
         });
     }
 
-    fn hint(&mut self, dialect: Dialect, what: &'static str, line: usize) {
-        if !self.hints.iter().any(|hint| hint.what == what) {
+    fn hint(&mut self, dialect: Dialect, what: &'static str, scope: &HintScope) {
+        if !self.hints.iter().any(|hint| {
+            hint.what == what
+                && hint.section == scope.section
+                && hint.definition == scope.definition
+        }) {
             self.hints.push(DialectHint {
                 dialect,
                 what,
-                line,
+                line: scope.line,
+                section: scope.section.clone(),
+                definition: scope.definition.clone(),
             });
         }
     }
 
     /// Constructs that ngspice reads only in a compatibility mode (checked with ngspice 44.2; the
     /// PSpice functions are translated only inside `.subckt`, where vendor models put them).
-    fn collect_hints(&mut self, statement: &Statement) {
-        let text = statement.text.to_ascii_lowercase();
+    fn collect_hints(&mut self, text: &str, scope: &HintScope) {
+        let text = text.to_ascii_lowercase();
         // Without the PSpice mode, `IF` and `STP` are unknown and `LIMIT` silently evaluates to 0.
         for (function, what) in [("if", "IF("), ("stp", "STP("), ("limit", "LIMIT(")] {
             if calls(&text, function) {
-                self.hint(Dialect::Pspice, what, statement.line);
+                self.hint(Dialect::Pspice, what, scope);
             }
         }
         for (op, what) in [('&', "&"), ('|', "|")] {
             if single(&text, op) {
-                self.hint(Dialect::Pspice, what, statement.line);
+                self.hint(Dialect::Pspice, what, scope);
             }
         }
         for (function, what) in [("uplim", "uplim("), ("dnlim", "dnlim(")] {
             if calls(&text, function) {
-                self.hint(Dialect::Ltspice, what, statement.line);
+                self.hint(Dialect::Ltspice, what, scope);
             }
         }
     }
@@ -435,6 +466,18 @@ pub struct FileRef {
     pub path: String,
     /// The value in the text searched, with its quotes.
     pub range: std::ops::Range<usize>,
+}
+
+/// A path as written in a SPICE netlist, a `Sim.Library` field or a command of ngspice: with `/` as
+/// the separator on Windows, as KiCad writes paths and since ngspice reads `\\` in commands as an
+/// escape.
+pub fn spice_path(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
 }
 
 /// The files named by code models in `text` (a definition, including the `.model` statements
@@ -514,7 +557,8 @@ fn param_values(line: &str, param: &str) -> Vec<(String, std::ops::Range<usize>)
     values
 }
 
-fn same_section(a: Option<&str>, b: Option<&str>) -> bool {
+/// Whether two sections (`None`: outside any section) are the same, case-insensitively.
+pub(crate) fn same_section(a: Option<&str>, b: Option<&str>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -958,6 +1002,27 @@ R1 a b 1k
             ]
         );
         assert!(!calls("ifx(1)", "if") && !calls("dif(1)", "if") && calls("a+if (1)", "if"));
+
+        // Each definition and section has its own hints; a statement outside them has none.
+        let lib = SpiceLib::parse(
+            ".subckt a x params: p={IF(1,2,3)}\nE1 x 0 VALUE={IF(V(x)>1,1,0)}\n.ends\n\
+             .model b D(is={IF(1,2,3)})\n.lib s\n.func c(x) {IF(x,1,0)}\n.endl\n.param q={IF(1,2,3)}\n",
+        )
+        .unwrap();
+        let hints: Vec<_> = lib
+            .hints
+            .iter()
+            .map(|h| (h.line, h.section.as_deref(), h.definition.as_deref()))
+            .collect();
+        assert_eq!(
+            hints,
+            [
+                (1, None, Some("a")),
+                (4, None, Some("b")),
+                (6, Some("s"), Some("c")),
+                (8, None, None),
+            ]
+        );
     }
 
     #[test]

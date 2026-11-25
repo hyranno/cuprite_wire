@@ -12,6 +12,7 @@ use crate::{
         self, Elements, ModelMode, SimInput, SpiceDef, Value,
         ibis::{IbisDef, IbisField, IbisSource, ibis_def},
     },
+    spice_lib::spice_path,
     symbol::{ElectricalType, Symbol},
     text_var,
 };
@@ -19,8 +20,10 @@ use crate::{
 mod pins;
 mod spice;
 
-use pins::{PinIds, PinKeys, check_internal_connections, default_pin_ids, rename_pins};
-use spice::{library_field, sim_block, sim_fields};
+use pins::{
+    PinIds, PinKeys, check_internal_connections, default_pin_ids, pin_constants, rename_pins,
+};
+use spice::{sim_block, sim_fields};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum FootprintOption {
@@ -159,6 +162,9 @@ pub struct PartDef {
     pub global_labels: Vec<(String, String)>,
     /// The SPICE description, with pin IDs.
     pub spice: SpiceDef,
+    /// The associated constants of the pins given an ID that can be one, as
+    /// `(constant name, pin ID)` (`out_a` -> `OUT_A`).
+    pub pin_constants: Vec<(String, String)>,
 }
 
 /// What a part made from a KiCad symbol has for KiCad.
@@ -384,6 +390,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         );
     }
     let value = value_with(&fields)?;
+    let pin_constants = pin_constants(&common.pins, &spice)?;
     let non_empty = |name: &str| {
         symbol
             .property(name)
@@ -407,6 +414,7 @@ pub fn load_part(options: &PartOptions, resolver: &mut Resolver) -> Result<PartD
         internal_connections,
         global_labels,
         spice,
+        pin_constants,
     })
 }
 
@@ -426,7 +434,7 @@ fn ibis_fields(def: &IbisDef) -> Vec<(String, String)> {
             "Sim.Type",
             if source.driver { "DCDRIVER" } else { "DEVICE" }.to_string(),
         ),
-        ("Sim.Library", library_field(&def.part.path)),
+        ("Sim.Library", spice_path(&def.part.path)),
         ("Sim.Name", def.part.component.clone()),
         ("Sim.Ibis.Pin", source.pin.clone()),
     ];
@@ -599,6 +607,11 @@ pub fn load_spice_part(
         (None, _) => "Q".to_string(),
     };
     check_ref_prefix(&ref_prefix)?;
+    let spice = SpiceDef::Elements(Elements {
+        elements,
+        unused_pins: Vec::new(),
+    });
+    let pin_constants = pin_constants(&common.pins, &spice)?;
     Ok(PartDef {
         kicad: None,
         ref_prefix,
@@ -606,10 +619,8 @@ pub fn load_spice_part(
         pins,
         internal_connections,
         global_labels: Vec::new(),
-        spice: SpiceDef::Elements(Elements {
-            elements,
-            unused_pins: Vec::new(),
-        }),
+        spice,
+        pin_constants,
     })
 }
 
@@ -781,10 +792,21 @@ mod tests {
         opts.common.pins = vec![("1".into(), "a".into()), ("2".into(), "a".into())];
         assert_eq!(error(opts).1, "pin ID \"a\" is used twice");
         let mut opts = options("test:R", "test:R_0603");
+        opts.common.value = Some(Value::Param);
         opts.common.pins = vec![("1".into(), "out".into()), ("2".into(), "OUT".into())];
         assert_eq!(
             error(opts).1,
             "pin IDs \"out\" and \"OUT\" differ only in case"
+        );
+        let mut opts = options("test:R", "test:R_0603");
+        opts.common.value = Some(Value::Param);
+        opts.common.pins = vec![("1".into(), "Pins".into())];
+        assert_eq!(
+            error(opts),
+            (
+                OptionKey::Pins,
+                "pin ID \"Pins\" would make the constant PINS, which the part already has".into()
+            )
         );
         let mut opts = options("test:R", "test:R_0603");
         opts.common.value = Some(Value::Fixed("R".into()));
@@ -989,7 +1011,7 @@ mod tests {
             fields,
             &vec![
                 ("Sim.Device".to_string(), "SUBCKT".to_string()),
-                ("Sim.Library".to_string(), library_field(&lib)),
+                ("Sim.Library".to_string(), spice_path(&lib)),
                 ("Sim.Name".to_string(), "VSUP01".to_string()),
                 (
                     "Sim.Pins".to_string(),

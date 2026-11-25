@@ -70,4 +70,14 @@ cuprite_wire::kicad_part! {
     }
 }
 
+// `PINS` is the constant of all pin IDs.
+cuprite_wire::kicad_part! {
+    struct PinsClash {
+        symbol: "test:R",
+        footprint: "test:R_0603",
+        value: param,
+        pins: { "1" => "pins" },
+    }
+}
+
 fn main() {}

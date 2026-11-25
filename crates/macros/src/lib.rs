@@ -80,7 +80,6 @@ pub fn kicad_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         &input.header,
         &input.spans,
         OptionKey::Symbol,
-        &input.options.common.pins,
         result,
         &resolver,
     )
@@ -127,15 +126,7 @@ pub fn spice_part(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         element: 0,
         field: cuprite_wire_kicad_lib::binding::BindingField::Name,
     };
-    expand(
-        &input.header,
-        &input.spans,
-        name,
-        &input.options.common.pins,
-        result,
-        &resolver,
-    )
-    .into()
+    expand(&input.header, &input.spans, name, result, &resolver).into()
 }
 
 /// Generates a type whose functions return the IBIS buffers of the pins of a component.
@@ -192,14 +183,15 @@ fn expand(
     header: &input::Header,
     spans: &input::Spans,
     fallback: OptionKey,
-    renamed: &[(String, String)],
     result: Result<PartDef, PartError>,
     resolver: &Resolver,
 ) -> TokenStream {
-    // Track what was read even when it failed, so fixing a library file triggers a rebuild.
+    // Track what was read even when it failed, so fixing a library file triggers a rebuild. A file
+    // that does not exist cannot be tracked (`include_bytes!` fails, and stable Rust has no other
+    // way), so creating it does not: the source has to be touched.
     let tracking = tracking(resolver);
     match result {
-        Ok(part) => generate(header, renamed, &part, tracking),
+        Ok(part) => generate(header, &part, tracking),
         Err(error) => {
             let span = spans.of(error.key, fallback, header.name.span());
             let error = syn::Error::new(span, error.error.message).to_compile_error();
@@ -209,6 +201,7 @@ fn expand(
 }
 
 /// Makes the compiler rebuild when a file read or an environment variable consulted changes.
+/// Files that do not exist are left out (see [`expand`]).
 fn tracking(resolver: &Resolver) -> TokenStream {
     let files = resolver
         .files
@@ -224,12 +217,7 @@ fn tracking(resolver: &Resolver) -> TokenStream {
     }
 }
 
-fn generate(
-    header: &input::Header,
-    renamed: &[(String, String)],
-    part: &PartDef,
-    tracking: TokenStream,
-) -> TokenStream {
+fn generate(header: &input::Header, part: &PartDef, tracking: TokenStream) -> TokenStream {
     let krate = quote!(::cuprite_wire);
     let attrs = &header.attrs;
     let vis = &header.vis;
@@ -237,16 +225,11 @@ fn generate(
     let doc = doc_lines(part);
 
     let pin_ids: Vec<&str> = part.pins.iter().map(|pin| pin.id.as_str()).collect();
-    // Constants for pins given an ID that is a valid identifier (e.g. `out_a` -> `OUT_A`).
-    let pin_consts = renamed
-        .iter()
-        .map(|(_, id)| id.as_str())
-        .filter(|id| is_identifier(id))
-        .map(|id| {
-            let ident = format_ident!("{}", id.to_ascii_uppercase());
-            let doc = format!("The pin ID `{id}`.");
-            quote! { #[doc = #doc] pub const #ident: &'static str = #id; }
-        });
+    let pin_consts = part.pin_constants.iter().map(|(name, id)| {
+        let ident = format_ident!("{name}");
+        let doc = format!("The pin ID `{id}`.");
+        quote! { #[doc = #doc] pub const #ident: &'static str = #id; }
+    });
 
     let (mut fields, mut constructor, value_fn) = match &part.value {
         Value::Param => {
@@ -677,14 +660,6 @@ fn escape(text: &str) -> String {
     text.replace('|', "\\|")
 }
 
-fn is_identifier(text: &str) -> bool {
-    text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
-        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-        && text != "_"
-        && syn::parse_str::<syn::Ident>(&text.to_ascii_uppercase()).is_ok()
-        && !text.eq_ignore_ascii_case("PINS")
-}
-
 #[cfg(test)]
 mod tests {
     use cuprite_wire_kicad_lib::{
@@ -720,6 +695,7 @@ mod tests {
             internal_connections: Vec::new(),
             global_labels: Vec::new(),
             spice: SpiceDef::Unsupported,
+            pin_constants: Vec::new(),
         };
         let lines = doc_lines(&part);
         let row = lines.last().unwrap();

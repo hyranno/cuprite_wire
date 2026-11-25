@@ -270,8 +270,29 @@ pub(super) fn from_waveforms(
     Some(solve(buffer, &chosen, rising, corner))
 }
 
+/// How small a determinant may be relative to its terms before the equations are taken as
+/// dependent: the solution of nearly dependent equations is mostly rounding error, and clamping it
+/// to 0..=1 makes the weight jump between 0 and 1.
+const SINGULAR: f64 = 1e-9;
+
+/// Solves `a·ku + c·kd = b` for two rows `(a, c, b)`; `None` if they are (nearly) dependent.
+fn solve_pair((a1, c1, b1): (f64, f64, f64), (a2, c2, b2): (f64, f64, f64)) -> Option<(f64, f64)> {
+    let det = a1 * c2 - a2 * c1;
+    if det.abs() <= SINGULAR * ((a1 * c2).abs() + (a2 * c1).abs()) {
+        return None;
+    }
+    let solution = ((b1 * c2 - b2 * c1) / det, (a1 * b2 - a2 * b1) / det);
+    (solution.0.is_finite() && solution.1.is_finite()).then_some(solution)
+}
+
+/// `b / a`; `None` if `a` is 0 or the quotient is not finite.
+fn divide(b: f64, a: f64) -> Option<f64> {
+    Some(b / a).filter(|q| a != 0.0 && q.is_finite())
+}
+
 /// Solves the weights at each time of the waveforms, so that the buffer drives the current that
-/// flows into each fixture.
+/// flows into each fixture. Where the equations are (nearly) dependent, the weights keep their
+/// previous values.
 fn solve(buffer: &Buffer, waveforms: &[&Waveform], rising: bool, corner: Corner) -> Edge {
     let curves: Vec<Vec<(f64, f64)>> = waveforms.iter().map(|w| w.curve(corner)).collect();
     let end = curves
@@ -310,27 +331,20 @@ fn solve(buffer: &Buffer, waveforms: &[&Waveform], rising: bool, corner: Corner)
     let mut ku = Vec::with_capacity(times.len());
     let mut kd = Vec::with_capacity(times.len());
     for (i, &t) in times.iter().enumerate() {
-        let (a1, c1, b1) = rows(0, i);
+        let first = rows(0, i);
         let solution = match (has_pu, has_pd, waveforms.len()) {
-            (true, true, 2) => {
-                let (a2, c2, b2) = rows(1, i);
-                let det = a1 * c2 - a2 * c1;
-                ((b1 * c2 - b2 * c1) / det, (a1 * b2 - a2 * b1) / det)
-            }
-            // One waveform: ku + kd = 1.
+            (true, true, 2) => solve_pair(first, rows(1, i)),
+            // One waveform: ku + kd = 1, that is (a - c)·ku = b - c.
             (true, true, _) => {
-                let ku = (b1 - c1) / (a1 - c1);
-                (ku, 1.0 - ku)
+                let (a, c, b) = first;
+                solve_pair((a, c, b), (1.0, 1.0, 1.0))
             }
-            (true, false, _) => (b1 / a1, 0.0),
-            _ => (0.0, b1 / c1),
+            (true, false, _) => divide(first.2, first.0).map(|ku| (ku, 0.0)),
+            _ => divide(first.2, first.1).map(|kd| (0.0, kd)),
         };
-        if solution.0.is_finite() && solution.1.is_finite() {
+        if let Some((ku, kd)) = solution {
             // `+ 0.0` turns -0 into 0.
-            previous = (
-                solution.0.clamp(0.0, 1.0) + 0.0,
-                solution.1.clamp(0.0, 1.0) + 0.0,
-            );
+            previous = (ku.clamp(0.0, 1.0) + 0.0, kd.clamp(0.0, 1.0) + 0.0);
         }
         ku.push((t, previous.0));
         kd.push((t, previous.1));

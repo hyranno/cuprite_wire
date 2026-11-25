@@ -321,6 +321,17 @@ Vds = 1.0
     );
 }
 
+/// A UTF-8 byte order mark (written by some Windows editors) is not text before the first keyword.
+#[test]
+fn test_byte_order_mark() {
+    let text = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/buffers.ibs"
+    ))
+    .unwrap();
+    assert_eq!(parse(&format!("\u{feff}{text}")).unwrap(), fixture());
+}
+
 /// Parses a file made of the header and the given lines, and returns the error.
 fn error(body: &str) -> (usize, String) {
     let text = format!("[IBIS Ver] 4.0\n{body}");
@@ -513,6 +524,17 @@ fn test_errors() {
             "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1 NA NA\n",
             5,
             "invalid value `1` for dV/dt_r",
+        ),
+        // The time of a slope must be positive (the edges are made from it).
+        (
+            "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1/0 NA NA\n",
+            5,
+            "invalid value `1/0` for dV/dt_r",
+        ),
+        (
+            "[Model] m\nModel_type Output\n[Ramp]\ndV/dt_r 1/1n 1/-1n NA\n",
+            5,
+            "invalid value `1/-1n` for dV/dt_r",
         ),
     ];
     for &(body, line, message) in cases {

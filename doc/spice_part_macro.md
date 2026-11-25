@@ -58,7 +58,7 @@ the body of the model is not interpreted, ngspice reads it. Files read are track
 | `sim_model` | `include` or `inline` (as for `kicad_part!`) | `include` |
 
 Port names such as `IN+` or `1` are not identifiers, so constants (`Tps3899Model::RESET_N`) are
-made only for the pins renamed with `pins` (whose IDs must differ in more than case); `PINS` lists
+made only for the pins renamed with `pins` (whose IDs must differ in more than case, and must not be `pins`); `PINS` lists
 all of them. `kicad()` returns `None`, and
 `spice()` returns one element: `X` for a `.subckt`, `D` `Q` `M` `J` for a `.model` of type `D`,
 `NPN`/`PNP`, `NMOS`/`PMOS`/`VDMOS`, `NJF`/`PJF` (terminals `A K`, `C B E`, `D G S [B]`, `D G S`).
@@ -154,7 +154,9 @@ from what the library (and the files it includes) uses, and record it in the ele
 
 - `dialect: auto` (default) chooses `pspice` if the library has PSpice constructs (`IF(`, `&`, `|`,
   `STP(`, `LIMIT(`, `.LIB file`), `ltspice` for `uplim(` / `dnlim(`, and `ngspice` otherwise;
-  both kinds are an error. The documentation of the generated type says what was found.
+  both kinds are an error. Only the model, the definitions it uses and the lines outside any
+  definition (of the sections read) count: ngspice translates a definition only when it is used,
+  so a library of many models may mix dialects. The documentation of the generated type says what was found.
   Give the dialect explicitly to override a wrong guess.
 - `.LIB file` in a library read with `sim_model: include` needs `dialect: pspice`; a library using
   `.lib file section` cannot be included in the PSpice mode (use `sim_model: inline`).

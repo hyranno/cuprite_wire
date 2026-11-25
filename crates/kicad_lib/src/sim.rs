@@ -106,7 +106,8 @@ pub struct SimInput<'a> {
     /// The reference prefix of the part (`R`, `U`, ...).
     pub ref_prefix: &'a str,
     pub value: &'a Value,
-    /// Name for a built-in model (`.model <name> D ...`), unique to the generated part type.
+    /// Prefix of the name of a built-in model (`.model <prefix>_<hash> D ...`), to which the hash
+    /// of the model is appended so that different models never share a name.
     pub builtin_model_name: &'a str,
     pub model_mode: ModelMode,
 }
@@ -368,12 +369,13 @@ fn semiconductor(
         (None, None) => {
             let model_type = builtin_model_type(device, fields.sim_type.as_deref())
                 .ok_or_else(|| fields.unsupported_type())?;
-            let name = input.builtin_model_name.to_string();
-            let mut text = format!(".model {name} {model_type}");
+            let mut definition = model_type.to_string();
             for (key, value) in &fields.params {
-                text.push_str(&format!(" {key}={}", value::param_to_spice(value)));
+                definition.push_str(&format!(" {key}={}", value::param_to_spice(value)));
             }
-            text.push('\n');
+            let hash = crate::fnv1a(definition.as_bytes());
+            let name = format!("{}_{hash:016x}", input.builtin_model_name);
+            let text = format!(".model {name} {definition}\n");
             let first = model_type.split(' ').next().unwrap().to_ascii_lowercase();
             let model = model_device(&first, &text).expect("a built-in model type");
             debug_assert_eq!(model.sim_device, device);
@@ -731,12 +733,15 @@ mod tests {
         );
         assert_eq!(element.device, 'D');
         assert_eq!(element.nodes, strings(&["2", "1"]));
-        assert_eq!(element.args, Args::Fixed("__S".into()));
+        // The name has the hash of the model, so that parts with different parameters do not
+        // share a name.
+        let name = format!("__S_{:016x}", crate::fnv1a(b"D rs=50m cjo=10p"));
+        assert_eq!(element.args, Args::Fixed(name.clone()));
         assert_eq!(
             element.models,
             vec![ModelDef::Inline {
-                name: "__S".into(),
-                text: ".model __S D rs=50m cjo=10p\n".into()
+                text: format!(".model {name} D rs=50m cjo=10p\n"),
+                name,
             }]
         );
     }
@@ -949,8 +954,11 @@ mod tests {
         assert_eq!(
             element.models,
             vec![ModelDef::Inline {
-                name: "__S".into(),
-                text: ".model __S D bv=1Meg rs={x}\n".into()
+                name: format!("__S_{:016x}", crate::fnv1a(b"D bv=1Meg rs={x}")),
+                text: format!(
+                    ".model __S_{:016x} D bv=1Meg rs={{x}}\n",
+                    crate::fnv1a(b"D bv=1Meg rs={x}")
+                ),
             }]
         );
     }

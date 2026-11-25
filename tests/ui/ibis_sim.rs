@@ -79,4 +79,14 @@ cuprite_wire::kicad_part! {
     }
 }
 
+// An IBIS part has the constants `LIBRARY`, `COMPONENT` and `IBIS_PIN`.
+cuprite_wire::kicad_part! {
+    struct ConstantClash {
+        symbol: "test:IBIS_LEGACY",
+        footprint: none,
+        pins: { "2" => "library" },
+        ibis: { library: "${TEST_MODELS}/kicad_ibis.ibs", pin: "1" },
+    }
+}
+
 fn main() {}

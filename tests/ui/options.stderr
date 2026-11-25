@@ -51,3 +51,9 @@ error: pin IDs "out" and "OUT" differ only in case
    |
 69 |         pins: { "1" => "out", "2" => "OUT" },
    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error: pin ID "pins" would make the constant PINS, which the part already has
+  --> tests/ui/options.rs:79:15
+   |
+79 |         pins: { "1" => "pins" },
+   |               ^^^^^^^^^^^^^^^^^

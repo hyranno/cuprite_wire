@@ -32,13 +32,4 @@ pub use value::{spice_number, spice_value};
 #[cfg(test)]
 mod tests;
 
-/// A path as written in a netlist or a command of ngspice: with `/` as the separator on Windows,
-/// since ngspice reads `\\` in commands as an escape.
-pub(crate) fn spice_path(path: &std::path::Path) -> String {
-    let text = path.display().to_string();
-    if cfg!(windows) {
-        text.replace('\\', "/")
-    } else {
-        text
-    }
-}
+pub(crate) use cuprite_wire_kicad_lib::spice_lib::spice_path;

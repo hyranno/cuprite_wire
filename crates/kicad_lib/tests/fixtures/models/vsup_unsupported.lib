@@ -12,3 +12,7 @@ $CDNENCFINISH
 E1 OUT 0 VALUE = { IF(V(IN) > 1, 1, 0) }
 B1 OUT2 0 V = uplim(V(IN), 1, 0.1)
 .ENDS VSUP_MIXED
+* Next to them, one ngspice can use without a compatibility mode, although the others hint at one.
+.SUBCKT VSUP_PLAIN IN OUT
+R1 IN OUT 1k
+.ENDS VSUP_PLAIN
