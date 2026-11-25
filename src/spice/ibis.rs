@@ -62,7 +62,7 @@ use crate::{
     spice::{
         ModelSource, SpiceElement, SpicePartInfo, Waveform,
         digital::{DigitalSequence, InputCharacteristics, Level},
-        subcircuit::{SUBCIRCUIT_REFERENCE, fnv1a, hashed_subcircuit},
+        subcircuit::{SUBCIRCUIT_REFERENCE, hashed_definition, hashed_subcircuit, subcircuit_part},
     },
 };
 
@@ -159,10 +159,11 @@ impl IbisBuffer {
         parasitics: &Parasitics,
         corner: Corner,
     ) -> Result<Self, SubcircuitError> {
-        // The name is derived from the definition, so equal buffers share one definition.
-        let hash = fnv1a(subcircuit("", model, parasitics, corner)?.text.as_bytes());
-        let name = format!("cuprite_ibis_model_{hash:016x}");
-        let subckt = subcircuit(&name, model, parasitics, corner)?;
+        let (name, subckt) = hashed_definition(
+            "ibis_model",
+            |name| subcircuit(name, model, parasitics, corner),
+            |subckt| &subckt.text,
+        )?;
         let input = model
             .thresholds(corner)
             .map(|(low, high)| InputCharacteristics {
@@ -400,9 +401,11 @@ impl IbisSeries {
     /// If the model is not a `Series` model of passive elements
     /// ([`cuprite_wire_ibis::spice::series_subcircuit`]).
     pub fn new(model: &Model, corner: Corner) -> Result<Self, SubcircuitError> {
-        let hash = fnv1a(series_subcircuit("", model, corner)?.text.as_bytes());
-        let name = format!("cuprite_ibis_series_{hash:016x}");
-        let subckt = series_subcircuit(&name, model, corner)?;
+        let (name, subckt) = hashed_definition(
+            "ibis_series",
+            |name| series_subcircuit(name, model, corner),
+            |subckt| &subckt.text,
+        )?;
         Ok(IbisSeries {
             model_name: model.name.clone(),
             corner,
@@ -620,11 +623,7 @@ impl IbisDiffBuffer {
     /// The SPICE element of a part with the wrapper subcircuit `body`.
     fn element(&self, body: &str) -> SpicePartInfo {
         let (name, text) = hashed_subcircuit("ibis", &[DIFF_P, DIFF_N], body);
-        let mut element = SpiceElement::new('X', [DIFF_P, DIFF_N, DIFF_GND], name.clone());
-        for model in self.model_sources() {
-            element = element.with_model(model);
-        }
-        SpicePartInfo::element(element.with_model(ModelSource::inline(name, text)))
+        subcircuit_part([DIFF_P, DIFF_N, DIFF_GND], name, text, self.model_sources())
     }
 }
 
@@ -653,7 +652,7 @@ impl IbisDriver {
     /// cannot drive ([`IbisBuffer::can_drive`]).
     #[track_caller]
     pub fn new(buffer: IbisBuffer, sequence: DigitalSequence) -> Self {
-        buffer.assert_drives(levels(&sequence));
+        buffer.assert_drives(sequence.levels());
         IbisDriver { buffer, sequence }
     }
 
@@ -676,11 +675,6 @@ impl IbisDriver {
     }
 }
 
-/// The levels of the sequence, the initial one included.
-fn levels(sequence: &DigitalSequence) -> impl Iterator<Item = Level> + '_ {
-    std::iter::once(sequence.initial()).chain(sequence.events().iter().map(|e| e.1))
-}
-
 impl Part for IbisDriver {
     fn ref_prefix(&self) -> String {
         "DRV".into()
@@ -693,10 +687,11 @@ impl Part for IbisDriver {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let (name, text) = self.subcircuit();
-        Some(SpicePartInfo::element(
-            SpiceElement::new('X', [Self::OUT, Self::GND], name.clone())
-                .with_model(self.buffer.model_source())
-                .with_model(ModelSource::inline(name, text)),
+        Some(subcircuit_part(
+            [Self::OUT, Self::GND],
+            name,
+            text,
+            [self.buffer.model_source()],
         ))
     }
 }
@@ -740,17 +735,16 @@ impl Part for IbisReceiver {
     }
     fn spice(&self) -> Option<SpicePartInfo> {
         let pins = [Self::IN, Self::GND];
-        let element = if self.buffer.is_driver() {
+        let model = self.buffer.model_source();
+        Some(if self.buffer.is_driver() {
             let body = self.buffer.receiver_line(Self::IN, "");
             let (name, text) = hashed_subcircuit("ibis", &[Self::IN], &body);
-            SpiceElement::new('X', pins, name.clone())
-                .with_model(self.buffer.model_source())
-                .with_model(ModelSource::inline(name, text))
+            subcircuit_part(pins, name, text, [model])
         } else {
-            SpiceElement::new('X', pins, self.buffer.name.clone())
-                .with_model(self.buffer.model_source())
-        };
-        Some(SpicePartInfo::element(element))
+            SpicePartInfo::element(
+                SpiceElement::new('X', pins, self.buffer.name.clone()).with_model(model),
+            )
+        })
     }
 }
 
@@ -782,7 +776,7 @@ impl IbisDiffDriver {
     #[track_caller]
     pub fn new(buffer: IbisDiffBuffer, sequence: DigitalSequence) -> Self {
         for (b, invert) in [(&buffer.p, false), (&buffer.n, true)] {
-            b.assert_drives(levels(&sequence).map(|l| pad_level(b, l, invert)));
+            b.assert_drives(sequence.levels().map(|l| pad_level(b, l, invert)));
         }
         IbisDiffDriver { buffer, sequence }
     }
@@ -922,6 +916,10 @@ pub mod __kicad {
 
     /// KiCad's rectangular stimulus: low, then `n` periods of high for `ton` and low for
     /// `toff`, starting at `td`.
+    ///
+    /// Not [`DigitalSequence::pwm`]: the falling edges are at `start + ton` as KiCad gives them,
+    /// not at `start + duty * period` with its rounding, and `ton == toff == 0` (a period of 0,
+    /// which `pwm` rejects) is accepted as KiCad accepts it.
     pub fn rect_sequence(ton: f64, toff: f64, td: f64, n: u32) -> DigitalSequence {
         let mut sequence = DigitalSequence::new(Level::Low);
         for i in 0..n {

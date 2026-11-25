@@ -43,16 +43,22 @@ impl PartOverrides {
             info.footprint = Some(footprint.clone());
         }
         for (name, value) in &self.fields {
-            match info.fields.iter_mut().find(|(field, _)| field == name) {
-                Some((_, old)) => old.clone_from(value),
-                None => info.fields.push((name.clone(), value.clone())),
-            }
+            set_field(&mut info.fields, name.clone(), value.clone());
         }
         let flags = &mut info.flags;
         flags.dnp = self.dnp.unwrap_or(flags.dnp);
         flags.exclude_from_bom = self.exclude_from_bom.unwrap_or(flags.exclude_from_bom);
         flags.exclude_from_board = self.exclude_from_board.unwrap_or(flags.exclude_from_board);
         info
+    }
+}
+
+/// Sets the field `name` to `value`: replaces the value of the field with that name, or appends
+/// the field if there is none.
+fn set_field(fields: &mut Vec<(String, String)>, name: String, value: String) {
+    match fields.iter_mut().find(|(field, _)| *field == name) {
+        Some((_, old)) => *old = value,
+        None => fields.push((name, value)),
     }
 }
 
@@ -139,12 +145,7 @@ pub trait PartExt: Sized {
     /// such field).
     fn with_field(self, name: impl Into<String>, value: impl Into<String>) -> Overridden {
         let mut part = self.into_overridden();
-        let (name, value) = (name.into(), value.into());
-        let fields = &mut part.overrides.fields;
-        match fields.iter_mut().find(|(field, _)| *field == name) {
-            Some((_, old)) => *old = value,
-            None => fields.push((name, value)),
-        }
+        set_field(&mut part.overrides.fields, name.into(), value.into());
         part
     }
     /// The part simulated as `spice` instead of its own SPICE description, e.g. a part without

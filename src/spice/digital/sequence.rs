@@ -60,6 +60,11 @@ impl DigitalSequence {
         &self.events
     }
 
+    /// The levels of the sequence, the initial one included.
+    pub(crate) fn levels(&self) -> impl Iterator<Item = Level> + '_ {
+        std::iter::once(self.initial).chain(self.events.iter().map(|e| e.1))
+    }
+
     /// The level after the last change.
     pub fn final_level(&self) -> Level {
         self.events.last().map_or(self.initial, |&(_, level)| level)
@@ -168,8 +173,7 @@ impl DigitalSequence {
             "the transition time must be positive: {transition}"
         );
         let enable = |level| if level == Level::HiZ { 0.0 } else { 1.0 };
-        let levels = || std::iter::once(self.initial).chain(self.events.iter().map(|e| e.1));
-        if !levels().any(|level| level == Level::HiZ) {
+        if !self.levels().any(|level| level == Level::HiZ) {
             return None;
         }
         let mut pwl = Pwl::new(enable(self.initial));

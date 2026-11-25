@@ -205,6 +205,7 @@ impl Part for CosimDevice {
             self.pin_ids(),
             self.subcircuit_name(),
             self.subcircuit(),
+            [],
         ))
     }
     fn cosim_device(&self) -> Option<&CosimDevice> {

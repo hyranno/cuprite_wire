@@ -9,6 +9,7 @@ use std::{
 use crate::spice::{
     SpiceDeck,
     analysis::{Analysis, column_count},
+    deck::AnalysisFiles,
     temp_dir::TempDir,
 };
 
@@ -122,7 +123,7 @@ pub(crate) fn output_log(output: &std::process::Output) -> String {
 
 /// The result of a run that wrote `log`: an error if it did not `succeed` or the log reports one.
 pub(crate) fn finish_run(
-    analyses: &[(u64, Option<String>)],
+    analyses: &AnalysisFiles,
     dir: TempDir,
     log: String,
     succeeded: bool,
@@ -137,7 +138,7 @@ pub(crate) fn finish_run(
     Ok(Simulation {
         dir,
         log,
-        analyses: analyses.to_vec(),
+        analyses: analyses.clone(),
     })
 }
 
@@ -162,8 +163,8 @@ fn is_error_line(line: &str) -> bool {
 pub struct Simulation {
     dir: TempDir,
     log: String,
-    /// The typed analyses of the deck, as [`SpiceDeck::analyses`].
-    analyses: Vec<(u64, Option<String>)>,
+    /// The typed analyses of the deck.
+    analyses: AnalysisFiles,
 }
 
 impl Simulation {
@@ -204,16 +205,9 @@ impl Simulation {
     /// [`SimulationError::Analysis`] if the deck did not have the analysis or it has no probes,
     /// and [`SimulationError::Table`] if its output cannot be read or has no rows.
     pub fn result<A: Analysis>(&self, analysis: &A) -> Result<A::Output, SimulationError> {
-        let error =
-            |reason: &str| SimulationError::Analysis(format!("{}: {reason}", analysis.command()));
-        let file = self
-            .analyses
-            .iter()
-            .find(|(id, _)| *id == analysis.id())
-            .ok_or_else(|| error("the deck did not have the analysis"))?
-            .1
-            .as_deref()
-            .ok_or_else(|| error("the analysis has no probes"))?;
+        let file = self.analyses.file(analysis).map_err(|reason| {
+            SimulationError::Analysis(format!("{}: {reason}", analysis.command()))
+        })?;
         let table = self.table(file)?;
         let expected = column_count(analysis);
         let reason = if table.columns.len() != expected {
@@ -420,7 +414,7 @@ mod tests {
         Simulation {
             dir: TempDir::new("sim").unwrap(),
             log: log.to_string(),
-            analyses: Vec::new(),
+            analyses: AnalysisFiles::default(),
         }
     }
 
@@ -442,12 +436,9 @@ mod tests {
     #[test]
     fn test_result_without_rows() {
         use crate::spice::analysis::{Op, Probe};
-        fn id_of(analysis: &impl Analysis) -> u64 {
-            analysis.id()
-        }
         let op = Op::new().probe(&Probe::of_expression("v(out)"));
         let mut sim = simulation("");
-        sim.analyses = vec![(id_of(&op), Some("op.txt".into()))];
+        sim.analyses.push(&op, Some("op.txt".into()));
         fs::write(sim.dir().join("op.txt"), "v(out) v(out)\n").unwrap();
         match sim.result(&op) {
             Err(SimulationError::Table { file, reason }) => {
@@ -462,7 +453,13 @@ mod tests {
     fn test_run_dir_kept_on_error() {
         let dir = TempDir::new("sim").unwrap();
         let path = dir.to_path_buf();
-        let error = finish_run(&[], dir, "Error: no circuit loaded.".into(), true).unwrap_err();
+        let error = finish_run(
+            &AnalysisFiles::default(),
+            dir,
+            "Error: no circuit loaded.".into(),
+            true,
+        )
+        .unwrap_err();
         assert!(matches!(&error, SimulationError::Ngspice { dir, .. } if *dir == path));
         assert!(path.is_dir());
         fs::remove_dir(&path).unwrap();

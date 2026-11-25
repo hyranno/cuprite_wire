@@ -14,7 +14,7 @@ use crate::{
     error::{
         CircuitError, CircuitErrorKind, CircuitErrors, CircuitWarning, CircuitWarningKind, warn,
     },
-    kicad::KicadPartInfo,
+    kicad::{KicadPartInfo, PinInfoProblem},
     naming::{HierPath, NetLabel, NodeLabel, escape_name, natural_cmp},
     parts::{Part, PartPins, PinType},
     trace::Trace,
@@ -49,6 +49,8 @@ pub struct Component {
     pub pins: PartPins,
     /// [`Part::kicad`] of the part, made once.
     pub(crate) kicad: Option<KicadPartInfo>,
+    /// The mismatches between the pins of the part and [`Component::kicad`].
+    pub(crate) pin_problems: Vec<PinInfoProblem>,
     /// The electrical types of the pins for ERC, keyed by pin ID: those of the KiCad pin
     /// information and [`Part::extra_pin_types`].
     pub pin_types: BTreeMap<String, PinType>,
@@ -80,6 +82,50 @@ impl Component {
         let ok = problems.is_empty();
         errors.extend(problems.into_iter().map(error));
         ok.then_some(info)
+    }
+
+    /// Reports the pin IDs of the part that are duplicated or unknown, and the pins given a type
+    /// by both the KiCad pin information and [`Part::extra_pin_types`] (`extra_ids`).
+    fn check_pin_ids(&self, extra_ids: Vec<String>, errors: &mut Vec<CircuitError>) {
+        let error = |kind| CircuitError::new(kind, self.trace.clone());
+        let ref_name = || self.ref_name.clone();
+        for pin_id in self.pins.duplicate_ids() {
+            errors.push(error(CircuitErrorKind::DuplicatePinId {
+                ref_name: ref_name(),
+                pin_id: pin_id.clone(),
+            }));
+        }
+        for pin_id in self.pins.unknown_ids() {
+            errors.push(error(CircuitErrorKind::UnknownPinId {
+                ref_name: ref_name(),
+                pin_id: pin_id.clone(),
+            }));
+        }
+        for (pin_id, _) in self.part.global_labels() {
+            if !self.pins.contains(&pin_id) {
+                errors.push(error(CircuitErrorKind::UnknownPinId {
+                    ref_name: ref_name(),
+                    pin_id,
+                }));
+            }
+        }
+        for pin_id in extra_ids {
+            if self
+                .kicad
+                .as_ref()
+                .is_some_and(|info| info.pins.contains_key(&pin_id))
+            {
+                errors.push(error(CircuitErrorKind::DuplicatePinType {
+                    ref_name: ref_name(),
+                    pin_id,
+                }));
+            } else if !self.pins.contains(&pin_id) {
+                errors.push(error(CircuitErrorKind::UnknownPinId {
+                    ref_name: ref_name(),
+                    pin_id,
+                }));
+            }
+        }
     }
 }
 
@@ -142,11 +188,7 @@ impl BuiltCircuit {
         // (the KiCad exporter reports that), so that the names stay unique.
         let kicad_infos: Vec<_> = components
             .iter()
-            .map(|c| {
-                c.kicad
-                    .as_ref()
-                    .filter(|info| info.check_pins(&c.pins).is_empty())
-            })
+            .map(|c| c.kicad.as_ref().filter(|_| c.pin_problems.is_empty()))
             .collect();
         let pins_by_node = self.pins_by_node(&component_of_part);
         let unnamed = |nodes: &[NetNode]| unnamed_net_name(nodes, &components, &kicad_infos);
@@ -170,9 +212,7 @@ impl BuiltCircuit {
         for warning in &warnings {
             warn(warning);
         }
-        if !errors.is_empty() {
-            return Err(CircuitErrors { errors, warnings });
-        }
+        CircuitErrors::into_result(errors, &warnings, ())?;
         Ok(Netlist {
             components,
             nets,
@@ -196,31 +236,10 @@ impl BuiltCircuit {
         for (component, &part) in order.iter().enumerate() {
             component_of_part[part] = component;
         }
-        let components: Vec<Component> = order
+        let (components, extra_ids): (Vec<_>, Vec<_>) = order
             .into_iter()
-            .map(|i| {
-                let part = &self.parts[i];
-                let kicad = part.part.kicad();
-                let mut pin_types: BTreeMap<_, _> = kicad
-                    .iter()
-                    .flat_map(|info| &info.pins)
-                    .map(|(id, pin)| (id.clone(), pin.pin_type))
-                    .collect();
-                let mut extra_types = part.part.extra_pin_types();
-                extra_types.retain(|id, _| !pin_types.contains_key(id));
-                pin_types.append(&mut extra_types);
-                Component {
-                    ref_name: ref_names[i].clone(),
-                    part: part.part.clone(),
-                    pins: PartPins::of(part.part.as_ref()),
-                    kicad,
-                    pin_types,
-                    path: part.path.clone(),
-                    uuid: part.uuid(),
-                    trace: part.trace.clone(),
-                }
-            })
-            .collect();
+            .map(|i| self.component(i, ref_names[i].clone()))
+            .unzip();
 
         let mut by_ref: Vec<&Component> = components.iter().collect();
         by_ref.sort_by(|a, b| natural_cmp(&a.ref_name, &b.ref_name));
@@ -230,48 +249,43 @@ impl BuiltCircuit {
             |ref_name| CircuitErrorKind::DuplicateRef { ref_name },
             "the other part is instantiated here",
         ));
-        for component in &components {
-            let error = |kind| CircuitError::new(kind, component.trace.clone());
-            let ref_name = || component.ref_name.clone();
-            for pin_id in component.pins.duplicate_ids() {
-                errors.push(error(CircuitErrorKind::DuplicatePinId {
-                    ref_name: ref_name(),
-                    pin_id: pin_id.clone(),
-                }));
-            }
-            for pin_id in component.pins.unknown_ids() {
-                errors.push(error(CircuitErrorKind::UnknownPinId {
-                    ref_name: ref_name(),
-                    pin_id: pin_id.clone(),
-                }));
-            }
-            for (pin_id, _) in component.part.global_labels() {
-                if !component.pins.contains(&pin_id) {
-                    errors.push(error(CircuitErrorKind::UnknownPinId {
-                        ref_name: ref_name(),
-                        pin_id,
-                    }));
-                }
-            }
-            for pin_id in component.part.extra_pin_types().into_keys() {
-                if component
-                    .kicad
-                    .as_ref()
-                    .is_some_and(|info| info.pins.contains_key(&pin_id))
-                {
-                    errors.push(error(CircuitErrorKind::DuplicatePinType {
-                        ref_name: ref_name(),
-                        pin_id,
-                    }));
-                } else if !component.pins.contains(&pin_id) {
-                    errors.push(error(CircuitErrorKind::UnknownPinId {
-                        ref_name: ref_name(),
-                        pin_id,
-                    }));
-                }
-            }
+        for (component, extra_ids) in components.iter().zip(extra_ids) {
+            component.check_pin_ids(extra_ids, errors);
         }
         (components, component_of_part)
+    }
+
+    /// The component of the part `i` with the reference `ref_name`, and the IDs of the pins
+    /// that [`Part::extra_pin_types`] gives types to.
+    fn component(&self, i: usize, ref_name: String) -> (Component, Vec<String>) {
+        let part = &self.parts[i];
+        let kicad = part.part.kicad();
+        let pins = PartPins::of(part.part.as_ref());
+        let mut pin_types: BTreeMap<_, _> = kicad
+            .iter()
+            .flat_map(|info| &info.pins)
+            .map(|(id, pin)| (id.clone(), pin.pin_type))
+            .collect();
+        let mut extra_types = part.part.extra_pin_types();
+        let extra_ids = extra_types.keys().cloned().collect();
+        extra_types.retain(|id, _| !pin_types.contains_key(id));
+        pin_types.append(&mut extra_types);
+        let pin_problems = kicad
+            .as_ref()
+            .map(|info| info.check_pins(&pins))
+            .unwrap_or_default();
+        let component = Component {
+            ref_name,
+            part: part.part.clone(),
+            pins,
+            kicad,
+            pin_problems,
+            pin_types,
+            path: part.path.clone(),
+            uuid: part.uuid(),
+            trace: part.trace.clone(),
+        };
+        (component, extra_ids)
     }
 
     /// The net of a group of connected nodes, named by its labels or by `unnamed`. Reports a
@@ -452,45 +466,9 @@ fn unnamed_net_name(
 ) -> String {
     let unconnected = nodes.len() == 1;
     let prefix = if unconnected { "unconnected" } else { "Net" };
-    // (written with the pad, net name) of a pin with KiCad information, in each of its units.
-    let candidates = |node: &NetNode| -> Vec<(bool, String)> {
-        let Some(info) = kicad_infos[node.component] else {
-            return Vec::new();
-        };
-        let Some(pin) = info.pins.get(&node.pin_id) else {
-            return Vec::new();
-        };
-        let ref_name = &components[node.component].ref_name;
-        let pad = format!("Pad{}", escape_name(&pin.pad));
-        let name = pin
-            .name
-            .as_deref()
-            .filter(|name| !name.is_empty() && *name != pin.pad);
-        let Some(name) = name else {
-            return vec![(true, format!("{prefix}-({}-{pad})", escape_name(ref_name)))];
-        };
-        // (unit, suffix of the reference): unit 0 stands for the single unit.
-        let units: Vec<(u32, &str)> = match (info.unit_count(), pin.unit) {
-            (1, _) => vec![(0, "")],
-            (_, 0) => (1..).zip(info.units.iter().map(String::as_str)).collect(),
-            (_, unit) => vec![(unit, &info.units[unit as usize - 1])],
-        };
-        units
-            .into_iter()
-            .map(|(unit, suffix)| {
-                let unit_ref = escape_name(&format!("{ref_name}{suffix}"));
-                let label = if unconnected || info.is_pin_name_shared(pin, unit) {
-                    (true, format!("{}-{pad}", escape_name(name)))
-                } else {
-                    (false, escape_name(name))
-                };
-                (label.0, format!("{prefix}-({unit_ref}-{})", label.1))
-            })
-            .collect()
-    };
     nodes
         .iter()
-        .flat_map(candidates)
+        .flat_map(|node| net_name_candidates(node, prefix, unconnected, components, kicad_infos))
         .min()
         .map(|(_, name)| name)
         .unwrap_or_else(|| {
@@ -499,6 +477,50 @@ fn unnamed_net_name(
             let ref_name = escape_name(&components[node.component].ref_name);
             format!("{prefix}-({ref_name}-{})", escape_name(&node.pin_id))
         })
+}
+
+/// The names of a net after the pin `node` with KiCad information, for [`unnamed_net_name`]:
+/// whether each is written with the pad, and the name, in each unit of the pin.
+fn net_name_candidates(
+    node: &NetNode,
+    prefix: &str,
+    unconnected: bool,
+    components: &[Component],
+    kicad_infos: &[Option<&KicadPartInfo>],
+) -> Vec<(bool, String)> {
+    let Some(info) = kicad_infos[node.component] else {
+        return Vec::new();
+    };
+    let Some(pin) = info.pins.get(&node.pin_id) else {
+        return Vec::new();
+    };
+    let ref_name = &components[node.component].ref_name;
+    let pad = format!("Pad{}", escape_name(&pin.pad));
+    let name = pin
+        .name
+        .as_deref()
+        .filter(|name| !name.is_empty() && *name != pin.pad);
+    let Some(name) = name else {
+        return vec![(true, format!("{prefix}-({}-{pad})", escape_name(ref_name)))];
+    };
+    // (unit, suffix of the reference): unit 0 stands for the single unit.
+    let units: Vec<(u32, &str)> = match (info.unit_count(), pin.unit) {
+        (1, _) => vec![(0, "")],
+        (_, 0) => (1..).zip(info.units.iter().map(String::as_str)).collect(),
+        (_, unit) => vec![(unit, &info.units[unit as usize - 1])],
+    };
+    units
+        .into_iter()
+        .map(|(unit, suffix)| {
+            let unit_ref = escape_name(&format!("{ref_name}{suffix}"));
+            let label = if unconnected || info.is_pin_name_shared(pin, unit) {
+                (true, format!("{}-{pad}", escape_name(name)))
+            } else {
+                (false, escape_name(name))
+            };
+            (label.0, format!("{prefix}-({unit_ref}-{})", label.1))
+        })
+        .collect()
 }
 
 impl Ord for NetNode {

@@ -292,10 +292,7 @@ impl fmt::Display for PinType {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn strings(ids: &[&str]) -> Vec<String> {
-        ids.iter().map(|id| id.to_string()).collect()
-    }
+    use crate::test_parts::strings;
 
     #[test]
     fn test_part_pins() {

@@ -11,7 +11,7 @@ use crate::{
     error::{CircuitError, CircuitErrorKind, CircuitErrors},
     kicad::{KicadPartInfo, LibId, PartFlags, PinInfoProblem},
     naming::unit_uuid,
-    netlist::{Component, Netlist},
+    netlist::{Component, Net, Netlist},
     sexpr::SExpr,
 };
 
@@ -73,94 +73,26 @@ impl Netlist {
             .map(|component| check_component(component, &mut errors))
             .collect();
 
-        // KiCad treats `~` as empty.
-        let text = |text: &Option<String>| text.clone().filter(|t| t != "~").unwrap_or_default();
         let components = self
             .components
             .iter()
             .zip(&infos)
-            .filter_map(|(component, info)| {
-                let info = (*info)?;
-                Some(KicadComponent {
-                    ref_name: component.ref_name.clone(),
-                    value: component.part.value(),
-                    footprint: info.footprint.clone()?,
-                    fields: info.fields.clone(),
-                    lib_source: info.lib_source.clone(),
-                    datasheet: text(&info.datasheet),
-                    description: text(&info.description),
-                    flags: info.flags,
-                    sheet_names: component.path.to_string(),
-                    sheet_tstamps: component.path.tstamps(),
-                    uuids: (1..=info.unit_count())
-                        .map(|unit| unit_uuid(component.uuid, unit))
-                        .collect(),
-                })
-            })
+            .filter_map(|(component, info)| kicad_component(component, (*info)?))
             .collect();
-
-        // Pins on a pad of another pin (duplicate pins, connected inside the part) are left out:
-        // KiCad writes one node per pad, with the first pin's name and type.
         let duplicate_pins: Vec<HashSet<&str>> = self
             .components
             .iter()
             .zip(&infos)
             .map(|(component, info)| {
-                let Some(info) = info else {
-                    return HashSet::new();
-                };
-                let mut pads = HashSet::new();
-                component
-                    .pins
-                    .ids()
-                    .iter()
-                    .filter(|id| !pads.insert(&info.pins[*id].pad))
-                    .map(String::as_str)
-                    .collect()
+                info.map(|info| duplicate_pins(component, info))
+                    .unwrap_or_default()
             })
             .collect();
         let nets = self
             .nets
             .iter()
             .enumerate()
-            .map(|(i, net)| {
-                let mut nodes: Vec<KicadNode> = net
-                    .nodes
-                    .iter()
-                    .filter(|node| !duplicate_pins[node.component].contains(node.pin_id.as_str()))
-                    .filter_map(|node| {
-                        let pin = infos[node.component].as_ref()?.pins.get(&node.pin_id)?;
-                        Some(KicadNode {
-                            ref_name: self.components[node.component].ref_name.clone(),
-                            pad: pin.pad.clone(),
-                            pin_function: pin.name.clone().filter(|name| !name.is_empty()),
-                            pin_type: pin.pin_type.as_str(),
-                            no_connect: false,
-                        })
-                    })
-                    .collect();
-                // KiCad sorts nodes by reference and pad number, both in string order.
-                nodes.sort();
-                // Duplicate pins are left out above, other pins sharing a pad are rejected
-                // (`DuplicatePad`), and references are unique (`DuplicateRef`).
-                debug_assert!(
-                    nodes
-                        .windows(2)
-                        .all(|pair| (&pair[0].ref_name, &pair[0].pad)
-                            != (&pair[1].ref_name, &pair[1].pad)),
-                    "a pad is listed twice in net {:?}",
-                    net.name
-                );
-                // KiCad marks a pin alone on a net with a no-connect flag (not one of several).
-                if let [node] = nodes.as_mut_slice() {
-                    node.no_connect = net.marks.iter().any(|mark| mark.mark == ErcMark::NoConnect);
-                }
-                KicadNet {
-                    code: i + 1,
-                    name: net.name.clone(),
-                    nodes,
-                }
-            })
+            .map(|(i, net)| self.kicad_net(i + 1, net, &infos, &duplicate_pins))
             .collect();
 
         CircuitErrors::into_result(
@@ -173,6 +105,86 @@ impl Netlist {
             },
         )
     }
+
+    /// The net `net` with the code `code`, with the pins of the components that have KiCad
+    /// information `infos`, but not the pins `duplicate_pins`.
+    fn kicad_net(
+        &self,
+        code: usize,
+        net: &Net,
+        infos: &[Option<&KicadPartInfo>],
+        duplicate_pins: &[HashSet<&str>],
+    ) -> KicadNet {
+        let mut nodes: Vec<KicadNode> = net
+            .nodes
+            .iter()
+            .filter(|node| !duplicate_pins[node.component].contains(node.pin_id.as_str()))
+            .filter_map(|node| {
+                let pin = infos[node.component].as_ref()?.pins.get(&node.pin_id)?;
+                Some(KicadNode {
+                    ref_name: self.components[node.component].ref_name.clone(),
+                    pad: pin.pad.clone(),
+                    pin_function: pin.name.clone().filter(|name| !name.is_empty()),
+                    pin_type: pin.pin_type.as_str(),
+                    no_connect: false,
+                })
+            })
+            .collect();
+        // KiCad sorts nodes by reference and pad number, both in string order.
+        nodes.sort();
+        // Duplicate pins are left out above, other pins sharing a pad are rejected
+        // (`DuplicatePad`), and references are unique (`DuplicateRef`).
+        debug_assert!(
+            nodes
+                .windows(2)
+                .all(|pair| (&pair[0].ref_name, &pair[0].pad) != (&pair[1].ref_name, &pair[1].pad)),
+            "a pad is listed twice in net {:?}",
+            net.name
+        );
+        // KiCad marks a pin alone on a net with a no-connect flag (not one of several).
+        if let [node] = nodes.as_mut_slice() {
+            node.no_connect = net.marks.iter().any(|mark| mark.mark == ErcMark::NoConnect);
+        }
+        KicadNet {
+            code,
+            name: net.name.clone(),
+            nodes,
+        }
+    }
+}
+
+/// The component written into the netlist, `None` without a footprint.
+fn kicad_component(component: &Component, info: &KicadPartInfo) -> Option<KicadComponent> {
+    // KiCad treats `~` as empty.
+    let text = |text: &Option<String>| text.clone().filter(|t| t != "~").unwrap_or_default();
+    Some(KicadComponent {
+        ref_name: component.ref_name.clone(),
+        value: component.part.value(),
+        footprint: info.footprint.clone()?,
+        fields: info.fields.clone(),
+        lib_source: info.lib_source.clone(),
+        datasheet: text(&info.datasheet),
+        description: text(&info.description),
+        flags: info.flags,
+        sheet_names: component.path.to_string(),
+        sheet_tstamps: component.path.tstamps(),
+        uuids: (1..=info.unit_count())
+            .map(|unit| unit_uuid(component.uuid, unit))
+            .collect(),
+    })
+}
+
+/// The pins on a pad of an earlier pin of the component (duplicate pins, connected inside the
+/// part). They are left out: KiCad writes one node per pad, with the first pin's name and type.
+fn duplicate_pins<'a>(component: &'a Component, info: &KicadPartInfo) -> HashSet<&'a str> {
+    let mut pads = HashSet::new();
+    component
+        .pins
+        .ids()
+        .iter()
+        .filter(|id| !pads.insert(&info.pins[*id].pad))
+        .map(String::as_str)
+        .collect()
 }
 
 /// Returns the KiCad information of a component if it can be exported.
@@ -188,9 +200,10 @@ fn check_component<'a>(
             .then(|| CircuitErrorKind::FootprintMissing {
                 ref_name: ref_name(),
             });
-        let pins = info
-            .check_pins(&component.pins)
-            .into_iter()
+        let pins = component
+            .pin_problems
+            .iter()
+            .cloned()
             .map(|problem| match problem {
                 PinInfoProblem::Missing { pin_id } => CircuitErrorKind::PinInfoMissing {
                     ref_name: ref_name(),

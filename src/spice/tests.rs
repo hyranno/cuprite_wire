@@ -1079,8 +1079,8 @@ fn test_transient_command() {
     );
     // A changed analysis is another analysis.
     let deck = deck_of(&rc_filter_bench(IndependentSource::voltage(1.0))).analysis(&tran);
-    assert!(deck.analysis_file(&tran).is_some());
-    assert!(deck.analysis_file(&tran.clone().with_uic()).is_none());
+    assert!(deck.analyses().contains(&tran));
+    assert!(!deck.analyses().contains(&tran.clone().with_uic()));
 }
 
 /// The errors reading a typed result: an analysis without probes, a probe the analysis does not

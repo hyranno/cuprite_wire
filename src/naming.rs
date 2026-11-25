@@ -96,28 +96,14 @@ pub(crate) use cuprite_wire_kicad_lib::naming::natural_cmp;
 /// ends the text, and the others are not meant for names.
 const CONTROL_CHARACTER: &str = "names must not contain control characters";
 
-/// Checks an explicit instance name.
-pub(crate) fn check_explicit_name(name: &str) -> Result<(), &'static str> {
-    if name.is_empty() {
-        Err("names must not be empty")
-    } else if name.contains(AUTO_NAME_SEPARATOR) {
-        Err("'#' is reserved for automatic names")
-    } else if name.contains(ESCAPE_START) {
-        Err("'{' is reserved for escape sequences such as {slash}")
-    } else if name.contains(char::is_control) {
-        Err(CONTROL_CHARACTER)
-    } else {
-        Ok(())
-    }
-}
-
-/// Checks the base of automatic instance names ([`SubcircuitGenerator::base_name`]), which
-/// becomes part of hierarchical paths like an explicit name.
+/// Checks an explicit instance name, or the base of automatic instance names
+/// ([`SubcircuitGenerator::base_name`]), which becomes part of hierarchical paths like an
+/// explicit name.
 ///
 /// [`SubcircuitGenerator::base_name`]: crate::subcircuit::SubcircuitGenerator::base_name
-pub(crate) fn check_base_name(name: &str) -> Result<(), &'static str> {
+pub(crate) fn check_instance_name(name: &str) -> Result<(), &'static str> {
     if name.is_empty() {
-        Err("base names must not be empty")
+        Err("names must not be empty")
     } else if name.contains(AUTO_NAME_SEPARATOR) {
         Err("'#' is reserved for automatic names")
     } else if name.contains(ESCAPE_START) {
@@ -313,13 +299,13 @@ mod tests {
     }
 
     #[test]
-    fn test_check_explicit_name() {
-        assert!(check_explicit_name("amp_left").is_ok());
-        assert!(check_explicit_name("").is_err());
-        assert!(check_explicit_name("R#1").is_err());
-        assert!(check_explicit_name("a{slash}b").is_err());
-        assert!(check_explicit_name("a\0b").is_err());
-        assert!(check_base_name("a\nb").is_err());
+    fn test_check_instance_name() {
+        assert!(check_instance_name("amp_left").is_ok());
+        assert!(check_instance_name("").is_err());
+        assert!(check_instance_name("R#1").is_err());
+        assert!(check_instance_name("a{slash}b").is_err());
+        assert!(check_instance_name("a\0b").is_err());
+        assert!(check_instance_name("a\nb").is_err());
         assert!(check_ref_prefix("U\u{7f}").is_err());
     }
 
