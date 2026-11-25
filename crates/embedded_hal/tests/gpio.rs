@@ -5,6 +5,7 @@ use cuprite_wire::{
     naming::NetLabel,
     spice::{
         SpiceDeck,
+        analysis::{Probe, Tran},
         cosim::{CosimDevice, DeviceModels},
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
@@ -66,8 +67,10 @@ fn test_mirror() {
         .unwrap()
         .to_spice()
         .unwrap()
-        .deck()
-        .control(["tran 10n 10u", r#"wrdata out.txt v("/OUT")"#]);
+        .deck();
+    let out = deck.voltage("/OUT").unwrap();
+    let tran = Tran::new(10e-9, 10e-6).probe(&out);
+    let deck = deck.analysis(&tran);
 
     let board = Board::new();
     let mirror = Mirror {
@@ -81,8 +84,8 @@ fn test_mirror() {
         .unwrap();
     // Steps at 0, 1, ..., 10 us.
     assert_eq!(firmware.task().steps, 11);
-    let table = sim.table("out.txt").unwrap();
-    let read = input.decode(table.scale(), table.column(r#"v("/OUT")"#).unwrap());
+    let result = sim.result(&tran).unwrap();
+    let read = input.decode(result.scale(), result.get(&out).unwrap());
     let [(rise, Level::High), (fall, Level::Low)] = read.events() else {
         panic!("{read:?}");
     };
@@ -104,7 +107,9 @@ fn test_two_transient_analyses() {
         }
         task.steps += 1;
     }
-    let deck = output_deck(&["tran 10n 2u", "tran 10n 2u"]);
+    let (deck, out) = output_deck();
+    let [first, second] = [(); 2].map(|()| Tran::new(10e-9, 2e-6).probe(&out));
+    let deck = deck.analysis(&first).analysis(&second);
     let board = Board::new();
     let once = Once {
         output: board.output_pin("out"),
@@ -116,16 +121,17 @@ fn test_two_transient_analyses() {
         .unwrap();
     // Steps at 0, 1 and 2 us in each analysis.
     assert_eq!(firmware.task().steps, 6);
-    let table = sim.table("out.txt").unwrap();
-    let out = table.interpolate(OUT, 1e-6).unwrap();
+    let out = sim
+        .result(&second)
+        .unwrap()
+        .interpolate(&out, 1e-6)
+        .unwrap()
+        .unwrap();
     assert!((out - 3.3).abs() < 1e-3, "{out}");
 }
 
-const OUT: &str = r#"v("/OUT")"#;
-
-/// A device with the output `out` on the net `/OUT`, loaded by an input; the deck runs `analyses`
-/// and writes the voltage of `/OUT` to `out.txt`.
-fn output_deck(analyses: &[&str]) -> SpiceDeck {
+/// A device with the output `out` on the net `/OUT`, loaded by an input, and the voltage of `/OUT`.
+fn output_deck() -> (SpiceDeck, Probe) {
     let mut bench = CircuitBuilder::new();
     let mcu = bench
         .instantiate_part(CosimDevice::new("mcu").output("out", OutputCharacteristics::cmos(3.3)));
@@ -135,15 +141,15 @@ fn output_deck(analyses: &[&str]) -> SpiceDeck {
     for gnd in [mcu[CosimDevice::GND], load[DigitalLoad::GND]] {
         bench.label(gnd, NetLabel::global("GND"));
     }
-    bench
+    let deck = bench
         .build(&())
         .to_netlist()
         .unwrap()
         .to_spice()
         .unwrap()
-        .deck()
-        .control(analyses.iter().copied())
-        .control([format!("wrdata out.txt {OUT}")])
+        .deck();
+    let out = deck.voltage("/OUT").unwrap();
+    (deck, out)
 }
 
 /// An open-drain line with a pull-up, shared by the firmware and another open-drain driver: the
@@ -208,7 +214,9 @@ fn test_open_drain_wired_and() {
 /// the buffered compare register of a timer whose interrupt is at the start of the period.
 #[test]
 fn test_pwm_duty_at_period_start() {
-    let deck = output_deck(&["tran 10n 3u"]);
+    let (deck, out) = output_deck();
+    let tran = Tran::new(10e-9, 3e-6).probe(&out);
+    let deck = deck.analysis(&tran);
     let board = Board::new();
     let mut firmware = Firmware::new(&board, 1e-6, board.pwm("out", 1e-6, 4), |pwm| {
         pwm.set_duty_cycle(2).unwrap();
@@ -216,8 +224,8 @@ fn test_pwm_duty_at_period_start() {
     let sim = deck
         .run_with(DeviceModels::new().with("mcu", &mut firmware))
         .unwrap();
-    let table = sim.table("out.txt").unwrap();
-    let at = |t| table.interpolate(OUT, t).unwrap();
+    let result = sim.result(&tran).unwrap();
+    let at = |t| result.interpolate(&out, t).unwrap().unwrap();
     // The first period has the duty of 0 the channel starts with.
     assert!(at(0.25e-6) < 0.1, "{}", at(0.25e-6));
     assert!(at(0.75e-6) < 0.1, "{}", at(0.75e-6));

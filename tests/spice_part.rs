@@ -14,7 +14,7 @@ use cuprite_wire::{
     kicad_part,
     naming::NetLabel,
     parts::Part,
-    spice::{IndependentSource, ModelSource, SpiceElement, SpicePartInfo},
+    spice::{IndependentSource, ModelSource, SpiceElement, SpicePartInfo, analysis::Op},
     spice_part,
 };
 
@@ -248,9 +248,16 @@ fn reset_voltage(part: Box<dyn Part>, pins: SupervisorPins, sense: f64) -> Resul
         circuit.label(pin, NetLabel::global("GND"));
     }
     circuit.label(u[reset], NetLabel::local("RESET"));
-    let deck = deck_of(&circuit).control(["op", r#"let reset = v("/RESET")"#, "print reset"]);
-    let sim = deck.run().map_err(common::simulation_error_message)?;
-    sim.value("reset").ok_or_else(|| sim.log().to_string())
+    let deck = deck_of(&circuit);
+    let reset = deck.voltage("/RESET").unwrap();
+    let op = Op::new().probe(&reset);
+    let sim = deck
+        .analysis(&op)
+        .run()
+        .map_err(common::simulation_error_message)?;
+    sim.result(&op)
+        .and_then(|result| result.get(&reset))
+        .map_err(|e| e.to_string())
 }
 
 /// RESET follows SENSE against the threshold (0.5 V by default, 0.6 V for `Supervisor`), which needs

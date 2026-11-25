@@ -32,12 +32,13 @@ use cuprite_wire::{
     ibis_part,
     naming::NetLabel,
     spice::{
+        analysis::{Probe, SweepResult, Tran},
         digital::{DigitalLoad, DigitalSequence, InputCharacteristics, Level, Pull},
         ibis::{
             IbisBuffer, IbisBufferError, IbisDiffBuffer, IbisDiffDriver, IbisDiffReceiver,
             IbisDriver, IbisReceiver, read_file,
         },
-        simulation::{Ngspice, Table},
+        simulation::Ngspice,
     },
 };
 
@@ -57,8 +58,6 @@ ibis_part! {
         diff_pins: { tmds => "32" },
     }
 }
-
-const LINE: &str = r#"v("/LINE")"#;
 
 /// The phases of the driver test, in seconds: low until `HIGH`, high (or released) until `LOW`,
 /// low until `STOP`.
@@ -108,13 +107,12 @@ fn rails(model: &Model) -> (f64, f64, f64) {
 }
 
 /// The test bench of [`simulate`] and [`simulate_diff`]: the pull on each of the `lines` (local
-/// labels), and the simulation until `STOP`, writing the voltages of the lines.
+/// labels), and the simulation until `STOP`, recording the voltages of the lines.
 fn run(
     mut circuit: CircuitBuilder,
     lines: &[(cuprite_wire::circuit::Node, &str)],
     pull: (f64, f64),
-) -> Table {
-    let mut columns = Vec::new();
+) -> Lines {
     for &(pin, label) in lines {
         let load = circuit.instantiate_part(DigitalLoad::new(
             InputCharacteristics::cmos(3.3)
@@ -124,17 +122,38 @@ fn run(
         circuit.connect(pin, load["in"]);
         circuit.label(pin, NetLabel::local(label));
         circuit.label(load["gnd"], NetLabel::global("GND"));
-        columns.push(format!(r#"v("/{label}")"#));
     }
-    let deck = deck_of(&circuit).control(vec![
-        format!("tran 50p {STOP:e}"),
-        format!("wrdata line.txt {}", columns.join(" ")),
-    ]);
-    Ngspice::new("ngspice")
-        .run(&deck)
+    let deck = deck_of(&circuit);
+    let probes: Vec<_> = lines
+        .iter()
+        .map(|&(_, label)| {
+            (
+                label.to_string(),
+                deck.voltage(&format!("/{label}")).unwrap(),
+            )
+        })
+        .collect();
+    let tran = Tran::new(50e-12, STOP).probes(probes.iter().map(|(_, probe)| probe.clone()));
+    let result = Ngspice::new("ngspice")
+        .run(&deck.analysis(&tran))
         .unwrap_or_else(|e| panic!("{e}"))
-        .table("line.txt")
-        .unwrap()
+        .result(&tran)
+        .unwrap();
+    Lines { result, probes }
+}
+
+/// The voltages of the lines of [`run`] over the time.
+struct Lines {
+    result: SweepResult,
+    probes: Vec<(String, Probe)>,
+}
+
+impl Lines {
+    /// The voltage of the line labeled `label` at `time`.
+    fn at(&self, label: &str, time: f64) -> f64 {
+        let (_, probe) = self.probes.iter().find(|(l, _)| l == label).unwrap();
+        self.result.interpolate(probe, time).unwrap().unwrap()
+    }
 }
 
 /// The pair with the pull `(voltage, resistance)` on both pins (`/P` and `/N`).
@@ -142,7 +161,7 @@ fn simulate_diff(
     buffer: IbisDiffBuffer,
     sequence: Option<DigitalSequence>,
     pull: (f64, f64),
-) -> Table {
+) -> Lines {
     let mut circuit = CircuitBuilder::new();
     let (p, n, gnd) = match sequence {
         Some(sequence) => {
@@ -168,7 +187,7 @@ fn simulate_diff(
 
 /// The buffer (its pin to the line) with the pull `(voltage, resistance)`, simulated until
 /// `STOP`.
-fn simulate(buffer: IbisBuffer, sequence: Option<DigitalSequence>, pull: (f64, f64)) -> Table {
+fn simulate(buffer: IbisBuffer, sequence: Option<DigitalSequence>, pull: (f64, f64)) -> Lines {
     let mut circuit = CircuitBuilder::new();
     let (pin, gnd) = match sequence {
         Some(sequence) => {
@@ -205,8 +224,8 @@ fn check(name: &str, model: &Model, buffer: IbisBuffer) {
     let swing = high - low;
     let what = format!("{name}: model `{}` ({})", model.name, model.model_type);
     if !buffer.is_driver() {
-        let table = simulate(buffer, None, (mid, r));
-        let v = table.interpolate(LINE, STOP).unwrap();
+        let lines = simulate(buffer, None, (mid, r));
+        let v = lines.at("LINE", STOP);
         // Receivers may have pull-ups and pull-downs in their clamps, and terminators pull
         // the line anywhere between their references.
         assert!(
@@ -217,8 +236,8 @@ fn check(name: &str, model: &Model, buffer: IbisBuffer) {
     }
     let sequence = driver_sequence(&buffer);
     let [first, second] = [sequence.initial(), sequence.events()[0].1];
-    let table = simulate(buffer, Some(sequence), (mid, r));
-    let at = |t: f64| table.interpolate(LINE, t).unwrap();
+    let lines = simulate(buffer, Some(sequence), (mid, r));
+    let at = |t: f64| lines.at("LINE", t);
     let levels = [(HIGH, first), (LOW, second), (STOP, first)].map(|(t, level)| (t, level, at(t)));
     // A released buffer leaves the line to the pull.
     for (time, level, v) in levels {
@@ -254,8 +273,8 @@ fn check_diff(name: &str, model: &Model, pair: IbisDiffBuffer) {
     } else {
         (false, None)
     };
-    let table = simulate_diff(pair, sequence, (mid, r));
-    let v = |pin: &str, t: f64| table.interpolate(&format!(r#"v("/{pin}")"#), t).unwrap();
+    let lines = simulate_diff(pair, sequence, (mid, r));
+    let v = |pin: &str, t: f64| lines.at(pin, t);
     let diff = |t: f64| v("P", t) - v("N", t);
     if !driver {
         for pin in ["P", "N"] {

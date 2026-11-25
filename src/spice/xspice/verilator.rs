@@ -110,6 +110,10 @@ impl Verilator {
     /// ports of the top module cannot be used, and [`VerilatorError::Io`] if a file operation
     /// fails, a program cannot be run, or the cache directory belongs to another user or is
     /// writable by others.
+    ///
+    /// When a step fails, its build directory (`build-*` in the cache directory, named by the
+    /// error) is kept for inspection and never removed; delete it when done. Successful builds
+    /// replace the outdated ones of the same design.
     pub fn build(&self) -> Result<VerilatedModel, VerilatorError> {
         let this = self.absolute()?;
         create_private_dir(&this.cache_dir)?;

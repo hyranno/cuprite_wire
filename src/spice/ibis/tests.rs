@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     circuit::CircuitBuilder,
     naming::NetLabel,
-    spice::{Simulator, tests::on_each_simulator},
+    spice::{Simulator, analysis::Tran, tests::on_each_simulator},
     test_parts::{Line, LineDeck, deck_of},
 };
 
@@ -501,27 +501,27 @@ fn simulate_ibis_diff_line(simulator: &dyn Simulator) {
     for gnd in [driver[IbisDiffDriver::GND], receiver[IbisDiffReceiver::GND]] {
         circuit.label(gnd, NetLabel::global("GND"));
     }
-    let control = vec![
-        "tran 10p 40e-9".to_string(),
-        r#"wrdata line.txt v("/P") v("/N")"#.to_string(),
-    ];
-    let deck = deck_of(&circuit).control(control);
-    let table = simulator.run(&deck).unwrap().table("line.txt").unwrap();
-    let diff = |t| {
-        table.interpolate(r#"v("/P")"#, t).unwrap() - table.interpolate(r#"v("/N")"#, t).unwrap()
-    };
+    let deck = deck_of(&circuit);
+    let [p, n] = ["/P", "/N"].map(|net| deck.voltage(net).unwrap());
+    let tran = Tran::new(10e-12, 40e-9).probes([p.clone(), n.clone()]);
+    let result = simulator
+        .run(&deck.analysis(&tran))
+        .unwrap()
+        .result(&tran)
+        .unwrap();
+    let v = |probe, t| result.interpolate(probe, t).unwrap().unwrap();
+    let diff = |t| v(&p, t) - v(&n, t);
     // R_pkg (0.1 ohm) is in series with each driver.
     let swing = 3.3 * 100.0 / (2.0 * 82.6 + 100.0);
     assert!((diff(4e-9) + swing).abs() < 1e-3, "{}", diff(4e-9));
     assert!((diff(20e-9) - swing).abs() < 1e-3, "{}", diff(20e-9));
     assert!((diff(39e-9) + swing).abs() < 1e-3, "{}", diff(39e-9));
     // The common mode stays at half the supply.
-    let common = table.interpolate(r#"v("/P")"#, 20e-9).unwrap() - swing / 2.0;
+    let common = v(&p, 20e-9) - swing / 2.0;
     assert!((common - 1.65).abs() < 1e-3, "{common}");
     // The receiver reads high from the time the difference crosses vdiff, after the edge starts.
-    let scale = table.scale();
-    let p = table.column(r#"v("/P")"#).unwrap();
-    let n = table.column(r#"v("/N")"#).unwrap();
+    let scale = result.scale();
+    let (p, n) = (result.get(&p).unwrap(), result.get(&n).unwrap());
     let rise = (0..scale.len())
         .find(|&i| p[i] - n[i] > vdiff)
         .map(|i| scale[i])

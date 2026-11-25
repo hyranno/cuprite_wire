@@ -89,8 +89,8 @@ compared with KiCad's in the tests.
 - **The port `ref`.** The reference port is not named `gnd`, which ngspice reads as the global
   ground even as a port (`doc/dev/spice_netlist_format.md` section 6.2). KIBIS's `GND` is the global
   ground too, which is harmless there because the instance connects it to the ground anyway.
-- **The weights reproduce the rounding of `pwl`.** `Edges::weights` solves the weights from the
-  `[Rising Waveform]` / `[Falling Waveform]` with the I-V tables as `pwl` evaluates them, quadratic
+- **The weights reproduce the rounding of `pwl`.** `edges::from_waveforms` (`solve`) solves the
+  weights from the `[Rising Waveform]` / `[Falling Waveform]` with the I-V tables as `pwl` evaluates them, quadratic
   within `input_domain` (`PWL_DOMAIN`, 0.05 of the shorter adjacent segment) around each row. With
   the plain linear interpolation, the simulated edge missed a hand-made waveform by about 2.5 %.
 - **`C_fixture`.** The current into the fixture is that of `R_fixture` to `V_fixture` plus

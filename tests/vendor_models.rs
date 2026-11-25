@@ -24,7 +24,10 @@ use cuprite_wire::{
     kicad_part,
     naming::NetLabel,
     parts::Part,
-    spice::{IndependentSource, SpiceDialect, SpicePartInfo, Waveform},
+    spice::{
+        IndependentSource, SpiceDeck, SpiceDialect, SpicePartInfo, Waveform,
+        analysis::{Op, Tran},
+    },
     spice_part,
 };
 
@@ -66,25 +69,13 @@ kicad_part! {
     }
 }
 
-/// Runs the circuit with the deck's `directives` and `commands`, and returns the values printed for `names`.
-fn run(
-    circuit: CircuitBuilder,
-    directives: &[&str],
-    commands: &[String],
-    names: &[&str],
-) -> Vec<f64> {
-    let mut deck = deck_of(&circuit);
+/// The deck of the circuit with the `directives`.
+fn deck(circuit: &CircuitBuilder, directives: &[&str]) -> SpiceDeck {
+    let mut deck = deck_of(circuit);
     for directive in directives {
         deck = deck.directive(*directive);
     }
-    let sim = deck
-        .control(commands.iter().cloned())
-        .run()
-        .unwrap_or_else(|e| panic!("{e}"));
-    names
-        .iter()
-        .map(|name| sim.value(name).unwrap_or_else(|| panic!("{}", sim.log())))
-        .collect()
+    deck
 }
 
 /// TI's test bench of the model: VDD ramps up to 3.3 V, SENSE drops from 3.3 V to 0.5 V (below
@@ -130,11 +121,12 @@ fn test_tps3899() {
     }
     c.label(u[Tps3899::RESET_N], NetLabel::local("RESET"));
     let times = [400e-6, 600e-6, 740e-6, 950e-6];
-    let mut commands = vec!["tran 1u 1m".to_string()];
-    for (i, t) in times.iter().enumerate() {
-        commands.push(format!("meas tran r{i} find v(\"/RESET\") at={t}"));
-    }
-    let reset = run(c, &[], &commands, &["r0", "r1", "r2", "r3"]);
+    let deck = deck(&c, &[]);
+    let probe = deck.voltage("/RESET").unwrap();
+    let tran = Tran::new(1e-6, 1e-3).probe(&probe);
+    let sim = deck.analysis(&tran).run().unwrap_or_else(|e| panic!("{e}"));
+    let result = sim.result(&tran).unwrap();
+    let reset = times.map(|t| result.interpolate(&probe, t).unwrap().unwrap());
     let high = |v: f64| v > 3.0;
     let low = |v: f64| v < 0.4;
     assert!(
@@ -178,13 +170,12 @@ fn test_lm358_units() {
     }
     c.label(u["1"], NetLabel::local("OUT_A"));
     c.label(u["7"], NetLabel::local("OUT_B"));
-    let commands = [
-        "op".to_string(),
-        r#"let a = v("/OUT_A")"#.to_string(),
-        r#"let b = v("/OUT_B")"#.to_string(),
-        "print a b".to_string(),
-    ];
-    let out = run(c, &[".options rshunt=1e12"], &commands, &["a", "b"]);
+    let deck = deck(&c, &[".options rshunt=1e12"]);
+    let probes = ["/OUT_A", "/OUT_B"].map(|net| deck.voltage(net).unwrap());
+    let op = Op::new().probes(probes.clone());
+    let sim = deck.analysis(&op).run().unwrap_or_else(|e| panic!("{e}"));
+    let result = sim.result(&op).unwrap();
+    let out = probes.map(|probe| result.get(&probe).unwrap());
     assert!(
         (out[0] - 1.0).abs() < 0.01 && (out[1] - 2.0).abs() < 0.01,
         "{out:?}"

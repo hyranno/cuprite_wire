@@ -12,7 +12,10 @@ use cuprite_wire::{
     circuit::{CircuitBuilder, Named},
     kicad_part,
     naming::NetLabel,
-    spice::IndependentSource,
+    spice::{
+        IndependentSource,
+        analysis::{Op, Tran},
+    },
 };
 
 kicad_part! {
@@ -212,21 +215,19 @@ fn test_simulate() {
     let input = bench.instantiate_part(Named("input", IndependentSource::voltage(0.2)));
     bench.label(input[IndependentSource::P], NetLabel::local("IN"));
     bench.label(input[IndependentSource::N], NetLabel::global("GND"));
-    let deck = deck_of(&bench).control([
-        "op",
-        r#"let amp = v("/AMP")"#,
-        r#"let out = v("/OUT")"#,
-        "print amp out",
-    ]);
-    let sim = deck.run().unwrap();
-    let amp = sim.expect_value("amp");
+    let deck = deck_of(&bench);
+    let [amp, out] = ["/AMP", "/OUT"].map(|net| deck.voltage(net).unwrap());
+    let op = Op::new().probes([amp.clone(), out.clone()]);
+    let sim = deck.analysis(&op).run().unwrap();
+    let result = sim.result(&op).unwrap();
+    let amp = result.get(&amp).unwrap();
     assert!(
         (amp - (0.2 - 0.01) * 11.0).abs() < 0.01,
         "amp = {amp}\n{}",
         sim.log()
     );
     // The transistor is on, so OUT is pulled low.
-    let out = sim.expect_value("out");
+    let out = result.get(&out).unwrap();
     assert!(out < 1.0, "out = {out}");
 }
 
@@ -319,20 +320,20 @@ fn test_sources() {
     ] {
         assert!(text.lines().any(|l| l == line), "{line}\n{text}");
     }
-    let deck = deck.control([
-        "tran 1n 300n",
-        r#"meas tran sin find v("/SIN") at=250n"#,
-        r#"meas tran pulse find v("/PULSE") at=130n"#,
-        r#"meas tran pwl find v("/PWL") at=97n"#,
-        r#"meas tran dc find v("/DC") at=100n"#,
-        "print sin pulse pwl dc",
-    ]);
-    let sim = deck.run().unwrap();
+    let probes = ["/SIN", "/PULSE", "/PWL", "/DC"].map(|net| deck.voltage(net).unwrap());
+    let tran = Tran::new(1e-9, 300e-9).probes(probes.clone());
+    let sim = deck.analysis(&tran).run().unwrap();
+    let result = sim.result(&tran).unwrap();
     // The current of 1 A flows from + through the source to -, so the pulse is -1 kV across R.
     let sin = (2.0 * std::f64::consts::PI * 1e3 * 250e-9).sin();
-    let expect = [("sin", sin), ("pulse", -1000.0), ("pwl", 1.0), ("dc", 2.5)];
-    for (name, value) in expect {
-        let actual = sim.expect_value(name);
+    let expect = [
+        ("sin", 250e-9, sin),
+        ("pulse", 130e-9, -1000.0),
+        ("pwl", 97e-9, 1.0),
+        ("dc", 100e-9, 2.5),
+    ];
+    for (probe, (name, time, value)) in probes.iter().zip(expect) {
+        let actual = result.interpolate(probe, time).unwrap().unwrap();
         assert!(
             (actual - value).abs() < 1e-6 * value.abs().max(1.0),
             "{name} = {actual}\n{}",

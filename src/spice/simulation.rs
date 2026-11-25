@@ -343,15 +343,16 @@ pub enum SimulationError {
         /// The run directory, with the deck (`deck.cir`) to reproduce the run.
         dir: PathBuf,
     },
-    /// A `wrdata` file cannot be read, or not as a table.
+    /// A `wrdata` file cannot be read, or not as a table: the file of [`Simulation::table`], or the
+    /// output of a typed analysis ([`Simulation::result`]) that has the wrong columns or no rows.
     Table {
-        /// The file name passed to [`Simulation::table`].
+        /// The file name passed to [`Simulation::table`], or the output file of the analysis.
         file: String,
         /// Why it cannot be read.
         reason: String,
     },
-    /// The result of a typed analysis cannot be read: the deck did not have the analysis, or the
-    /// analysis has no such probe.
+    /// The result of a typed analysis cannot be read: the deck did not have the analysis, the
+    /// analysis has no probes, or it has no such probe.
     Analysis(String),
     /// The ngspice shared library cannot be loaded or used.
     #[cfg(feature = "shared-ngspice")]
