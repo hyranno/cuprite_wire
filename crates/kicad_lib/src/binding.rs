@@ -26,7 +26,7 @@ use crate::{
     Error,
     resolve::Resolver,
     sim::{Args, ElementDef, Elements, ModelDef, ModelMode},
-    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, FileRef, file_refs},
+    spice_lib::{Definition, DefinitionKind, Dialect, DialectHint, FileRef, file_refs, spice_path},
 };
 
 /// The dialect of a model: detected from the library, or given.
@@ -424,7 +424,7 @@ fn check_relative_files(found: &Definition, files: &[Vec<ModelFile>]) -> Result<
 fn with_absolute_files(text: &str, files: &[ModelFile]) -> String {
     let mut text = text.to_string();
     for file in files.iter().rev() {
-        let path = file.path.to_string_lossy();
+        let path = spice_path(&file.path);
         text.replace_range(file.reference.range.clone(), &format!("\"{path}\""));
     }
     text

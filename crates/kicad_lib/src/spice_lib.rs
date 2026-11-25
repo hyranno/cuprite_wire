@@ -437,6 +437,18 @@ pub struct FileRef {
     pub range: std::ops::Range<usize>,
 }
 
+/// A path as written in a SPICE netlist, a `Sim.Library` field or a command of ngspice: with `/` as
+/// the separator on Windows, as KiCad writes paths and since ngspice reads `\\` in commands as an
+/// escape.
+pub fn spice_path(path: &std::path::Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
+
 /// The files named by code models in `text` (a definition, including the `.model` statements
 /// nested in a `.subckt`).
 pub fn file_refs(text: &str) -> Vec<FileRef> {

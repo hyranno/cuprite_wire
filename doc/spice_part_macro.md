@@ -58,7 +58,7 @@ the body of the model is not interpreted, ngspice reads it. Files read are track
 | `sim_model` | `include` or `inline` (as for `kicad_part!`) | `include` |
 
 Port names such as `IN+` or `1` are not identifiers, so constants (`Tps3899Model::RESET_N`) are
-made only for the pins renamed with `pins` (whose IDs must differ in more than case); `PINS` lists
+made only for the pins renamed with `pins` (whose IDs must differ in more than case, and must not be `pins`); `PINS` lists
 all of them. `kicad()` returns `None`, and
 `spice()` returns one element: `X` for a `.subckt`, `D` `Q` `M` `J` for a `.model` of type `D`,
 `NPN`/`PNP`, `NMOS`/`PMOS`/`VDMOS`, `NJF`/`PJF` (terminals `A K`, `C B E`, `D G S [B]`, `D G S`).

@@ -156,6 +156,15 @@ break the API).
   error instead of a panic (`Op`).
 - `cuprite_wire_ibis` rejects numbers out of the range of `f64` (`1e999`) instead of reading them
   as infinities.
+- `kicad_part!` and `spice_part!`: a pin renamed to an ID whose constant is another constant of the
+  type (`pins`, or `library`, `component` and `ibis_pin` for an IBIS part) is a compile error
+  pointing at `pins` instead of a duplicate definition in the generated code.
+- On Windows, `sim_model: inline` wrote the absolute paths of the files of code models with `\`,
+  which ngspice reads as an escape; they are written with `/` like the other paths.
+- The built-in models of `kicad_part!` (`Sim.Device D` etc. with `Sim.Params`) were named after the
+  type only (`__Diode`), so two types of the same name in different modules with different
+  parameters made ngspice fail with conflicting models. The name has the hash of the model
+  appended (`__Diode_af63f94c86021dd3`).
 
 ## [0.3.0] - 2026-11-22
 

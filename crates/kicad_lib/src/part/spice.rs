@@ -7,6 +7,7 @@ use crate::{
     binding::{self, BindOptions, ModelBinding, PartPin, PartPins},
     resolve::Resolver,
     sim::{self, Elements, ModelMode},
+    spice_lib::spice_path,
 };
 
 /// Binds the models of the `sim` block, with pad numbers.
@@ -67,7 +68,7 @@ pub(super) fn sim_fields(
         .collect();
     let mut fields = vec![
         ("Sim.Device".to_string(), info.sim_device.to_string()),
-        ("Sim.Library".to_string(), library_field(&info.path)),
+        ("Sim.Library".to_string(), spice_path(&info.path)),
         ("Sim.Name".to_string(), info.name.clone()),
         ("Sim.Pins".to_string(), pins.join(" ")),
     ];
@@ -80,15 +81,4 @@ pub(super) fn sim_fields(
         fields.push(("Sim.Params".to_string(), params.join(" ")));
     }
     fields
-}
-
-/// The `Sim.Library` field of a model file: with `/` as the separator on Windows, as KiCad writes
-/// paths and as the SPICE netlist does.
-pub(super) fn library_field(path: &std::path::Path) -> String {
-    let text = path.to_string_lossy();
-    if cfg!(windows) {
-        text.replace('\\', "/")
-    } else {
-        text.into_owned()
-    }
 }

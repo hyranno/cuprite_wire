@@ -73,7 +73,8 @@ with the same nickname.
   `fn new(value: impl Into<String>)` for `value: param`. It derives `Debug`, `Clone`, `PartialEq` and `Eq`.
   When the simulation writes the value (section 4), `new` panics if it is not a number.
 - `Name::PINS`: the pin IDs. Each pin renamed with `pins` also gets a constant (`out_a` -> `Name::OUT_A`),
-  so the given IDs must differ in more than case (`out` and `OUT` are an error).
+  so the given IDs must differ in more than case (`out` and `OUT` are an error) and must not make the
+  name of another constant of the type (`pins`; `library`, `component` and `ibis_pin` for an IBIS part).
 - The documentation of the type gets the symbol, the footprint, the symbol's description and
   datasheet, and a table of the pins (ID, pad, name, electrical type, unit), shown by rust-analyzer.
 - `impl Part`: the reference prefix, the pins, the value, the internal connections, `kicad()`
@@ -143,7 +144,7 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
 | `Sim.Device` `R` `C` `L` | the value, or `Sim.Params` `r=` / `c=` / `l=` |
 | `Sim.Device` `V` `I` with `Sim.Type` `DC` (or none) | `DC <value>`, or `Sim.Params` `dc=`; `AC <ac> <ph>` with `ac=` / `ph=` |
 | `Sim.Device` `V` `I` with `Sim.Type` `SIN` `PULSE` `EXP` `AM` `SFFM` `PWL` | the waveform of `Sim.Params` (`SIN( 0 1 1k )`), as KiCad writes it (see below) |
-| `Sim.Device` `D`, `NPN` `PNP` (Gummel-Poon), `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges) | a built-in model `.model __<TypeName> <type> <Sim.Params>`, or the `.model` `Sim.Name` of `Sim.Library` |
+| `Sim.Device` `D`, `NPN` `PNP` (Gummel-Poon), `NMOS` `PMOS` (`VDMOS`, `MOS1`), `NJFET` `PJFET` (Shichman-Hodges) | a built-in model `.model __<TypeName>_<hash> <type> <Sim.Params>`, or the `.model` `Sim.Name` of `Sim.Library` |
 | `Sim.Device` `SUBCKT` with `Sim.Library` and `Sim.Name` | `X` element with the `.subckt` and `Sim.Params` as parameters |
 | `Sim.Device` `IBIS` (KiCad 10) | the driver or receiver of a pin of an IBIS file (feature `ibis`; see "IBIS models" below) |
 
@@ -191,8 +192,10 @@ With `spice: auto`, the SPICE description is derived from the symbol, following 
   `spice: excluded` explicitly. To simulate such a part anyway, give its SPICE description by
   hand to an instance with `PartExt::with_spice` (`doc/kicad_netlist_usage.md` section 2). A `.subckt` built from XSPICE code models is a `SUBCKT` like any
   other; files its code models read are handled as in `doc/spice_part_macro.md` section 5.
-- Built-in models are named after the generated type (`__Diode`), while KiCad names them after the
-  reference (`__D1`); the definitions are the same.
+- Built-in models are named after the generated type and the hash of the model
+  (`__Diode_af63f94c86021dd3`, so that types of the same name in different modules never share a
+  name with different parameters), while KiCad names them after the reference (`__D1`); the
+  definitions are the same.
 - The library model is checked as described in `doc/spice_part_macro.md` section 3 (except that
   pins missing from `Sim.Pins` are unused, as in KiCad), and its dialect is detected: models written
   for PSpice or LTspice run in ngspice's compatibility mode (`doc/spice_part_macro.md` section 4).

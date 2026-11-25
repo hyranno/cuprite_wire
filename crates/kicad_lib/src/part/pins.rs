@@ -150,19 +150,54 @@ pub(super) fn rename_pins(
             );
         }
     }
-    // The macros make an upper-case constant of each given ID (`out` -> `OUT`).
-    let mut upper: BTreeMap<String, &str> = BTreeMap::new();
+    Ok(())
+}
+
+/// The associated constants the macros generate besides the pin constants: `PINS`, and for an
+/// IBIS part the constants of the IBIS file and pin.
+fn reserved_constants(spice: &SpiceDef) -> &'static [&'static str] {
+    match spice {
+        SpiceDef::Ibis(_) => &["PINS", "LIBRARY", "COMPONENT", "IBIS_PIN"],
+        _ => &["PINS"],
+    }
+}
+
+/// The constants of the pins given an ID that can be one (`out_a` -> `OUT_A`), as
+/// `(constant name, pin ID)`, checked against each other and the other constants of the part.
+pub(super) fn pin_constants(
+    renames: &[(String, String)],
+    spice: &SpiceDef,
+) -> Result<Vec<(String, String)>, PartError> {
+    let reserved = reserved_constants(spice);
+    let mut constants: BTreeMap<String, &str> = BTreeMap::new();
+    let mut result = Vec::new();
     for (_, id) in renames {
-        if let Some(other) = upper.insert(id.to_ascii_uppercase(), id)
-            && other != id
-        {
+        if !is_identifier(id) {
+            continue;
+        }
+        let name = id.to_ascii_uppercase();
+        if reserved.contains(&name.as_str()) {
+            return err(
+                OptionKey::Pins,
+                format!("pin ID {id:?} would make the constant {name}, which the part already has"),
+            );
+        }
+        if let Some(other) = constants.insert(name.clone(), id) {
             return err(
                 OptionKey::Pins,
                 format!("pin IDs {other:?} and {id:?} differ only in case"),
             );
         }
+        result.push((name, id.clone()));
     }
-    Ok(())
+    Ok(result)
+}
+
+/// An ID that is an identifier (not `_`) in upper case. Upper-case words are never keywords.
+fn is_identifier(text: &str) -> bool {
+    text.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && text != "_"
 }
 
 /// The default pin IDs: the pad numbers, with `#2`, `#3`, ... appended for the second and later

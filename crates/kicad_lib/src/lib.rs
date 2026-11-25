@@ -36,6 +36,14 @@ pub(crate) fn unique_by<'a, T: 'a, K: Ord + 'a>(
     items.into_iter().filter(move |item| seen.insert(key(item)))
 }
 
+/// The 64-bit FNV-1a hash: stable across platforms and Rust versions, unlike `DefaultHasher`.
+/// Generated names derived from a definition use it, so that equal definitions share a name.
+pub fn fnv1a(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 /// An error with a human-readable message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Error {
