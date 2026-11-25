@@ -136,7 +136,10 @@ let gain_db: Vec<f64> = ac.get(&out)?.iter().map(|v| v.db()).collect();
 - **Analyses**: `Op::new()`; `Tran::new(step, stop)` with `with_start`, `with_max_step` and
   `with_uic`; `Dc::new(&source, start, stop, step)` sweeping a source from `deck.source(name)`;
   `Ac::decade`, `Ac::octave` and `Ac::linear(points, start, stop)`. Add the probes with `probe` or
-  `probes`, then add the analysis to the deck. A deck writes each typed analysis with a `wrdata`
+  `probes`, then add the analysis to the deck. Invalid values panic when the analysis is made
+  (a step or stop time that is not finite and positive, a start time not before the stop, a DC
+  step going away from the stop, zero AC points or a frequency range that is empty or not
+  finite), rather than when ngspice rejects or ignores them. A deck writes each typed analysis with a `wrdata`
   of its probes to `analysis<n>.txt`; avoid those names in your own commands.
 - **Results**: `Simulation::result(&analysis)` returns `OpResult` (`get` gives `f64`),
   `SweepResult` for `Tran` and `Dc` (`scale()` is the time or the swept value; `get`,
@@ -163,8 +166,12 @@ let tx = DigitalSequence::new(Level::High).uart(10e-6, 115_200.0, b"Hi");
 let driver = bench.instantiate_part(DigitalDriver::new(OutputCharacteristics::cmos(3.3), tx));
 let input = InputCharacteristics::cmos(3.3).with_pull(Pull::up(3.3, 10e3));
 let load = bench.instantiate_part(DigitalLoad::new(input.clone()));
-// ... connect `driver[DigitalDriver::OUT]` / `load[DigitalLoad::IN]`, run a transient analysis ...
-let read = input.decode(table.scale(), table.column(r#"v("/RX")"#).unwrap());
+// ... connect `driver[DigitalDriver::OUT]` / `load[DigitalLoad::IN]`, label the net `RX`,
+//     build the deck ...
+let rx = deck.voltage("/RX")?;
+let tran = Tran::new(1e-7, 200e-6).probe(&rx);
+let result = deck.analysis(&tran).run()?.result(&tran)?;
+let read = input.decode(result.scale(), result.get(&rx)?);
 ```
 
 - `DigitalSequence`: an initial `Level` (`Low`, `High`, `HiZ`) and the times it changes

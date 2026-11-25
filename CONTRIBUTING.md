@@ -46,7 +46,9 @@ others get the same environment.
    [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`deny.toml`), and runs the tests,
    including the ignored tests reading the KiCad libraries and demos. `cargo xtask help` lists
    the tasks and their options (e.g. `cargo xtask test --no-kicad` without a KiCad
-   installation). The commands are in `xtask/src/main.rs`; the CI workflow runs the same tasks.
+   installation). The commands are in `xtask/src/main.rs`; the CI workflow runs the same tasks, and
+   also `cargo xtask check` with the minimum supported Rust (`rust-version` in `Cargo.toml`), which
+   `all` does not include.
 
    The git hooks in `.githooks/` run these checks for you: `pre-commit` checks the formatting and
    `pre-push` runs `cargo xtask all` (`SKIP_TESTS=1 git push` skips the tests,
@@ -83,7 +85,7 @@ review, not rules.
 
 | Document | Contents |
 |---|---|
-| [`doc/dev/kicad_netlist_format.md`](doc/dev/kicad_netlist_format.md) | the KiCad netlist format, as observed in KiCad 9 |
+| [`doc/dev/kicad_netlist_format.md`](doc/dev/kicad_netlist_format.md) | the KiCad netlist format, as observed in KiCad 9 and 10 |
 | [`doc/dev/kicad_bom_format.md`](doc/dev/kicad_bom_format.md) | the BOM (CSV) of `kicad-cli sch export bom`, as observed in KiCad 10 |
 | [`doc/dev/spice_netlist_format.md`](doc/dev/spice_netlist_format.md) | the SPICE netlist format and ngspice's behavior |
 | [`doc/dev/ibis.md`](doc/dev/ibis.md) | KiCad's IBIS conversion, how to reproduce it, and the design of the IBIS support |

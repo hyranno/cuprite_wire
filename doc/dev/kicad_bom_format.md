@@ -6,8 +6,8 @@ this document records what KiCad 10.0 was observed to write, and how to observe 
 
 ## 1. Reproducing the observations
 
-Set the KiCad configuration directories as in the `kicad` skill (`$HOME` is read-only in the
-sandbox), then export the BOM of a demo schematic:
+Point the KiCad configuration directories into `$TMPDIR` where `$HOME` is read-only (e.g. in the
+Claude Code sandbox), then export the BOM of a demo schematic:
 
 ```sh
 export XDG_CONFIG_HOME=$TMPDIR/kicad/config XDG_CACHE_HOME=$TMPDIR/kicad/cache XDG_DATA_HOME=$TMPDIR/kicad/data

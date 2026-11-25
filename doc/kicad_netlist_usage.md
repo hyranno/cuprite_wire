@@ -16,7 +16,8 @@ let netlist = circuit             // CircuitBuilder
 netlist.write(&mut file)?;        // or `netlist.to_string()`
 ```
 
-`to_kicad()` returns `Err(CircuitErrors)` with all errors found (section 5).
+`to_kicad()` returns `Err(CircuitErrors)` with all errors found (section 5). `with_source` panics
+if the source contains a NUL character.
 
 ## 2. KiCad information of parts
 
@@ -126,6 +127,7 @@ Besides the errors of `to_netlist` (`doc/circuits.md` section 6), `to_kicad` rep
 | `UnknownPinId` | a `KicadPinInfo` for a pin ID the part does not have |
 | `UnknownPinUnit` | a `KicadPinInfo` in a unit that `KicadPartInfo::units` does not have |
 | `DuplicatePad` | two pins on the same pad that are not connected inside the part (connected ones are duplicate pins: the pad is written once, with the first of them in `Part::pin_ids`) |
+| `KicadNulCharacter` | a NUL character, where KiCad would end the text, in the value, a field name or value, the datasheet, the description, a unit name, or a pin's pad or name |
 
 The output is checked against pcbnew and Eeschema by the tools described in `doc/dev/verifying.md`.
 

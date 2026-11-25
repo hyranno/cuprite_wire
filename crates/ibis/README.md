@@ -47,7 +47,7 @@ assert_eq!(model.voltage_range.unwrap().typ, 3.3);
 
 ## Coverage
 
-The parser follows the syntax of the IBIS specification (up to version 7): keywords are
+The parser follows the syntax of the IBIS specification (up to version 8.0): keywords are
 case-insensitive and treat `_` and spaces alike, `[Comment Char]` changes the comment
 character, numbers take scale suffixes (`p`, `n`, `m`, `k`, `M`, ...) and ignore the units
 after them, and `NA` marks missing min/max values. It reads:

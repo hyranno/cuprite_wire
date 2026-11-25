@@ -220,6 +220,8 @@ traces to `decode`.
 depend on `cuprite_wire` and can be used alone. `parse(&text)` reads a file into an `IbisFile`:
 the header, the components (package, pins, `[Diff Pin]`, `[Series Pin Mapping]`), the model selectors
 and the models. Keywords it does not read are skipped and listed in `IbisFile::skipped`.
+`parse_bytes(&bytes)` reads the bytes of a file, replacing those that are not UTF-8 (found in the
+comments of some vendor files); `cuprite_wire::spice::ibis::read_file` uses it.
 `cuprite_wire_ibis::spice::subcircuit` writes a model with the ports `pin ref` (receiver) or
 `pin ref ku kd` (driver), and `Edges::weights` the waveforms of `ku` and `kd` for a sequence of
 states. The API reference is on [docs.rs](https://docs.rs/cuprite_wire_ibis).

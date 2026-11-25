@@ -44,6 +44,9 @@ impl Part for Passive {
 }
 ```
 
+A part type must also implement `Debug` and `Clone`, and be `'static` (`Part` has `Any` as a
+supertrait), so it cannot borrow data: own it, or share it with `Arc`.
+
 - **One pin ID corresponds to one footprint pad**, as in KiCad symbols. A part with several pads
   of the same function (e.g. six GND pins) has one pin ID per pad. The exception is KiCad 10's duplicate pins
   (several pins with different names or types on one pad), which must be connected inside the part.
@@ -59,8 +62,9 @@ impl Part for Passive {
   unsupported format is an error (`KicadUnsupported`, `SpiceUnsupported`). There is no option to
   skip unsupported parts; for SPICE, parts that should not be simulated are excluded explicitly
   (`SpicePartInfo::Excluded`).
-- An instance can override the value, footprint, fields and flags (DNP, ...) of its part, e.g.
-  `Resistor0603::new("10k").dnp()`, with `PartExt` (`doc/kicad_netlist_usage.md` section 2).
+- An instance can override the value, footprint, fields, flags (DNP, ...) and SPICE description
+  (`with_spice`) of its part, e.g. `Resistor0603::new("10k").dnp()`, with `PartExt`
+  (`doc/kicad_netlist_usage.md` section 2).
 
 ## 3. Nodes, parts and subcircuits
 
@@ -78,7 +82,8 @@ circuit.connect(amp.output, node);
 Nodes are `circuit::Node`s. A node belongs to the builder that created it: using it in another
 builder (e.g. a node of the outer circuit inside a subcircuit's generator) is reported as
 `CircuitErrorKind::ForeignNode` when the circuit is converted to a netlist. Pass nodes into a
-subcircuit through its interface.
+subcircuit through its interface. A clone of a builder shares the nodes made before cloning, but
+a node made by one of them afterwards is foreign to the other.
 
 A subcircuit is a `SubcircuitGenerator`. Its `Interface` type lists the nodes the circuit around
 it connects to, usually as a struct deriving `subcircuit::Interface`, generic over the type of its
@@ -126,7 +131,7 @@ footprints linked to components (`doc/kicad_netlist_usage.md` section 3).
 
 - Wrapping the part or the generator in `circuit::Named` gives an explicit name
   (`Named("amp_left", Follower)`, also around `with_options`). Names must be non-empty, must not
-  contain `#`, and must be unique per kind in one (sub)circuit.
+  contain `#`, `{` or control characters, and must be unique per kind in one (sub)circuit.
 - Otherwise the instance gets an automatic name `<base>#<n>`, numbered per
   kind in each (sub)circuit: the reference prefix for parts (`R#1`, `R#2`) and
   `SubcircuitGenerator::base_name()` for subcircuits (by default the type name without module path
@@ -157,7 +162,8 @@ Reference designators (`R1`, `R2`, ...) are numbered in instantiation order over
   (a net labeled `ALPHA` and `ZED` is connected to another net labeled `ZED`).
 - An unnamed net is named after one of its pins, as Eeschema does: `Net-(<ref>-<pin name>)`, or
   `Net-(<ref>-Pad<number>)` for a pin without a name or named as its pad number. A pin name shared
-  by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`). For a part with
+  by several pins of the part is followed by the pad (`Net-(U1-GND-Pad5)`); duplicate pins (on the
+  same pad) and `no_connect` pins do not count as sharing the name, as in KiCad. For a part with
   several units (`KicadPartInfo::units`), a pin written by its name gets the reference of its
   unit (`Net-(U1B-OUT)`), only the pins of that unit (and those of every unit) count for a shared
   name, and a pin of every unit is a candidate in each unit. Pins written by their
@@ -185,7 +191,7 @@ Errors raised by `to_netlist` (`CircuitErrorKind`):
 
 | Error | Cause |
 |---|---|
-| `InvalidName` | empty name or label, `#` in an explicit name, or `{` in an explicit name or label; a reference prefix (`Part::ref_prefix`) that is empty, ends with a digit, or contains whitespace, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#` or `{` |
+| `InvalidName` | empty name or label, `#` in an explicit name, or `{` or a control character in an explicit name or label; a reference prefix (`Part::ref_prefix`) that is empty, ends with a digit, or contains whitespace, a control character, `?`, `#`, `/` or `{`; a `SubcircuitGenerator::base_name` used for an automatic name that is empty or contains `#`, `{` or a control character |
 | `DuplicateInstanceName` | the same explicit name twice in one (sub)circuit (the note points at the first) |
 | `ForeignNode` | a node created by another builder (section 3) |
 | `DuplicatePinId` / `UnknownPinId` | duplicate pin IDs; unknown pin IDs in internal connections, in `Part::global_labels` or in the keys of `Part::extra_pin_types` |

@@ -95,8 +95,7 @@ reports the errors of the pin map as warnings, and `Ignore` turns pin conflicts 
 KiCad 10 added `LabelSinglePin` (`isolated_pin_label`) and `GroundPinNotGround`
 (`ground_pin_not_ground`). A label on a net with only one pin was `global_label_dangling` (a
 warning) for a global label and `label_dangling` (an error) for a local one in KiCad 9; KiCad 10
-reports both as `isolated_pin_label`. Before following KiCad 10, this crate reported the pin as
-`PinNotConnected`. The pin conflict matrix is the same.
+reports both as `isolated_pin_label`. The pin conflict matrix is the same.
 
 ## 4. Marks
 

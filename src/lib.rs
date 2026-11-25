@@ -30,6 +30,7 @@
 //! | [Exporting a KiCad netlist](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_netlist_usage.md) | the netlist for pcbnew and the bill of materials ([`kicad`]) |
 //! | [Generating parts from KiCad libraries](https://github.com/hyranno/cuprite_wire/blob/main/doc/kicad_part_macro.md) | [`kicad_part!`] and [`basic`] |
 //! | [Parts from SPICE models](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_part_macro.md) | [`spice_part!`], the `sim` block, dialects |
+//! | [Pins of IBIS models](https://github.com/hyranno/cuprite_wire/blob/main/doc/ibis_part_macro.md) | `ibis_part!` (feature `ibis`): the pins of IBIS models, checked at compile time |
 //! | [Exporting a SPICE netlist and simulating](https://github.com/hyranno/cuprite_wire/blob/main/doc/spice_netlist_usage.md) | test benches and ngspice ([`spice`]) |
 //! | [Simulating I/O buffers with IBIS models](https://github.com/hyranno/cuprite_wire/blob/main/doc/ibis.md) | signal integrity with IBIS models (`spice::ibis`, feature `ibis`), [`spice::TransmissionLine`] |
 //! | [Co-simulation with Rust models](https://github.com/hyranno/cuprite_wire/blob/main/doc/cosimulation.md) | microcontroller models driving the circuit (`spice::cosim`, feature `shared-ngspice`), XSPICE `d_cosim` ([`spice::xspice`]) |
