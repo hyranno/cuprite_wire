@@ -24,6 +24,10 @@ use crate::spice::{GROUND, SimulationError, SpiceDeck, spice_number};
 /// A vector to record in an analysis: a node voltage, the voltage between two nodes, or the
 /// current through a voltage source. Get one from [`SpiceDeck::voltage`],
 /// [`SpiceDeck::voltage_between`] or [`SpiceDeck::current`].
+///
+/// A probe names the nodes or the source of the deck it comes from, and does not record the deck.
+/// Used in another deck that lacks them, the run fails with ngspice's `no such vector`
+/// ([`SimulationError::Ngspice`]).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Probe {
     expression: String,
@@ -175,6 +179,9 @@ impl SpiceDeck {
 }
 
 /// An independent source of a deck, from [`SpiceDeck::source`].
+///
+/// Like a [`Probe`], it names the element and does not record the deck: in another deck, it
+/// sweeps the element of the same name, or the run fails if there is none.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Source {
     element: String,

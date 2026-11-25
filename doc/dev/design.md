@@ -75,6 +75,7 @@ stay, and both go into the `.control` block in the order they are added, so `mea
   `wrdata` and `Simulation::table` on purpose: those of `Table` itself (column names, quoting,
   the same table from both backends, the paths the shared library rewrites, decks that ngspice
   rejects), those comparing with vectors of ngspice (`vp()`, `cph()`, `group_delay()`), and
-  those measuring with `meas` (`WHEN`, `FIND ... AT`), which needs the node name in `vdb(...)`.
-  The tests of XSpice models, vendor IBIS files and `cuprite_wire_embedded_hal` still write
-  `wrdata`; they work, and are rewritten when they are changed for another reason.
+  those measuring with `meas` (`WHEN`, `FIND ... AT`), which needs the node name in `vdb(...)`
+  (a voltage at a time is read with `SweepResult::interpolate` instead). The tests of
+  `cuprite_wire_ibis` write `wrdata` in their own decks, since that crate does not depend on
+  `cuprite_wire`.

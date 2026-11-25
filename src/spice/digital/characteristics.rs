@@ -247,11 +247,12 @@ impl InputCharacteristics {
         )
     }
 
-    /// The levels read from voltage samples (e.g. columns of a transient analysis [`Table`]).
-    /// The first sample sets the initial level (between the thresholds, the nearer one);
-    /// the times of the changes are interpolated at the threshold crossed.
+    /// The levels read from voltage samples (e.g. [`SweepResult::scale`] and [`SweepResult::get`]
+    /// of a transient analysis). The first sample sets the initial level (between the thresholds,
+    /// the nearer one); the times of the changes are interpolated at the threshold crossed.
     ///
-    /// [`Table`]: crate::spice::Table
+    /// [`SweepResult::scale`]: crate::spice::analysis::SweepResult::scale
+    /// [`SweepResult::get`]: crate::spice::analysis::SweepResult::get
     ///
     /// # Panics
     /// If `time` and `voltage` have different lengths or the times decrease.

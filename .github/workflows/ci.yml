@@ -37,7 +37,7 @@ jobs:
         with:
           tool: cargo-deny@0.22.0
       - run: cargo xtask fmt
-      # Clippy with and without the optional features, and rustdoc warnings.
+      # Clippy and rustdoc warnings, with and without the optional features.
       - run: cargo xtask lint
       # The licenses and sources of the dependencies (deny.toml); audit.yml checks the advisories.
       - run: cargo xtask deny
@@ -101,6 +101,8 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: kicad${{ matrix.kicad }}
+      # Clippy on the targets needing the KiCad libraries, which the lint job cannot build.
+      - run: rustup component add clippy
       # Including the ignored tests reading the KiCad libraries and demos.
       - run: cargo xtask test ${{ matrix.test-options }}
 

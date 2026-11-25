@@ -136,6 +136,10 @@ impl DigitalLoad {
     /// The reference pin the voltages of the input are relative to.
     pub const GND: &'static str = "gnd";
 
+    /// An ideal input (no capacitance, leakage or pull) draws nothing and has no SPICE elements
+    /// ([`SpicePartInfo::Excluded`]). A net with nothing else on it is then left out of the
+    /// SPICE netlist, and cannot be probed.
+    ///
     /// # Panics
     /// If the thresholds of `input` cross, its capacitance is negative, its leakage is not
     /// finite, or its pull resistance is not positive.

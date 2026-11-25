@@ -42,7 +42,9 @@ run by `cargo test`, and the scripts in `tools/` that drive KiCad. CI runs the c
   the vendor models below; the files and the checks are listed in the test).
 - **Vendor models** (opt-in, not run by CI):
   `CUPRITE_VENDOR_MODELS_DIR=... cargo test --features vendor-models --test vendor_models`
-  (`doc/spice_part_macro.md` section 7).
+  (`doc/spice_part_macro.md` section 7). CI does not even compile `tests/vendor_models.rs` and
+  `tests/vendor_ibis.rs` (their macros read the files), so a change of an API they use breaks
+  them unnoticed: run both after such a change (`--features vendor-models,ibis`).
 - **Compile errors of the macros**: `tests/kicad_part_errors.rs` (trybuild); regenerate the
   messages with `TRYBUILD=overwrite cargo test --test kicad_part_errors`.
 - **S-expression helpers of the tools**: `python3 -m doctest tools/kicad_netlist.py` checks the

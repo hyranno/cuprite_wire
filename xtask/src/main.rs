@@ -17,15 +17,16 @@ Usage: cargo xtask <TASK>... [OPTIONS]
 
 Tasks:
   fmt         Check the formatting
-  lint        Clippy with and without the optional features, and rustdoc warnings
+  lint        Clippy and rustdoc warnings, with and without the optional features
   check       cargo check with the optional features (CI runs it with the minimum supported Rust)
   deny        Check the licenses and sources of the dependencies (cargo-deny)
   advisories  Check the dependencies for security advisories (cargo-deny; needs the network)
-  test        Run the tests, including those reading the KiCad libraries and demos
+  test        Run the tests, including those reading the KiCad libraries and demos (and
+              clippy on the targets needing the KiCad libraries)
   all         fmt, lint, deny and test: the checks of the pre-push hook
 
 Options:
-  --no-kicad        test: skip the tests reading the KiCad libraries and demos
+  --no-kicad        test: skip the tests (and clippy) reading the KiCad libraries and demos
   --no-kicad-demos  test: skip the tests reading the KiCad demos (Debian's packages lack them)
 ";
 
@@ -103,11 +104,14 @@ fn lint() -> Result<(), String> {
     // cuprite_wire_embedded_hal turns shared-ngspice on for the whole workspace build;
     // check cuprite_wire without it too.
     cargo("clippy -p cuprite_wire --all-targets -- -D warnings")?;
-    // Broken intra-doc links and other rustdoc warnings.
+    // Broken intra-doc links and other rustdoc warnings, with and without the optional features
+    // (links to items behind a feature break without it).
+    let deny_warnings = [("RUSTDOCFLAGS", "-D warnings")];
     cargo_with_env(
         &format!("doc --workspace --no-deps --features {FEATURES}"),
-        &[("RUSTDOCFLAGS", "-D warnings")],
-    )
+        &deny_warnings,
+    )?;
+    cargo_with_env("doc -p cuprite_wire --no-deps", &deny_warnings)
 }
 
 /// Runs `cargo deny check` (configured in `deny.toml`).
@@ -134,6 +138,13 @@ fn test(kicad: KicadTests) -> Result<(), String> {
     } else {
         format!("{FEATURES},kicad-libraries")
     };
+    if kicad != KicadTests::None {
+        // The targets needing the KiCad libraries build only where they are installed, so `lint`
+        // leaves them out.
+        cargo(&format!(
+            "clippy --workspace --all-targets --features {features} -- -D warnings"
+        ))?;
+    }
     cargo(&format!("test --workspace --features {features}"))?;
     // Ignored tests reading the KiCad symbol and footprint libraries, and the IBIS files of the
     // KiCad demos.

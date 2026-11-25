@@ -12,6 +12,7 @@ use crate::{
     parts::Part,
     spice::{
         IndependentSource, SpicePartInfo,
+        analysis::Tran,
         digital::{
             DigitalDriver, DigitalLoad, DigitalSequence, InputCharacteristics, Level,
             OutputCharacteristics,
@@ -149,12 +150,13 @@ fn test_simulate_inverter() {
         bench.label(gnd, NetLabel::local("VSS"));
     }
     bench.label(offset[IndependentSource::N], NetLabel::global("GND"));
-    let deck = deck_of(&bench).control(["tran 10n 6u", r#"wrdata y.txt v("/Y","/VSS")"#]);
-    let sim = deck.run().unwrap();
-    let table = sim.table("y.txt").unwrap();
-    let y = table.column(r#"v("/Y","/VSS")"#).unwrap();
+    let deck = deck_of(&bench);
+    let probe = deck.voltage_between("/Y", "/VSS").unwrap();
+    let tran = Tran::new(10e-9, 6e-6).probe(&probe);
+    let result = deck.analysis(&tran).run().unwrap().result(&tran).unwrap();
+    let y = result.get(&probe).unwrap();
     assert!((y[y.len() - 1] - 3.3).abs() < 0.01, "{}", y[y.len() - 1]);
-    let read = input.decode(table.scale(), y);
+    let read = input.decode(result.scale(), y);
     // The model answers its first input, at time 0, after the delays.
     let (first, rest) = read.events().split_first().expect("the output changes");
     assert_eq!(read.initial(), Level::Low, "{read:?}");
@@ -187,10 +189,11 @@ fn test_simulate_oscillator() {
     bench.label(oscillator["q"], NetLabel::local("Q"));
     bench.label(oscillator[DCosim::GND], NetLabel::global("GND"));
     bench.label(load[DigitalLoad::GND], NetLabel::global("GND"));
-    let deck = deck_of(&bench).control(["tran 10n 9u", r#"wrdata q.txt v("/Q")"#]);
-    let sim = deck.run().unwrap();
-    let table = sim.table("q.txt").unwrap();
-    let read = input.decode(table.scale(), table.column(r#"v("/Q")"#).unwrap());
+    let deck = deck_of(&bench);
+    let probe = deck.voltage("/Q").unwrap();
+    let tran = Tran::new(10e-9, 9e-6).probe(&probe);
+    let result = deck.analysis(&tran).run().unwrap().result(&tran).unwrap();
+    let read = input.decode(result.scale(), result.get(&probe).unwrap());
     let times: Vec<f64> = read.events().iter().map(|e| e.0).collect();
     assert_eq!(read.initial(), Level::Low, "{read:?}");
     assert_eq!(times.len(), 4, "{read:?}");
@@ -250,20 +253,13 @@ fn test_simulate_verilog_counter() {
     for gnd in gnds {
         bench.label(gnd, NetLabel::global("GND"));
     }
-    let deck = deck_of(&bench).control([
-        "tran 10n 5.5u",
-        r#"wrdata out.txt v("/Q1") v("/Q0") v("/C")"#,
-    ]);
-    let sim = deck.run().unwrap();
-    let table = sim.table("out.txt").unwrap();
-    let level = |node: &str, time: f64| {
-        input
-            .decode(
-                table.scale(),
-                table.column(&format!(r#"v("{node}")"#)).unwrap(),
-            )
-            .level_at(time)
-    };
+    let deck = deck_of(&bench);
+    let probes = ["/Q1", "/Q0", "/C"].map(|net| deck.voltage(net).unwrap());
+    let tran = Tran::new(10e-9, 5.5e-6).probes(probes.clone());
+    let result = deck.analysis(&tran).run().unwrap().result(&tran).unwrap();
+    let levels = probes
+        .each_ref()
+        .map(|probe| input.decode(result.scale(), result.get(probe).unwrap()));
     use Level::{High as H, Low as L};
     // After the clock edges at 1, 2, 3 and 4 us.
     for (time, q1, q0, carry) in [
@@ -273,7 +269,7 @@ fn test_simulate_verilog_counter() {
         (4.5e-6, L, L, L),
     ] {
         assert_eq!(
-            [level("/Q1", time), level("/Q0", time), level("/C", time)],
+            levels.each_ref().map(|read| read.level_at(time)),
             [q1, q0, carry],
             "at {time} s"
         );
