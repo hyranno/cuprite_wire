@@ -47,7 +47,7 @@ pub enum IbisPinKind {
 
 /// The option an error points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IbisKey {
+pub enum IbisPartKey {
     Library,
     Component,
     /// The `index`th entry of the pins.
@@ -69,7 +69,7 @@ pub enum IbisPinField {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IbisPartError {
-    pub key: IbisKey,
+    pub key: IbisPartKey,
     pub error: Error,
 }
 
@@ -122,17 +122,12 @@ pub fn load_ibis_part(
     let at = |key| move |error: Error| IbisPartError { key, error };
     let path = resolver
         .sim_library_path(&options.library)
-        .map_err(at(IbisKey::Library))?;
-    if !path.is_file() {
-        resolver.track(&path);
-        return Err(at(IbisKey::Library)(Error::new(format!(
-            "IBIS file not found ({})",
-            path.display()
-        ))));
-    }
-    let file = resolver.ibis_file(&path).map_err(at(IbisKey::Library))?;
+        .map_err(at(IbisPartKey::Library))?;
+    let file = resolver
+        .ibis_file(&path)
+        .map_err(at(IbisPartKey::Library))?;
     let component =
-        find_component(&file, options.component.as_deref()).map_err(at(IbisKey::Component))?;
+        find_component(&file, options.component.as_deref()).map_err(at(IbisPartKey::Component))?;
     let pins = options
         .pins
         .iter()
@@ -182,7 +177,7 @@ fn check_pin(
     index: usize,
 ) -> Result<IbisPinDef, IbisPartError> {
     let error = |field, error: Error| IbisPartError {
-        key: IbisKey::Pin { index, field },
+        key: IbisPartKey::Pin { index, field },
         error,
     };
     let lookup = |e: LookupError| {
@@ -195,27 +190,22 @@ fn check_pin(
         };
         error(field, explain(file, component, &e))
     };
-    let choice = option.model.as_deref();
+    let buffer = |pin: &str| {
+        check_buffer(file, component, pin, option.model.as_deref()).map_err(|e| match e {
+            Checked::Lookup(e) => lookup(e),
+            Checked::Simulation(e) => error(IbisPinField::Pin, e),
+        })
+    };
     let mut buffers = Vec::new();
     let mut series = None;
     match &option.kind {
         IbisPinKind::Single => {
-            buffers.push(check_buffer(file, component, &option.pin, choice).map_err(
-                |e| match e {
-                    Checked::Lookup(e) => lookup(e),
-                    Checked::Simulation(e) => error(IbisPinField::Pin, e),
-                },
-            )?);
+            buffers.push(buffer(&option.pin)?);
         }
         IbisPinKind::Diff => {
             let diff = component.find_diff_pin(&option.pin).map_err(lookup)?;
             for pin in [&diff.pin, &diff.inv_pin] {
-                buffers.push(
-                    check_buffer(file, component, pin, choice).map_err(|e| match e {
-                        Checked::Lookup(e) => lookup(e),
-                        Checked::Simulation(e) => error(IbisPinField::Pin, e),
-                    })?,
-                );
+                buffers.push(buffer(pin)?);
             }
             series = check_series(file, component, &diff.pin, &diff.inv_pin)
                 .map_err(|e| error(IbisPinField::Pin, e))?;
@@ -420,13 +410,13 @@ mod tests {
     }
 
     /// The key and message of the error.
-    fn error(options: &IbisPartOptions) -> (IbisKey, String) {
+    fn error(options: &IbisPartOptions) -> (IbisPartKey, String) {
         let e = load(options).unwrap_err();
         (e.key, e.error.message)
     }
 
-    fn pin_key(index: usize, field: IbisPinField) -> IbisKey {
-        IbisKey::Pin { index, field }
+    fn pin_key(index: usize, field: IbisPinField) -> IbisPartKey {
+        IbisPartKey::Pin { index, field }
     }
 
     #[test]
@@ -476,13 +466,13 @@ mod tests {
     #[test]
     fn test_component() {
         let (key, message) = error(&options(None, vec![]));
-        assert_eq!(key, IbisKey::Component);
+        assert_eq!(key, IbisPartKey::Component);
         assert_eq!(
             message,
             "the file has several components; choose one with `component`: Chip, Other"
         );
         let (key, message) = error(&options(Some("chip"), vec![]));
-        assert_eq!(key, IbisKey::Component);
+        assert_eq!(key, IbisPartKey::Component);
         assert_eq!(
             message,
             "no [Component] `chip`; the components of the file: Chip, Other; similar names: Chip"
@@ -494,11 +484,11 @@ mod tests {
         let mut opts = options(None, vec![]);
         opts.library = "models/none.ibs".into();
         let (key, message) = error(&opts);
-        assert_eq!(key, IbisKey::Library);
+        assert_eq!(key, IbisPartKey::Library);
         assert!(message.starts_with("IBIS file not found ("), "{message}");
         opts.library = "models/amp.lib".into();
         let (key, message) = error(&opts);
-        assert_eq!(key, IbisKey::Library);
+        assert_eq!(key, IbisPartKey::Library);
         assert!(message.contains("amp.lib: "), "{message}");
     }
 

@@ -81,7 +81,7 @@ pub mod spice;
 use std::fmt;
 
 pub use lookup::LookupError;
-pub use parse::parse;
+pub use parse::{parse, parse_bytes};
 
 /// The contents of an IBIS file.
 #[derive(Debug, Clone, PartialEq)]

@@ -198,16 +198,7 @@ pub fn bind(
             message.push_str(&pin_table(pins, |id| {
                 elements
                     .iter()
-                    .filter_map(|element| {
-                        let info = element.info.as_ref()?;
-                        let index = element.nodes.iter().position(|node| node == id)?;
-                        let port = &info.ports[index];
-                        Some(if element.suffix.is_empty() {
-                            port.clone()
-                        } else {
-                            format!("{port} ({})", element.suffix)
-                        })
-                    })
+                    .filter_map(|element| element.port_of(id, str::to_string))
                     .collect()
             }));
             return Err(BindingError {

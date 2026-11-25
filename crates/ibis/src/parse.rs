@@ -32,6 +32,16 @@ pub fn parse(text: &str) -> Result<IbisFile, Error> {
     parser.finish(comment_char)
 }
 
+/// Reads the bytes of an IBIS file, as [`parse`]. Bytes that are not UTF-8 (in the comments of
+/// some vendor files) are replaced.
+///
+/// # Errors
+///
+/// As [`parse`].
+pub fn parse_bytes(bytes: &[u8]) -> Result<IbisFile, Error> {
+    parse(&String::from_utf8_lossy(bytes))
+}
+
 /// Where the keywords belong.
 #[derive(Clone, Copy)]
 enum Context {

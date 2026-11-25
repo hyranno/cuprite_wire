@@ -186,22 +186,27 @@ fn expand(
     result: Result<PartDef, PartError>,
     resolver: &Resolver,
 ) -> TokenStream {
-    // Track what was read even when it failed, so fixing a library file triggers a rebuild. A file
-    // that does not exist cannot be tracked (`include_bytes!` fails, and stable Rust has no other
-    // way), so creating it does not: the source has to be touched.
-    let tracking = tracking(resolver);
-    match result {
-        Ok(part) => generate(header, &part, tracking),
-        Err(error) => {
+    output(
+        result.map(|part| generate(header, &part)).map_err(|error| {
             let span = spans.of(error.key, fallback, header.name.span());
-            let error = syn::Error::new(span, error.error.message).to_compile_error();
-            quote! { #error #tracking }
-        }
-    }
+            syn::Error::new(span, error.error.message)
+        }),
+        resolver,
+    )
+}
+
+/// The generated code or the error, with the tracking of what was read: even when it failed, so
+/// that fixing a library file triggers a rebuild. A file that does not exist cannot be tracked
+/// (`include_bytes!` fails, and stable Rust has no other way), so creating it does not: the
+/// source has to be touched.
+fn output(result: syn::Result<TokenStream>, resolver: &Resolver) -> TokenStream {
+    let code = result.unwrap_or_else(syn::Error::into_compile_error);
+    let tracking = tracking(resolver);
+    quote! { #code #tracking }
 }
 
 /// Makes the compiler rebuild when a file read or an environment variable consulted changes.
-/// Files that do not exist are left out (see [`expand`]).
+/// Files that do not exist are left out (see [`output`]).
 fn tracking(resolver: &Resolver) -> TokenStream {
     let files = resolver
         .files
@@ -217,7 +222,7 @@ fn tracking(resolver: &Resolver) -> TokenStream {
     }
 }
 
-fn generate(header: &input::Header, part: &PartDef, tracking: TokenStream) -> TokenStream {
+fn generate(header: &input::Header, part: &PartDef) -> TokenStream {
     let krate = quote!(::cuprite_wire);
     let attrs = &header.attrs;
     let vis = &header.vis;
@@ -364,8 +369,6 @@ fn generate(header: &input::Header, part: &PartDef, tracking: TokenStream) -> To
             #kicad_fn
             #spice_fn
         }
-
-        #tracking
     }
 }
 
@@ -513,15 +516,7 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
         }
         let ports: Vec<String> = models
             .iter()
-            .filter_map(|element| {
-                let index = element.nodes.iter().position(|node| node == id)?;
-                let port = escape(&element.info.as_ref()?.ports[index]);
-                Some(if element.suffix.is_empty() {
-                    format!("`{port}`")
-                } else {
-                    format!("`{port}` ({})", element.suffix)
-                })
-            })
+            .filter_map(|element| element.port_of(id, |port| format!("`{}`", escape(port))))
             .collect();
         ports.join(", ")
     };
@@ -606,7 +601,7 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
     }
     if let Some(def) = ibis {
         let source = &def.source;
-        let inner = kicad_ibis::Inner::of(source);
+        let inner = source.inner();
         lines.push(String::new());
         lines.push(format!(
             "IBIS model: {} of the pin `{}` of the component `{}` in `{}` (IBIS {}), \
@@ -656,7 +651,7 @@ fn doc_lines(part: &PartDef) -> Vec<String> {
 }
 
 /// Escapes `|` in a table cell.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('|', "\\|")
 }
 

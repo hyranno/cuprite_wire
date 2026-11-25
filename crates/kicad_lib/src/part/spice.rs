@@ -60,25 +60,20 @@ pub(super) fn sim_fields(
     let Some(info) = &element.info else {
         return Vec::new();
     };
-    let pins: Vec<String> = element
-        .nodes
-        .iter()
-        .zip(&info.ports)
-        .map(|(pin, port)| format!("{pin}={port}"))
-        .collect();
     let mut fields = vec![
         ("Sim.Device".to_string(), info.sim_device.to_string()),
         ("Sim.Library".to_string(), spice_path(&info.path)),
         ("Sim.Name".to_string(), info.name.clone()),
-        ("Sim.Pins".to_string(), pins.join(" ")),
+        (
+            "Sim.Pins".to_string(),
+            sim::assignments(element.nodes.iter().zip(&info.ports)),
+        ),
     ];
     if !binding.params.is_empty() {
-        let params: Vec<String> = binding
-            .params
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
-        fields.push(("Sim.Params".to_string(), params.join(" ")));
+        fields.push((
+            "Sim.Params".to_string(),
+            sim::assignments(binding.params.iter().map(|(k, v)| (k, v))),
+        ));
     }
     fields
 }

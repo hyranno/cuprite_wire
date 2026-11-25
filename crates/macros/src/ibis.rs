@@ -2,7 +2,7 @@
 
 use cuprite_wire_kicad_lib::{
     ibis_part::{
-        IbisKey, IbisPartDef, IbisPartOptions, IbisPinDef, IbisPinField, IbisPinKind,
+        IbisPartDef, IbisPartKey, IbisPartOptions, IbisPinDef, IbisPinField, IbisPinKind,
         IbisPinOption, load_ibis_part,
     },
     resolve::Resolver,
@@ -14,7 +14,10 @@ use syn::{
     parse::{Parse, ParseStream},
 };
 
-use crate::input::{Header, Spans, comma_separated, end, parse_keys};
+use crate::{
+    escape,
+    input::{Header, Spans, comma_separated, end, parse_keys},
+};
 
 pub struct IbisPartInput {
     pub header: Header,
@@ -41,11 +44,11 @@ struct PinSpans {
 }
 
 impl IbisSpans {
-    fn of(&self, key: IbisKey, default: Span) -> Span {
+    fn of(&self, key: IbisPartKey, default: Span) -> Span {
         match key {
-            IbisKey::Library => self.library,
-            IbisKey::Component => self.component,
-            IbisKey::Pin { index, field } => self.pins.get(index).map(|p| match field {
+            IbisPartKey::Library => self.library,
+            IbisPartKey::Component => self.component,
+            IbisPartKey::Pin { index, field } => self.pins.get(index).map(|p| match field {
                 IbisPinField::Pin => p.pin,
                 IbisPinField::Pin2 => p.pin2.unwrap_or(p.pin),
                 IbisPinField::Model => p.model.unwrap_or(p.name),
@@ -86,6 +89,8 @@ impl Parse for IbisPartInput {
         parse_keys(
             &content,
             KEYS,
+            &[("library", "`library: \"path/to/file.ibs\"` is required")],
+            header.name.span(),
             |key, content, span| {
                 match key {
                     Key::Library => {
@@ -128,12 +133,6 @@ impl Parse for IbisPartInput {
             },
             &mut Spans::default(),
         )?;
-        if spans.library.is_none() {
-            return Err(syn::Error::new(
-                header.name.span(),
-                "`library: \"path/to/file.ibs\"` is required",
-            ));
-        }
         end(input)?;
         Ok(IbisPartInput {
             header,
@@ -174,6 +173,8 @@ fn entry(input: ParseStream, key: Key) -> syn::Result<(IbisPinOption, PinSpans, 
         parse_keys(
             &content,
             &[("pin", true), ("model", false)],
+            &[("pin", "`pin: \"...\"` is required")],
+            name.span(),
             |is_pin, content, _| {
                 let value: LitStr = content.parse()?;
                 if is_pin {
@@ -185,7 +186,7 @@ fn entry(input: ParseStream, key: Key) -> syn::Result<(IbisPinOption, PinSpans, 
             },
             &mut Spans::default(),
         )?;
-        let pin = pin.ok_or_else(|| syn::Error::new(name.span(), "`pin: \"...\"` is required"))?;
+        let pin = pin.expect("`pin` is required");
         (pin, None, model)
     } else {
         return Err(input.error("expected a pin `\"1\"` or `{ pin: \"1\", model: \"...\" }`"));
@@ -206,25 +207,16 @@ fn entry(input: ParseStream, key: Key) -> syn::Result<(IbisPinOption, PinSpans, 
 }
 
 pub fn expand(input: &IbisPartInput, resolver: &mut Resolver) -> TokenStream {
-    let result = load_ibis_part(&input.options, resolver);
-    // Track what was read even when it failed, so fixing the file triggers a rebuild.
-    let tracking = crate::tracking(resolver);
-    match result {
-        Ok(part) => generate(&input.header, &input.names, &part, tracking),
-        Err(error) => {
+    let result = load_ibis_part(&input.options, resolver)
+        .map(|part| generate(&input.header, &input.names, &part))
+        .map_err(|error| {
             let span = input.spans.of(error.key, input.header.name.span());
-            let error = syn::Error::new(span, error.error.message).to_compile_error();
-            quote! { #error #tracking }
-        }
-    }
+            syn::Error::new(span, error.error.message)
+        });
+    crate::output(result, resolver)
 }
 
-fn generate(
-    header: &Header,
-    names: &[Ident],
-    part: &IbisPartDef,
-    tracking: TokenStream,
-) -> TokenStream {
+fn generate(header: &Header, names: &[Ident], part: &IbisPartDef) -> TokenStream {
     let krate = quote!(::cuprite_wire);
     let attrs = &header.attrs;
     let vis = &header.vis;
@@ -254,8 +246,6 @@ fn generate(
 
             #(#functions)*
         }
-
-        #tracking
     }
 }
 
@@ -297,12 +287,7 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
     let (ty, call, doc) = match &option.kind {
         IbisPinKind::Single => {
             let buffer = &pin.buffers[0];
-            let call = match &option.model {
-                Some(model) => {
-                    quote!(of_pin_model(Self::file()?, Self::COMPONENT, #p, #model, corner))
-                }
-                None => quote!(of_pin(Self::file()?, Self::COMPONENT, #p, corner)),
-            };
+            let call = buffer_call(quote!(#p), option.model.as_ref());
             let doc = format!(
                 "The buffer of the pin `{p}` ({}), at `corner`.",
                 describe(buffer)
@@ -310,12 +295,7 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
             (quote!(IbisBuffer), call, doc)
         }
         IbisPinKind::Diff => {
-            let call = match &option.model {
-                Some(model) => {
-                    quote!(of_pin_model(Self::file()?, Self::COMPONENT, #p, #model, corner))
-                }
-                None => quote!(of_pin(Self::file()?, Self::COMPONENT, #p, corner)),
-            };
+            let call = buffer_call(quote!(#p), option.model.as_ref());
             let pins: Vec<String> = pin
                 .buffers
                 .iter()
@@ -355,6 +335,15 @@ fn function(pin: &IbisPinDef, name: &Ident, krate: &TokenStream) -> TokenStream 
         > {
             #krate::spice::ibis::#ty::#call
         }
+    }
+}
+
+/// The call of `IbisBuffer` or `IbisDiffBuffer` making the buffer of `pin`, with the model chosen
+/// if any.
+pub(crate) fn buffer_call(pin: TokenStream, model: Option<&String>) -> TokenStream {
+    match model {
+        Some(model) => quote!(of_pin_model(Self::file()?, Self::COMPONENT, #pin, #model, corner)),
+        None => quote!(of_pin(Self::file()?, Self::COMPONENT, #pin, corner)),
     }
 }
 
@@ -425,8 +414,4 @@ fn doc_lines(part: &IbisPartDef) -> Vec<String> {
         ));
     }
     lines.into_iter().map(|line| format!(" {line}")).collect()
-}
-
-fn escape(text: &str) -> String {
-    text.replace('|', "\\|")
 }

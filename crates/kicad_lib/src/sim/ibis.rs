@@ -11,7 +11,7 @@ use super::{SimFields, map_pins};
 use crate::{
     Error,
     ibis_part::{
-        IbisKey, IbisPartDef, IbisPartOptions, IbisPinField, IbisPinKind, IbisPinOption,
+        IbisPartDef, IbisPartKey, IbisPartOptions, IbisPinField, IbisPinKind, IbisPinOption,
         load_ibis_part,
     },
     resolve::Resolver,
@@ -37,10 +37,69 @@ pub struct IbisSource {
 }
 
 impl IbisSource {
-    /// KiCad's model pins: [`SINGLE_PINS`] or [`DIFF_PINS`].
-    pub fn kicad_pins(&self) -> &'static [&'static str] {
-        if self.diff { &DIFF_PINS } else { &SINGLE_PINS }
+    /// The part of `cuprite_wire::spice::ibis` simulating the model.
+    pub fn inner(&self) -> IbisInner {
+        const SINGLE: [&str; 2] = ["GND", "IN/OUT"];
+        const DIFF: [&str; 3] = ["GND", "+", "-"];
+        let (name, buffer, kicad_pins, pins, description): (_, _, &[&str], &[&str], _) =
+            match (self.diff, self.driver) {
+                (false, true) => (
+                    "IbisDriver",
+                    "IbisBuffer",
+                    &SINGLE,
+                    &["GND", "OUT"],
+                    "the driver",
+                ),
+                (false, false) => (
+                    "IbisReceiver",
+                    "IbisBuffer",
+                    &SINGLE,
+                    &["GND", "IN"],
+                    "the receiver",
+                ),
+                (true, true) => (
+                    "IbisDiffDriver",
+                    "IbisDiffBuffer",
+                    &DIFF,
+                    &["GND", "P", "N"],
+                    "the differential driver",
+                ),
+                (true, false) => (
+                    "IbisDiffReceiver",
+                    "IbisDiffBuffer",
+                    &DIFF,
+                    &["GND", "P", "N"],
+                    "the differential receiver",
+                ),
+            };
+        IbisInner {
+            name,
+            buffer,
+            kicad_pins,
+            pins,
+            description,
+        }
     }
+
+    /// KiCad's model pins: `GND IN/OUT`, or `GND + -` for a differential pair.
+    pub fn kicad_pins(&self) -> &'static [&'static str] {
+        self.inner().kicad_pins
+    }
+}
+
+/// The part of `cuprite_wire::spice::ibis` simulating a model, as the generated code names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IbisInner {
+    /// The type (`IbisDriver`, ...).
+    pub name: &'static str,
+    /// What its `buffer()` returns.
+    pub buffer: &'static str,
+    /// KiCad's model pins.
+    pub kicad_pins: &'static [&'static str],
+    /// The pin constants of the type, in the order of `kicad_pins`.
+    pub pins: &'static [&'static str],
+    /// What it is, for the documentation.
+    pub description: &'static str,
 }
 
 /// The IBIS model of a part, checked.
@@ -50,7 +109,7 @@ pub struct IbisDef {
     /// The file and the buffers, with a single entry in `pins`.
     pub part: IbisPartDef,
     /// Pin numbers (pin IDs once the part is made) in the order of KiCad's model pins
-    /// ([`SINGLE_PINS`] or [`DIFF_PINS`]).
+    /// ([`IbisSource::kicad_pins`]).
     pub nodes: Vec<String>,
     /// Pins not connected to the model.
     pub unused_pins: Vec<String>,
@@ -81,11 +140,6 @@ pub enum DcLevel {
     Low,
     HiZ,
 }
-
-/// KiCad's model pins of a single-ended IBIS model.
-pub const SINGLE_PINS: [&str; 2] = ["GND", "IN/OUT"];
-/// KiCad's model pins of a differential IBIS model (`Sim.Ibis.Diff` `1`).
-pub const DIFF_PINS: [&str; 3] = ["GND", "+", "-"];
 
 /// The `Sim.Params` choosing the corner of a part of the model.
 const CORNER_PARAMS: [&str; 4] = ["vcc", "rpin", "lpin", "cpin"];
@@ -175,6 +229,7 @@ pub enum IbisField {
     Component,
     Pin,
     Model,
+    Diff,
     Driver,
     /// The symbol (its `Sim.Pins`).
     Symbol,
@@ -202,13 +257,13 @@ pub fn ibis_def(
     };
     let part = load_ibis_part(&options, resolver).map_err(|e| {
         let field = match e.key {
-            IbisKey::Library => IbisField::Library,
-            IbisKey::Component => IbisField::Component,
-            IbisKey::Pin {
+            IbisPartKey::Library => IbisField::Library,
+            IbisPartKey::Component => IbisField::Component,
+            IbisPartKey::Pin {
                 field: IbisPinField::Model,
                 ..
             } => IbisField::Model,
-            IbisKey::Pin { .. } => IbisField::Pin,
+            IbisPartKey::Pin { .. } => IbisField::Pin,
         };
         (field, e.error)
     })?;

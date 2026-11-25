@@ -2,11 +2,14 @@
 //! block): it holds the driver or receiver of `cuprite_wire::spice::ibis` and connects its pins
 //! to the symbol's.
 
-use cuprite_wire_kicad_lib::sim::ibis::{DcLevel, IbisDef, IbisSource, Stimulus};
+use cuprite_wire_kicad_lib::sim::{
+    assignments,
+    ibis::{DcLevel, IbisDef, IbisInner, Stimulus},
+};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 
-use crate::ibis::{describe, file_items};
+use crate::ibis::{buffer_call, describe, file_items};
 
 /// What the generated type has in place of an ordinary part's.
 pub struct IbisItems {
@@ -18,52 +21,14 @@ pub struct IbisItems {
     pub spice_fn: TokenStream,
 }
 
-/// The part of `cuprite_wire::spice::ibis` simulating the model.
-pub struct Inner {
-    pub name: &'static str,
-    /// What it returns from `buffer()`.
-    pub buffer: &'static str,
-    /// Its pin constants, in the order of KiCad's model pins.
-    pub pins: &'static [&'static str],
-    pub description: &'static str,
-}
-
-impl Inner {
-    pub fn of(source: &IbisSource) -> Self {
-        let (name, buffer, pins, description): (_, _, &[&str], _) =
-            match (source.diff, source.driver) {
-                (false, true) => ("IbisDriver", "IbisBuffer", &["GND", "OUT"], "the driver"),
-                (false, false) => ("IbisReceiver", "IbisBuffer", &["GND", "IN"], "the receiver"),
-                (true, true) => (
-                    "IbisDiffDriver",
-                    "IbisDiffBuffer",
-                    &["GND", "P", "N"],
-                    "the differential driver",
-                ),
-                (true, false) => (
-                    "IbisDiffReceiver",
-                    "IbisDiffBuffer",
-                    &["GND", "P", "N"],
-                    "the differential receiver",
-                ),
-            };
-        Inner {
-            name,
-            buffer,
-            pins,
-            description,
-        }
-    }
-}
-
 pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
     let source = &def.source;
-    let Inner {
+    let IbisInner {
         name: inner,
         buffer,
         pins: inner_pins,
         ..
-    } = Inner::of(source);
+    } = source.inner();
     let ibis = quote!(#krate::spice::ibis);
     let inner = format_ident!("{inner}");
     let buffer = format_ident!("{buffer}");
@@ -74,24 +39,9 @@ pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
         (!unused.is_empty()).then(|| quote!(.map(|info| info.with_unused_pins([#(#unused),*]))));
 
     let pin = &source.pin;
-    let call = match &source.model {
-        Some(model) => {
-            quote!(of_pin_model(Self::file()?, Self::COMPONENT, Self::IBIS_PIN, #model, corner))
-        }
-        None => quote!(of_pin(
-            Self::file()?,
-            Self::COMPONENT,
-            Self::IBIS_PIN,
-            corner
-        )),
-    };
+    let call = buffer_call(quote!(Self::IBIS_PIN), source.model.as_ref());
     let warn = (!def.corner_params.is_empty()).then(|| {
-        let params: Vec<String> = def
-            .corner_params
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
-        let params = params.join(" ");
+        let params = assignments(def.corner_params.iter().map(|(k, v)| (k, v)));
         let type_name = name.to_string();
         quote! {
             static WARNED: ::std::sync::Once = ::std::sync::Once::new();

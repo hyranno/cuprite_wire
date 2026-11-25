@@ -62,29 +62,6 @@ impl Spans {
             .or_else(|| find(fallback))
             .unwrap_or(default)
     }
-
-    fn has(&self, key: OptionKey) -> bool {
-        self.options.iter().any(|(k, _)| *k == key)
-    }
-
-    /// An error at `span` if the `library` or `name` of the model `element` is not written;
-    /// `message` makes it from the key.
-    fn require_library_and_name(
-        &self,
-        element: usize,
-        span: Span,
-        message: impl Fn(&str) -> String,
-    ) -> syn::Result<()> {
-        for (field, key) in [
-            (BindingField::Library, "library"),
-            (BindingField::Name, "name"),
-        ] {
-            if !self.has(OptionKey::Model { element, field }) {
-                return Err(syn::Error::new(span, message(key)));
-            }
-        }
-        Ok(())
-    }
 }
 
 /// `#[attrs] vis struct Name { key: value, ... }` of `kicad_part!`.
@@ -114,18 +91,6 @@ enum CommonKey {
     SimModel,
 }
 
-/// The options of a model (`spice_part!` and the `sim` block).
-#[derive(Clone, Copy)]
-enum ModelKey {
-    Library,
-    Name,
-    Pins,
-    Unused,
-    Params,
-    Dialect,
-    Suffix,
-}
-
 /// The options of `kicad_part!` only.
 #[derive(Clone, Copy)]
 enum KicadKey {
@@ -152,7 +117,7 @@ enum KicadPartKey {
 #[derive(Clone, Copy)]
 enum SpicePartKey {
     Common(CommonKey),
-    Model(ModelKey),
+    Model(BindingField),
 }
 
 /// The keys of each macro (and of the `sim` block), in the order the error message lists them.
@@ -180,8 +145,8 @@ const KICAD_KEYS: &[(&str, KicadPartKey)] = &[
     ),
 ];
 const SPICE_KEYS: &[(&str, SpicePartKey)] = &[
-    ("library", SpicePartKey::Model(ModelKey::Library)),
-    ("name", SpicePartKey::Model(ModelKey::Name)),
+    ("library", SpicePartKey::Model(BindingField::Library)),
+    ("name", SpicePartKey::Model(BindingField::Name)),
     ("value", SpicePartKey::Common(CommonKey::Value)),
     ("ref_prefix", SpicePartKey::Common(CommonKey::RefPrefix)),
     ("pins", SpicePartKey::Common(CommonKey::Pins)),
@@ -189,18 +154,18 @@ const SPICE_KEYS: &[(&str, SpicePartKey)] = &[
         "internal_connections",
         SpicePartKey::Common(CommonKey::InternalConnections),
     ),
-    ("params", SpicePartKey::Model(ModelKey::Params)),
-    ("dialect", SpicePartKey::Model(ModelKey::Dialect)),
+    ("params", SpicePartKey::Model(BindingField::Params)),
+    ("dialect", SpicePartKey::Model(BindingField::Dialect)),
     ("sim_model", SpicePartKey::Common(CommonKey::SimModel)),
 ];
-const SIM_KEYS: &[(&str, ModelKey)] = &[
-    ("library", ModelKey::Library),
-    ("name", ModelKey::Name),
-    ("pins", ModelKey::Pins),
-    ("unused", ModelKey::Unused),
-    ("params", ModelKey::Params),
-    ("dialect", ModelKey::Dialect),
-    ("suffix", ModelKey::Suffix),
+const SIM_KEYS: &[(&str, BindingField)] = &[
+    ("library", BindingField::Library),
+    ("name", BindingField::Name),
+    ("pins", BindingField::Pins),
+    ("unused", BindingField::Unused),
+    ("params", BindingField::Params),
+    ("dialect", BindingField::Dialect),
+    ("suffix", BindingField::Suffix),
 ];
 
 impl Parse for PartInput {
@@ -216,18 +181,18 @@ impl Parse for PartInput {
         let (mut symbol_dir, mut footprint_dir, mut sim_library_dir) = (None, None, None);
         let mut spans = Spans::default();
         let mut sim_spans = Spans::default();
-        let mut has_symbol = false;
         let content;
         braced!(content in input);
         parse_keys(
             &content,
             KICAD_KEYS,
+            &[("symbol", "`symbol: \"Library:Name\"` is required")],
+            header.name.span(),
             |key, content, span| {
                 let recorded = match key {
                     KicadPartKey::Common(key) => common_key(key, content, &mut options.common)?,
                     KicadPartKey::Kicad(KicadKey::Symbol) => {
                         options.symbol = content.parse::<LitStr>()?.value();
-                        has_symbol = true;
                         Some(OptionKey::Symbol)
                     }
                     KicadPartKey::Kicad(KicadKey::Footprint) => {
@@ -281,12 +246,6 @@ impl Parse for PartInput {
             },
             &mut spans,
         )?;
-        if !has_symbol {
-            return Err(syn::Error::new(
-                header.name.span(),
-                "`symbol: \"Library:Name\"` is required",
-            ));
-        }
         spans.options.extend(sim_spans.options);
         spans.models = sim_spans.models;
         end(input)?;
@@ -317,22 +276,23 @@ impl Parse for SpicePartInput {
         parse_keys(
             &content,
             SPICE_KEYS,
+            &[
+                ("library", "`library: \"path\"` is required"),
+                ("name", "`name: \"NAME\"` is required"),
+            ],
+            header.name.span(),
             |key, content, span| {
                 let recorded = match key {
                     SpicePartKey::Common(key) => common_key(key, content, &mut options.common)?,
-                    SpicePartKey::Model(key) => Some(OptionKey::Model {
-                        element: 0,
-                        field: model_key(key, content, &mut options.model)?,
-                    }),
+                    SpicePartKey::Model(field) => {
+                        model_key(field, content, &mut options.model)?;
+                        Some(OptionKey::Model { element: 0, field })
+                    }
                 };
                 Ok(recorded.map(|k| (k, span)))
             },
             &mut spans,
         )?;
-        spans.require_library_and_name(0, header.name.span(), |key| match key {
-            "library" => "`library: \"path\"` is required".into(),
-            _ => "`name: \"NAME\"` is required".into(),
-        })?;
         end(input)?;
         Ok(SpicePartInput {
             header,
@@ -357,15 +317,17 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
         parse_keys(
             &content,
             SIM_KEYS,
-            |key, content, span| {
-                let field = model_key(key, content, &mut binding)?;
+            &[
+                ("library", "`library` is required in `sim`"),
+                ("name", "`name` is required in `sim`"),
+            ],
+            block,
+            |field, content, span| {
+                model_key(field, content, &mut binding)?;
                 Ok(Some((OptionKey::Model { element, field }, span)))
             },
             spans,
         )?;
-        spans.require_library_and_name(element, block, |key| {
-            format!("`{key}` is required in `sim`")
-        })?;
         spans.models.push(block);
         bindings.push(binding);
         Ok(())
@@ -383,80 +345,50 @@ fn sim_block(input: ParseStream, spans: &mut Spans) -> syn::Result<Vec<ModelBind
 /// `ibis: { library: "...", pin: "...", ... }`.
 fn ibis_block(input: ParseStream, block: Span, spans: &mut Spans) -> syn::Result<IbisSource> {
     let mut source = IbisSource::default();
-    let (mut has_library, mut has_pin) = (false, false);
     let content;
     braced!(content in input);
     parse_keys(
         &content,
         IBIS_KEYS,
-        |key, content, span| {
-            let field = match key {
-                IbisKey::Library => {
-                    source.library = content.parse::<LitStr>()?.value();
-                    has_library = true;
-                    IbisField::Library
-                }
-                IbisKey::Component => {
-                    source.component = Some(content.parse::<LitStr>()?.value());
-                    IbisField::Component
-                }
-                IbisKey::Pin => {
-                    source.pin = content.parse::<LitStr>()?.value();
-                    has_pin = true;
-                    IbisField::Pin
-                }
-                IbisKey::Model => {
-                    source.model = Some(content.parse::<LitStr>()?.value());
-                    IbisField::Model
-                }
-                IbisKey::Diff => {
-                    source.diff = content.parse::<syn::LitBool>()?.value;
-                    return Ok(None);
-                }
-                IbisKey::Driver => {
-                    source.driver = content.parse::<syn::LitBool>()?.value;
-                    IbisField::Driver
-                }
-            };
+        &[
+            ("library", "`library` is required in `ibis`"),
+            ("pin", "`pin` is required in `ibis`"),
+        ],
+        block,
+        |field, content, span| {
+            match field {
+                IbisField::Library => source.library = content.parse::<LitStr>()?.value(),
+                IbisField::Component => source.component = Some(content.parse::<LitStr>()?.value()),
+                IbisField::Pin => source.pin = content.parse::<LitStr>()?.value(),
+                IbisField::Model => source.model = Some(content.parse::<LitStr>()?.value()),
+                IbisField::Diff => source.diff = content.parse::<syn::LitBool>()?.value,
+                IbisField::Driver => source.driver = content.parse::<syn::LitBool>()?.value,
+                IbisField::Symbol => unreachable!("not a key"),
+            }
             Ok(Some((OptionKey::Ibis(field), span)))
         },
         spans,
     )?;
-    for (has, key) in [(has_library, "library"), (has_pin, "pin")] {
-        if !has {
-            return Err(syn::Error::new(
-                block,
-                format!("`{key}` is required in `ibis`"),
-            ));
-        }
-    }
     Ok(source)
 }
 
-#[derive(Clone, Copy)]
-enum IbisKey {
-    Library,
-    Component,
-    Pin,
-    Model,
-    Diff,
-    Driver,
-}
-
-const IBIS_KEYS: &[(&str, IbisKey)] = &[
-    ("library", IbisKey::Library),
-    ("component", IbisKey::Component),
-    ("pin", IbisKey::Pin),
-    ("model", IbisKey::Model),
-    ("diff", IbisKey::Diff),
-    ("driver", IbisKey::Driver),
+const IBIS_KEYS: &[(&str, IbisField)] = &[
+    ("library", IbisField::Library),
+    ("component", IbisField::Component),
+    ("pin", IbisField::Pin),
+    ("model", IbisField::Model),
+    ("diff", IbisField::Diff),
+    ("driver", IbisField::Driver),
 ];
 
 /// Parses `key: value` pairs separated by commas, with the keys of `keys`. `handle` parses the
-/// value and returns the option it sets, if errors should point at it, with its span.
+/// value and returns the option it sets, if errors should point at it, with its span. A key of
+/// `required` that is not given is an error at `missing`, with the message given with the key.
 pub(crate) fn parse_keys<K: Copy>(
     content: ParseStream,
     keys: &[(&str, K)],
+    required: &[(&str, &str)],
+    missing: Span,
     mut handle: impl FnMut(K, ParseStream, Span) -> syn::Result<Option<(OptionKey, Span)>>,
     spans: &mut Spans,
 ) -> syn::Result<()> {
@@ -486,7 +418,14 @@ pub(crate) fn parse_keys<K: Copy>(
             .map_or_else(|| content.span(), |(tree, _)| tree.span());
         spans.options.extend(handle(handled, content, span)?);
         Ok(())
-    })
+    })?;
+    match required
+        .iter()
+        .find(|(key, _)| !seen.iter().any(|s| s == key))
+    {
+        Some((_, message)) => Err(syn::Error::new(missing, *message)),
+        None => Ok(()),
+    }
 }
 
 /// Calls `item` for each item of the comma-separated list filling `input`; a trailing comma is
@@ -550,46 +489,28 @@ fn common_key(
 
 /// Parses an option of a model (`spice_part!` and the `sim` block).
 fn model_key(
-    key: ModelKey,
+    field: BindingField,
     content: ParseStream,
     binding: &mut ModelBinding,
-) -> syn::Result<BindingField> {
-    Ok(match key {
-        ModelKey::Library => {
-            binding.library = content.parse::<LitStr>()?.value();
-            BindingField::Library
-        }
-        ModelKey::Name => {
-            binding.name = content.parse::<LitStr>()?.value();
-            BindingField::Name
-        }
-        ModelKey::Pins => {
-            binding.pins = string_map(content)?;
-            BindingField::Pins
-        }
-        ModelKey::Unused => {
-            binding.unused = string_list(content)?;
-            BindingField::Unused
-        }
-        ModelKey::Params => {
-            binding.params = string_map(content)?;
-            BindingField::Params
-        }
-        ModelKey::Dialect => {
+) -> syn::Result<()> {
+    match field {
+        BindingField::Library => binding.library = content.parse::<LitStr>()?.value(),
+        BindingField::Name => binding.name = content.parse::<LitStr>()?.value(),
+        BindingField::Pins => binding.pins = string_map(content)?,
+        BindingField::Unused => binding.unused = string_list(content)?,
+        BindingField::Params => binding.params = string_map(content)?,
+        BindingField::Dialect => {
             binding.dialect =
                 match keyword(content, &["auto", "ngspice", "pspice", "ltspice"])?.as_str() {
                     "ngspice" => DialectOption::Given(Dialect::Ngspice),
                     "pspice" => DialectOption::Given(Dialect::Pspice),
                     "ltspice" => DialectOption::Given(Dialect::Ltspice),
                     _ => DialectOption::Auto,
-                };
-            BindingField::Dialect
+                }
         }
-        ModelKey::Suffix => {
-            binding.suffix = content.parse::<LitStr>()?.value();
-            BindingField::Suffix
-        }
-    })
+        BindingField::Suffix => binding.suffix = content.parse::<LitStr>()?.value(),
+    }
+    Ok(())
 }
 
 pub(crate) fn end(input: ParseStream) -> syn::Result<()> {

@@ -70,6 +70,21 @@ pub struct ElementDef {
     pub info: Option<ModelInfo>,
 }
 
+impl ElementDef {
+    /// The port of the library model the pin `id` is connected to, written by `show`, with the
+    /// suffix of the element if the part has several (`PORT (A)`).
+    pub fn port_of(&self, id: &str, show: impl Fn(&str) -> String) -> Option<String> {
+        let info = self.info.as_ref()?;
+        let index = self.nodes.iter().position(|node| node == id)?;
+        let port = show(&info.ports[index]);
+        Some(if self.suffix.is_empty() {
+            port
+        } else {
+            format!("{port} ({})", self.suffix)
+        })
+    }
+}
+
 /// The arguments after the nodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Args {
@@ -536,6 +551,14 @@ pub fn parse_sim_pins(text: &str) -> Result<Vec<(String, String)>, Error> {
                 .ok_or_else(|| Error::new(format!("invalid Sim.Pins entry {pair:?}")))
         })
         .collect()
+}
+
+/// Writes `key=value` pairs separated by spaces, as in `Sim.Pins` and `Sim.Params`.
+pub fn assignments<K: std::fmt::Display, V: std::fmt::Display>(
+    pairs: impl IntoIterator<Item = (K, V)>,
+) -> String {
+    let pairs: Vec<String> = pairs.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+    pairs.join(" ")
 }
 
 /// KiCad's model type for a built-in model.
