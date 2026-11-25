@@ -3,7 +3,7 @@ members = ["crates/embedded_hal", "crates/ibis", "crates/kicad_lib", "crates/mac
 
 [workspace.package]
 # The crates are released together, with the same version (see .github/workflows/release.yml).
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 # The lowest version CI checks (the msrv job); uuid needs 1.89.
 rust-version = "1.89"
@@ -12,10 +12,10 @@ repository = "https://github.com/hyranno/cuprite_wire"
 
 [workspace.dependencies]
 # Keep the versions equal to workspace.package.version.
-cuprite_wire = { version = "0.3.0", path = "." }
-cuprite_wire_ibis = { version = "0.3.0", path = "crates/ibis" }
-cuprite_wire_kicad_lib = { version = "0.3.0", path = "crates/kicad_lib" }
-cuprite_wire_macros = { version = "0.3.0", path = "crates/macros" }
+cuprite_wire = { version = "0.4.0", path = "." }
+cuprite_wire_ibis = { version = "0.4.0", path = "crates/ibis" }
+cuprite_wire_kicad_lib = { version = "0.4.0", path = "crates/kicad_lib" }
+cuprite_wire_macros = { version = "0.4.0", path = "crates/macros" }
 
 [package]
 name = "cuprite_wire"
