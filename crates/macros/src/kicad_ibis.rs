@@ -30,6 +30,7 @@ pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
         ..
     } = source.inner();
     let ibis = quote!(#krate::spice::ibis);
+    let new_doc = new_doc(def);
     let inner = format_ident!("{inner}");
     let buffer = format_ident!("{buffer}");
     let inner_pins = inner_pins.iter().map(|pin| format_ident!("{pin}"));
@@ -48,107 +49,13 @@ pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
             WARNED.call_once(|| #ibis::__kicad::warn_corners(#type_name, #params));
         }
     });
-    let corner_note = (!def.corner_params.is_empty()).then(|| {
-        let params: Vec<String> = def
-            .corner_params
-            .iter()
-            .map(|(k, v)| format!("`{k}={v}`"))
-            .collect();
-        format!(
-            " The symbol's corners per parameter ({}) are not supported: `corner` is used for \
-             the whole model, with a warning (through the `log` crate) at the first call.",
-            params.join(", ")
-        )
-    });
-    let buffers: Vec<String> = def.part.pins[0]
-        .buffers
-        .iter()
-        .map(|b| format!("`{}` ({})", b.pin, describe(b)))
-        .collect();
-    let what = if source.diff {
-        format!(
-            "the differential pair of the pins {}",
-            buffers.join(" and ")
-        )
-    } else {
-        format!("the pin {}", buffers[0])
-    };
-    let new_doc = format!(
-        "{} {what} at `corner`.{}",
-        if source.driver {
-            "Drives `sequence` from"
-        } else {
-            "Receives with"
-        },
-        corner_note.unwrap_or_default()
-    );
-    let (sequence_param, sequence_arg, panics) = if source.driver {
-        (
-            Some(quote!(, sequence: #krate::spice::digital::DigitalSequence)),
-            Some(quote!(, sequence)),
-            Some({
-                let doc = format!(
-                    " If the sequence has a level the model cannot drive (see \
-                     [`{inner}::new`](cuprite_wire::spice::ibis::{inner}::new))."
-                );
-                quote! {
-                    ///
-                    /// # Panics
-                    #[doc = #doc]
-                    #[track_caller]
-                }
-            }),
-        )
-    } else {
-        (None, None, None)
-    };
-    let sequence_fn = source.driver.then(|| {
-        quote! {
-            /// The levels the part plays.
-            pub fn sequence(&self) -> &#krate::spice::digital::DigitalSequence {
-                self.inner.sequence()
-            }
-        }
-    });
-    let kicad_sequence = def.stimulus.map(|stimulus| {
-        let level = |l: DcLevel| {
-            let l = format_ident!(
-                "{}",
-                match l {
-                    DcLevel::High => "High",
-                    DcLevel::Low => "Low",
-                    DcLevel::HiZ => "HiZ",
-                }
-            );
-            quote!(#krate::spice::digital::Level::#l)
-        };
-        let (body, doc) = match stimulus {
-            Stimulus::Dc(l) => (
-                {
-                    let l = level(l);
-                    quote!(#krate::spice::digital::DigitalSequence::new(#l))
-                },
-                "the constant level of `Sim.Params` `dc`".to_string(),
-            ),
-            Stimulus::Rect { ton, toff, td, n } => (
-                quote!(#ibis::__kicad::rect_sequence(#ton, #toff, #td, #n)),
-                format!(
-                    "low, then {n} periods of high for {ton:e} s and low for {toff:e} s from \
-                     {td:e} s (`Sim.Params` `ton` `toff` `td` `n`)"
-                ),
-            ),
-        };
-        let doc = format!(
-            "The stimulus of the symbol's KiCad simulation as a sequence for \
-             [`new`](Self::new): {doc}."
-        );
-        quote! {
-            #[doc = #doc]
-            pub fn kicad_sequence() -> #krate::spice::digital::DigitalSequence {
-                #body
-            }
-        }
-    });
+    let Driver {
+        sequence_param,
+        sequence_arg,
+        panics,
+        sequence_fn,
+    } = Driver::items(source.driver, &inner, krate);
+    let kicad_sequence = def.stimulus.map(|stimulus| kicad_sequence(stimulus, krate));
     let file_items = file_items(&def.part, krate);
 
     IbisItems {
@@ -190,5 +97,126 @@ pub fn items(def: &IbisDef, name: &Ident, krate: &TokenStream) -> IbisItems {
                 ) #unused
             }
         },
+    }
+}
+
+/// The documentation of `new`.
+fn new_doc(def: &IbisDef) -> String {
+    let source = &def.source;
+    let corner_note = (!def.corner_params.is_empty()).then(|| {
+        let params: Vec<String> = def
+            .corner_params
+            .iter()
+            .map(|(k, v)| format!("`{k}={v}`"))
+            .collect();
+        format!(
+            " The symbol's corners per parameter ({}) are not supported: `corner` is used for \
+             the whole model, with a warning (through the `log` crate) at the first call.",
+            params.join(", ")
+        )
+    });
+    let buffers: Vec<String> = def.part.pins[0]
+        .buffers
+        .iter()
+        .map(|b| format!("`{}` ({})", b.pin, describe(b)))
+        .collect();
+    let what = if source.diff {
+        format!(
+            "the differential pair of the pins {}",
+            buffers.join(" and ")
+        )
+    } else {
+        format!("the pin {}", buffers[0])
+    };
+    format!(
+        "{} {what} at `corner`.{}",
+        if source.driver {
+            "Drives `sequence` from"
+        } else {
+            "Receives with"
+        },
+        corner_note.unwrap_or_default()
+    )
+}
+
+/// What a driver has that a receiver does not: the sequence it drives.
+#[derive(Default)]
+struct Driver {
+    /// The parameter of `new`.
+    sequence_param: Option<TokenStream>,
+    /// The argument of the inner type's `new`.
+    sequence_arg: Option<TokenStream>,
+    /// The `# Panics` section of `new`.
+    panics: Option<TokenStream>,
+    /// The `sequence` method.
+    sequence_fn: Option<TokenStream>,
+}
+
+impl Driver {
+    fn items(driver: bool, inner: &Ident, krate: &TokenStream) -> Driver {
+        if !driver {
+            return Driver::default();
+        }
+        let doc = format!(
+            " If the sequence has a level the model cannot drive (see \
+             [`{inner}::new`](cuprite_wire::spice::ibis::{inner}::new))."
+        );
+        Driver {
+            sequence_param: Some(quote!(, sequence: #krate::spice::digital::DigitalSequence)),
+            sequence_arg: Some(quote!(, sequence)),
+            panics: Some(quote! {
+                ///
+                /// # Panics
+                #[doc = #doc]
+                #[track_caller]
+            }),
+            sequence_fn: Some(quote! {
+                /// The levels the part plays.
+                pub fn sequence(&self) -> &#krate::spice::digital::DigitalSequence {
+                    self.inner.sequence()
+                }
+            }),
+        }
+    }
+}
+
+/// `kicad_sequence`: the stimulus of the symbol's KiCad simulation.
+fn kicad_sequence(stimulus: Stimulus, krate: &TokenStream) -> TokenStream {
+    let level = |l: DcLevel| {
+        let l = format_ident!(
+            "{}",
+            match l {
+                DcLevel::High => "High",
+                DcLevel::Low => "Low",
+                DcLevel::HiZ => "HiZ",
+            }
+        );
+        quote!(#krate::spice::digital::Level::#l)
+    };
+    let (body, doc) = match stimulus {
+        Stimulus::Dc(l) => (
+            {
+                let l = level(l);
+                quote!(#krate::spice::digital::DigitalSequence::new(#l))
+            },
+            "the constant level of `Sim.Params` `dc`".to_string(),
+        ),
+        Stimulus::Rect { ton, toff, td, n } => (
+            quote!(#krate::spice::ibis::__kicad::rect_sequence(#ton, #toff, #td, #n)),
+            format!(
+                "low, then {n} periods of high for {ton:e} s and low for {toff:e} s from \
+                 {td:e} s (`Sim.Params` `ton` `toff` `td` `n`)"
+            ),
+        ),
+    };
+    let doc = format!(
+        "The stimulus of the symbol's KiCad simulation as a sequence for \
+         [`new`](Self::new): {doc}."
+    );
+    quote! {
+        #[doc = #doc]
+        pub fn kicad_sequence() -> #krate::spice::digital::DigitalSequence {
+            #body
+        }
     }
 }

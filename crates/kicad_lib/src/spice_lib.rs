@@ -155,9 +155,9 @@ struct Statement<'a> {
     encrypted: bool,
 }
 
-impl Statement<'_> {
+impl<'a> Statement<'a> {
     /// The physical lines without the trailing comment lines (which belong to the next statement).
-    fn own_lines(&self) -> &[&str] {
+    fn own_lines(&self) -> &[&'a str] {
         let end = self
             .lines
             .iter()
@@ -180,6 +180,182 @@ struct OpenSubckt<'a> {
     top: Option<(DefinitionKind, Vec<&'a str>, bool)>,
 }
 
+/// The state of [`SpiceLib::parse`].
+struct Parser<'a> {
+    lib: SpiceLib,
+    /// The subcircuits being defined, outermost first.
+    open: Vec<OpenSubckt<'a>>,
+    /// The `.lib` section being defined.
+    section: Option<String>,
+    /// Whether the file ends sections with `.endl`.
+    has_sections: bool,
+}
+
+impl<'a> Parser<'a> {
+    fn statement(&mut self, statement: &Statement<'a>) -> Result<(), String> {
+        if statement.encrypted {
+            match self.open.first_mut().and_then(|s| s.top.as_mut()) {
+                Some((_, lines, encrypted)) => {
+                    lines.extend(statement.own_lines());
+                    *encrypted = true;
+                }
+                None => self.lib.encrypted_blocks += 1,
+            }
+            return Ok(());
+        }
+        let tokens = tokenize(&statement.text);
+        let keyword = tokens
+            .first()
+            .map(|t| t.to_ascii_lowercase())
+            .unwrap_or_default();
+        let scope = self.scope(statement, &keyword, &tokens);
+        self.lib.collect_hints(&statement.text, &scope);
+        if let Some(OpenSubckt {
+            top: Some((_, lines, _)),
+            ..
+        }) = self.open.first_mut()
+        {
+            lines.extend(statement.own_lines());
+        }
+        match keyword.as_str() {
+            ".subckt" => self.subckt(statement, &tokens)?,
+            ".ends" => self.ends(&tokens)?,
+            _ if !self.open.is_empty() => {}
+            ".model" => self.model(statement, &tokens)?,
+            ".param" => self.param(&tokens),
+            ".func" => self.func(statement, &tokens)?,
+            ".include" | ".inc" => {
+                let path = tokens
+                    .get(1)
+                    .ok_or_else(|| format!("`{keyword}` without a file"))?;
+                self.include(path, None, false);
+            }
+            ".lib" => self.dot_lib(&tokens, &scope)?,
+            ".endl" => {
+                self.section.take().ok_or("`.endl` outside a section")?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Where the statement is, for its dialect hints.
+    fn scope(&self, statement: &Statement, keyword: &str, tokens: &[String]) -> HintScope {
+        HintScope {
+            line: statement.line,
+            section: self.section.clone(),
+            definition: match (self.open.first(), keyword) {
+                (Some(subckt), _) => Some(subckt.name.clone()),
+                (None, ".subckt" | ".model") => tokens.get(1).cloned(),
+                (None, ".func") => tokens
+                    .get(1)
+                    .and_then(|t| t.split('(').next())
+                    .map(str::to_string),
+                _ => None,
+            },
+        }
+    }
+
+    fn subckt(&mut self, statement: &Statement<'a>, tokens: &[String]) -> Result<(), String> {
+        let name = tokens.get(1).cloned().ok_or("`.subckt` without a name")?;
+        let top = self.open.is_empty().then(|| {
+            (
+                subckt_header(&tokens[2..]),
+                statement.own_lines().to_vec(),
+                false,
+            )
+        });
+        self.open.push(OpenSubckt { name, top });
+        Ok(())
+    }
+
+    fn ends(&mut self, tokens: &[String]) -> Result<(), String> {
+        let subckt = self.open.pop().ok_or("`.ends` without `.subckt`")?;
+        if let Some(name) = tokens.get(1)
+            && !name.eq_ignore_ascii_case(&subckt.name)
+        {
+            return Err(format!("`.ends {name}` closes `.subckt {}`", subckt.name));
+        }
+        if let Some((kind, lines, encrypted)) = subckt.top {
+            self.lib.definitions.push(Definition {
+                name: subckt.name,
+                kind,
+                text: join(&lines),
+                section: self.section.clone(),
+                encrypted,
+            });
+        }
+        Ok(())
+    }
+
+    fn model(&mut self, statement: &Statement, tokens: &[String]) -> Result<(), String> {
+        let name = tokens.get(1).cloned().ok_or("`.model` without a name")?;
+        let model_type = tokens
+            .get(2)
+            .map(|t| t.split('(').next().unwrap_or_default().to_ascii_lowercase())
+            .unwrap_or_default();
+        self.lib.push(
+            statement,
+            self.section.clone(),
+            name,
+            DefinitionKind::Model { model_type },
+        );
+        Ok(())
+    }
+
+    fn param(&mut self, tokens: &[String]) {
+        for token in &tokens[1..] {
+            if let Some((name, _)) = token.split_once('=') {
+                self.lib.definitions.push(Definition {
+                    name: name.to_string(),
+                    kind: DefinitionKind::Param,
+                    text: format!(".param {token}\n"),
+                    section: self.section.clone(),
+                    encrypted: false,
+                });
+            }
+        }
+    }
+
+    fn func(&mut self, statement: &Statement, tokens: &[String]) -> Result<(), String> {
+        let name = tokens
+            .get(1)
+            .and_then(|t| t.split('(').next())
+            .filter(|n| !n.is_empty())
+            .ok_or("`.func` without a name")?
+            .to_string();
+        self.lib
+            .push(statement, self.section.clone(), name, DefinitionKind::Func);
+        Ok(())
+    }
+
+    fn include(&mut self, path: &str, section: Option<String>, pspice: bool) {
+        self.lib.includes.push(Include {
+            path: unquote(path).to_string(),
+            section,
+            within: self.section.clone(),
+            pspice,
+        });
+    }
+
+    /// `.lib`: the start of a section, or an include.
+    fn dot_lib(&mut self, tokens: &[String], scope: &HintScope) -> Result<(), String> {
+        match &tokens[1..] {
+            [name] if self.has_sections && self.section.is_none() => {
+                self.section = Some(name.clone());
+                self.lib.sections.push(name.clone());
+            }
+            [path] => {
+                self.include(path, None, true);
+                self.lib.hint(Dialect::Pspice, ".LIB file", scope);
+            }
+            [path, name] => self.include(path, Some(name.clone()), false),
+            _ => return Err("expected `.lib file [section]` or `.lib section`".into()),
+        }
+        Ok(())
+    }
+}
+
 impl SpiceLib {
     pub fn parse(text: &str) -> Result<Self, Error> {
         let text = text.strip_prefix('\u{feff}').unwrap_or(text);
@@ -189,172 +365,24 @@ impl SpiceLib {
         let has_sections = statements
             .iter()
             .any(|s| keyword(&s.text).eq_ignore_ascii_case(".endl"));
-
-        let mut lib = SpiceLib::default();
-        let mut open: Vec<OpenSubckt> = Vec::new();
-        let mut section: Option<String> = None;
+        let mut parser = Parser {
+            lib: SpiceLib::default(),
+            open: Vec::new(),
+            section: None,
+            has_sections,
+        };
         for statement in &statements {
-            let at = |message: String| Error::new(format!("line {}: {message}", statement.line));
-            if statement.encrypted {
-                match open.first_mut().and_then(|s| s.top.as_mut()) {
-                    Some((_, lines, encrypted)) => {
-                        lines.extend(statement.own_lines());
-                        *encrypted = true;
-                    }
-                    None => lib.encrypted_blocks += 1,
-                }
-                continue;
-            }
-            let tokens = tokenize(&statement.text);
-            let keyword = tokens
-                .first()
-                .map(|t| t.to_ascii_lowercase())
-                .unwrap_or_default();
-            let scope = HintScope {
-                line: statement.line,
-                section: section.clone(),
-                definition: match (open.first(), keyword.as_str()) {
-                    (Some(subckt), _) => Some(subckt.name.clone()),
-                    (None, ".subckt" | ".model") => tokens.get(1).cloned(),
-                    (None, ".func") => tokens
-                        .get(1)
-                        .and_then(|t| t.split('(').next())
-                        .map(str::to_string),
-                    _ => None,
-                },
-            };
-            lib.collect_hints(&statement.text, &scope);
-            if let Some(OpenSubckt {
-                top: Some((_, lines, _)),
-                ..
-            }) = open.first_mut()
-            {
-                lines.extend(statement.own_lines());
-            }
-            match keyword.as_str() {
-                ".subckt" => {
-                    let name = tokens
-                        .get(1)
-                        .cloned()
-                        .ok_or_else(|| at("`.subckt` without a name".into()))?;
-                    let top = open.is_empty().then(|| {
-                        (
-                            subckt_header(&tokens[2..]),
-                            statement.own_lines().to_vec(),
-                            false,
-                        )
-                    });
-                    open.push(OpenSubckt { name, top });
-                }
-                ".ends" => {
-                    let subckt = open
-                        .pop()
-                        .ok_or_else(|| at("`.ends` without `.subckt`".into()))?;
-                    if let Some(name) = tokens.get(1)
-                        && !name.eq_ignore_ascii_case(&subckt.name)
-                    {
-                        return Err(at(format!(
-                            "`.ends {name}` closes `.subckt {}`",
-                            subckt.name
-                        )));
-                    }
-                    if let Some((kind, lines, encrypted)) = subckt.top {
-                        lib.definitions.push(Definition {
-                            name: subckt.name,
-                            kind,
-                            text: join(&lines),
-                            section: section.clone(),
-                            encrypted,
-                        });
-                    }
-                }
-                _ if !open.is_empty() => {}
-                ".model" => {
-                    let name = tokens
-                        .get(1)
-                        .cloned()
-                        .ok_or_else(|| at("`.model` without a name".into()))?;
-                    let model_type = tokens
-                        .get(2)
-                        .map(|t| t.split('(').next().unwrap_or_default().to_ascii_lowercase())
-                        .unwrap_or_default();
-                    lib.push(
-                        statement,
-                        section.clone(),
-                        name,
-                        DefinitionKind::Model { model_type },
-                    );
-                }
-                ".param" => {
-                    for token in &tokens[1..] {
-                        if let Some((name, _)) = token.split_once('=') {
-                            lib.definitions.push(Definition {
-                                name: name.to_string(),
-                                kind: DefinitionKind::Param,
-                                text: format!(".param {token}\n"),
-                                section: section.clone(),
-                                encrypted: false,
-                            });
-                        }
-                    }
-                }
-                ".func" => {
-                    let name = tokens
-                        .get(1)
-                        .and_then(|t| t.split('(').next())
-                        .filter(|n| !n.is_empty())
-                        .ok_or_else(|| at("`.func` without a name".into()))?
-                        .to_string();
-                    lib.push(statement, section.clone(), name, DefinitionKind::Func);
-                }
-                ".include" | ".inc" => {
-                    let path = tokens
-                        .get(1)
-                        .ok_or_else(|| at(format!("`{keyword}` without a file")))?;
-                    lib.includes.push(Include {
-                        path: unquote(path).to_string(),
-                        section: None,
-                        within: section.clone(),
-                        pspice: false,
-                    });
-                }
-                ".lib" => match &tokens[1..] {
-                    [name] if has_sections && section.is_none() => {
-                        section = Some(name.clone());
-                        lib.sections.push(name.clone());
-                    }
-                    [path] => {
-                        lib.includes.push(Include {
-                            path: unquote(path).to_string(),
-                            section: None,
-                            within: section.clone(),
-                            pspice: true,
-                        });
-                        lib.hint(Dialect::Pspice, ".LIB file", &scope);
-                    }
-                    [path, name] => lib.includes.push(Include {
-                        path: unquote(path).to_string(),
-                        section: Some(name.clone()),
-                        within: section.clone(),
-                        pspice: false,
-                    }),
-                    _ => return Err(at("expected `.lib file [section]` or `.lib section`".into())),
-                },
-                ".endl" => {
-                    section
-                        .take()
-                        .ok_or_else(|| at("`.endl` outside a section".into()))?;
-                }
-                _ => {}
-            }
+            parser
+                .statement(statement)
+                .map_err(|message| Error::new(format!("line {}: {message}", statement.line)))?;
         }
-        if let Some(subckt) = open.first() {
+        if let Some(subckt) = parser.open.first() {
             return Err(Error::new(format!(
                 "`.subckt {}` is not closed with `.ends`",
                 subckt.name
             )));
         }
-        Ok(lib)
+        Ok(parser.lib)
     }
 
     fn push(
