@@ -234,7 +234,7 @@ impl<'a> Parser<'a> {
 
     fn skip(&mut self, at: &impl Located) {
         self.skipped.push(Skipped {
-            name: at.name().to_string(),
+            name: at.written().to_string(),
             line: at.line(),
         });
     }
@@ -912,15 +912,15 @@ fn append(field: &mut Option<String>, text: String) {
 /// A keyword or a subparameter, as errors and [`Skipped`] name it.
 trait Located {
     fn line(&self) -> usize;
-    /// As written.
-    fn name(&self) -> &str;
+    /// The keyword or the name, as written.
+    fn written(&self) -> &str;
 }
 
 impl Located for Block {
     fn line(&self) -> usize {
         self.line
     }
-    fn name(&self) -> &str {
+    fn written(&self) -> &str {
         &self.keyword
     }
 }
@@ -929,14 +929,14 @@ impl Located for Subparam {
     fn line(&self) -> usize {
         self.line
     }
-    fn name(&self) -> &str {
+    fn written(&self) -> &str {
         &self.name
     }
 }
 
 fn set_once<T>(field: &mut Option<T>, at: &impl Located, value: T) -> Result<(), Error> {
     if field.is_some() {
-        return Err(Error::new(at.line(), format!("duplicate {}", at.name())));
+        return Err(Error::new(at.line(), format!("duplicate {}", at.written())));
     }
     *field = Some(value);
     Ok(())
